@@ -1,0 +1,122 @@
+# agents.md
+
+## 通用要求
+
+- 所有最终回答必须使用中文。
+- 回答保持简短、直接、技术化。
+- 不使用表情符号。
+- 不写无信息量的客套话或填充内容。
+- 在创建新方法或编写复杂逻辑时，添加必要注释。
+
+## 代码质量
+
+- 除非绝对必要，禁止使用 `any`。
+- 外部 API 的类型定义必须先在 `node_modules` 中确认，禁止猜测。
+- 始终使用顶部导入（top-level import）。
+- 禁止使用内联导入或动态类型导入：
+  - 禁止 `await import("./foo.js")`
+  - 禁止 `import("pkg").Type`
+  - 禁止任何类型层面的动态导入
+- 不得通过删除代码、降级能力或绕过逻辑来规避由依赖过时引起的类型错误；应优先升级依赖。
+- 删除看起来是有意设计的功能或代码前，必须先询问用户。
+- 禁止硬编码快捷键判断，例如 `matchesKey(keyData, "ctrl+x")`。
+- 所有快捷键都必须可配置，并在默认配置中声明，例如：
+  - `DEFAULT_EDITOR_KEYBINDINGS`
+  - `DEFAULT_APP_KEYBINDINGS`
+
+## 命令执行规则
+
+### 必须遵守
+
+- 若进行了代码变更（文档变更除外），必须执行 `pnpm check`。
+- 必须保留完整输出，不得截断。
+- 在结束前，必须修复 `pnpm check` 报出的所有错误、警告和信息。
+- `pnpm check` 不会运行测试，不要误判。
+
+### 禁止执行
+
+- 禁止运行：
+  - `pnpm dev`
+  - `pnpm build`
+  - `pnpm test`
+
+### 测试规则
+
+- 仅在用户明确要求时运行测试。
+- 运行测试时，必须从对应包的根目录执行，而不是仓库根目录。
+- 编写测试后，必须实际运行，并根据测试结果持续迭代，直到测试或实现中的问题被修复。
+
+### 提交规则
+
+- 除非用户明确要求，否则禁止提交代码。
+- 如果需要执行 `git commit`，必须先加载 `git commit` skill。
+
+## Changelog 规则
+
+- Changelog 位于各包目录下：`packages/*/CHANGELOG.md`
+- 仅可修改对应包的 `## [Unreleased]` 部分。
+- 严禁修改任何已发布版本的章节，例如 `## [0.12.2]`。
+
+### `## [Unreleased]` 标准章节
+
+按以下固定标题组织：
+
+```md
+### Breaking Changes - 需要迁移的 API 变更
+
+### Added - 新功能
+
+### Changed - 对现有功能的修改
+
+### Fixed - Bug 修复
+
+### Removed - 已移除的功能
+````
+
+### 写入规则
+
+* 修改前，先完整阅读该文件中整个 `## [Unreleased]` 部分。
+* 若目标小节已存在，直接追加内容，不得创建重复标题。
+* 所有新增条目必须写入 `## [Unreleased]` 下。
+
+### 归属格式
+
+* 内部变更（来自 issue）：
+
+  * `Fixed foo bar ([#123](https://github.com/badlogic/pi-mono/issues/123))`
+* 外部贡献：
+
+  * `Added feature X ([#456](https://github.com/badlogic/pi-mono/pull/456) by [@username](https://github.com/username))`
+
+## 文件读取与编辑规则
+
+* 禁止使用 `sed`、`cat` 读取文件或文件片段。
+* 必须使用 `read` 工具，并使用 `offset + limit` 方式读取。
+* 在编辑任何文件前，必须完整读取该文件。
+
+## Git 操作限制
+
+### 严禁使用以下命令
+
+这些操作可能破坏其他代理的工作：
+
+```bash
+git reset --hard
+git checkout .
+git clean -fd
+git stash
+git add -A
+git add .
+git commit --no-verify
+```
+
+### Rebase 冲突处理
+
+* 只解决你负责文件中的冲突。
+* 如果冲突出现在你未修改的文件中，立即停止并询问用户。
+* 严禁 `force push`。
+
+## 输出要求
+
+* 所有最终回答必须使用中文。
+
