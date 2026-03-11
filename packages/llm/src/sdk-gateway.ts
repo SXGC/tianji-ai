@@ -249,7 +249,7 @@ function isTianjiError(error: unknown): error is TianjiError {
 
 class SdkLlmStream implements LlmStream {
   private readonly callbacks = new Set<LlmStreamCallback>()
-  private readonly completion: Promise<LlmResponse>
+  private completion: Promise<LlmResponse> | undefined
 
   constructor(
     private readonly provider: LlmProvider,
@@ -257,19 +257,26 @@ class SdkLlmStream implements LlmStream {
     private readonly startedAt: number,
     private readonly result: SdkStreamLike,
     private readonly controller: AbortController
-  ) {
-    this.completion = this.consume()
+  ) {}
+
+  private ensureStarted(): Promise<LlmResponse> {
+    if (this.completion === undefined) {
+      this.completion = this.consume()
+    }
+
+    return this.completion
   }
 
   readonly onEvent = (callback: LlmStreamCallback): void => {
     this.callbacks.add(callback)
+    this.ensureStarted()
   }
 
   readonly abort = (): void => {
     this.controller.abort()
   }
 
-  readonly waitUntilComplete = (): Promise<LlmResponse> => this.completion
+  readonly waitUntilComplete = (): Promise<LlmResponse> => this.ensureStarted()
 
   private emit(event: Parameters<LlmStreamCallback>[0]): void {
     for (const callback of this.callbacks) {

@@ -797,41 +797,41 @@ Max Concurrent: 7 (Waves 1 & 4)
 
 ### Wave 5: Runtime Package (7 tasks, parallel)
 
-- [ ] 27. runtime package setup + API interface
+- [x] 27. runtime package setup + API interface
   **What to do**: 创建 packages/runtime，定义 createSession/runTurn/resumeRun/streamEvents API
   **Must NOT do**: 不暴露 LangChain 内部类型
   **Acceptance**: `pnpm --filter @tianji/runtime build` 成功
   **Commit**: NO
 
-- [ ] 28. Session lifecycle management
+- [x] 28. Session lifecycle management
   **What to do**: 实现 Session 创建、恢复、关闭生命周期
   **Category**: `deep`
   **Acceptance**: 生命周期测试通过
   **Commit**: NO
 
-- [ ] 29. LangGraph workflow definition
+- [x] 29. LangGraph workflow definition
   **What to do**: 使用 LangGraph 定义 agent 工作流图
   **Category**: `deep`
   **Acceptance**: 工作流执行正确，测试通过
   **Commit**: NO
 
-- [ ] 30. ToolCatalog/ToolRegistry
+- [x] 30. ToolCatalog/ToolRegistry
   **What to do**: 实现工具注册和查找
   **Acceptance**: 工具注册和查找正确，测试通过
   **Commit**: NO
 
-- [ ] 31. SnapshotStore (memory + file)
+- [x] 31. SnapshotStore (memory + file)
   **What to do**: 实现内存和文件系统 SnapshotStore
   **Category**: `unspecified-high`
   **Acceptance**: save/load 测试通过
   **Commit**: NO
 
-- [ ] 32. RuntimeEvent emission
+- [x] 32. RuntimeEvent emission
   **What to do**: 实现 RuntimeEvent 发射和流式传输
   **Acceptance**: 事件流正确，测试通过
   **Commit**: NO
 
-- [ ] 33. Cancel propagation
+- [x] 33. Cancel propagation
   **What to do**: 实现 AbortSignal 到 LLM/tool/retry 的传播
   **Category**: `deep`
   **Acceptance**: 取消传播测试通过

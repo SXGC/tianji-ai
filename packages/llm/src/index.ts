@@ -28,6 +28,7 @@ export interface LlmGenerationConfig {
 }
 
 export interface LlmToolExecutionOptions {
+  readonly toolCallId: string
   readonly abortSignal?: AbortSignal
 }
 
