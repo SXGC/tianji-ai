@@ -1,0 +1,37 @@
+{
+  "name": "@tianji/shared",
+  "version": "0.0.1",
+  "description": "Shared utilities and configuration schemas for tianji-ai",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
+  },
+"dependencies": {
+"zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "keywords": [
+    "tianji",
+    "shared",
+    "utilities"
+  ],
+  "license": "MIT"
+}
