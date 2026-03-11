@@ -188,7 +188,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
 ### Wave 1: 工程骨架 (7 tasks, parallel)
 
-- [ ] 1. Root package.json + pnpm-workspace.yaml
+- [x] 1. Root package.json + pnpm-workspace.yaml
 
   **What to do**:
   - 创建根目录 `package.json` (name: tianji-ai, private: true)
@@ -228,7 +228,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 1)
 
-- [ ] 2. turbo.json build orchestration
+- [x] 2. turbo.json build orchestration
 
   **What to do**:
   - 创建 `turbo.json` 配置文件
@@ -263,7 +263,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 1)
 
-- [ ] 3. biome.json linting/formatting
+- [x] 3. biome.json linting/formatting
 
   **What to do**:
   - 创建 `biome.json` 配置文件
@@ -299,7 +299,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 1)
 
-- [ ] 4. Root tsconfig.json + base config
+- [x] 4. Root tsconfig.json + base config
 
   **What to do**:
   - 创建根 `tsconfig.json` 作为 base config
@@ -335,7 +335,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 1)
 
-- [ ] 5. packages/contracts package setup
+- [x] 5. packages/contracts package setup
 
   **What to do**:
   - 创建 `packages/contracts/` 目录
@@ -379,7 +379,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 1)
 
-- [ ] 6. packages/shared package setup
+- [x] 6. packages/shared package setup
 
   **What to do**:
   - 创建 `packages/shared/` 目录
@@ -420,7 +420,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 1)
 
-- [ ] 7. Vitest config + test infrastructure
+- [x] 7. Vitest config + test infrastructure
 
   **What to do**:
   - 创建根 `vitest.config.ts` 作为 base config
@@ -462,7 +462,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
 ### Wave 2: Contracts 核心类型 (6 tasks, parallel)
 
-- [ ] 8. Identifiers (SessionId/ThreadId/RunId)
+- [x] 8. Identifiers (SessionId/ThreadId/RunId)
 
   **What to do**:
   - 创建 `packages/contracts/src/identifiers.ts`
@@ -505,7 +505,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 2)
 
-- [ ] 9. Message types (AppMessage/MessagePart)
+- [x] 9. Message types (AppMessage/MessagePart)
 
   **What to do**:
   - 创建 `packages/contracts/src/message.ts`
@@ -549,7 +549,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 2)
 
-- [ ] 10. RuntimeEvent types
+- [x] 10. RuntimeEvent types
 
   **What to do**:
   - 创建 `packages/contracts/src/events.ts`
@@ -593,7 +593,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 2)
 
-- [ ] 11. Tool types (ToolSpec/ToolInvocation/ToolResult)
+- [x] 11. Tool types (ToolSpec/ToolInvocation/ToolResult)
 
   **What to do**:
   - 创建 `packages/contracts/src/tool.ts`
@@ -634,7 +634,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 2)
 
-- [ ] 12. Error types
+- [x] 12. Error types
 
   **What to do**:
   - 创建 `packages/contracts/src/errors.ts`
@@ -675,7 +675,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
   **Commit**: NO (groups with Wave 2)
 
-- [ ] 13. ExecutionPolicy types
+- [x] 13. ExecutionPolicy types
 
   **What to do**:
   - 创建 `packages/contracts/src/policy.ts`
@@ -721,7 +721,7 @@ Max Concurrent: 7 (Waves 1 & 4)
 
 ### Wave 3: Contracts Advanced + Shared (6 tasks, parallel)
 
-- [ ] 14. Delta types (MessageDelta/ToolProgressDelta)
+- [x] 14. Delta types (MessageDelta/ToolProgressDelta)
   **What to do**: 创建 delta.ts，定义 DeltaOp, MessageDelta, ToolProgressDelta 类型
   **Acceptance**: `pnpm --filter @tianji/contracts test -- --grep delta` 通过
   **Commit**: NO
@@ -732,22 +732,22 @@ Max Concurrent: 7 (Waves 1 & 4)
   **Acceptance**: append/complete 操作正确，测试通过
   **Commit**: NO
 
-- [ ] 16. Artifact types
+- [x] 16. Artifact types
   **What to do**: 创建 artifact.ts，定义 ArtifactType 和 Artifact 类型
   **Acceptance**: `pnpm --filter @tianji/contracts test -- --grep artifact` 通过
   **Commit**: NO
 
-- [ ] 17. Snapshot types (SessionSnapshot/RunSnapshot)
+- [x] 17. Snapshot types (SessionSnapshot/RunSnapshot)
   **What to do**: 创建 snapshot.ts，定义 SessionSnapshot 和 RunSnapshot
   **Acceptance**: `pnpm --filter @tianji/contracts test -- --grep snapshot` 通过
   **Commit**: NO
 
-- [ ] 18. shared/config schema
+- [x] 18. shared/config schema
   **What to do**: 创建 config schema，使用 zod 定义配置，实现 env 占位符解析
   **Acceptance**: `pnpm --filter @tianji/shared test -- --grep config` 通过
   **Commit**: NO
 
-- [ ] 19. shared/utils
+- [x] 19. shared/utils
   **What to do**: 创建 utils，实现 deepClone, sleep, retry 函数
   **Acceptance**: `pnpm --filter @tianji/shared test -- --grep utils` 通过
   **Commit**: YES (Wave 3)
@@ -755,13 +755,13 @@ Max Concurrent: 7 (Waves 1 & 4)
 
 ### Wave 4: LLM Package (7 tasks, parallel)
 
-- [ ] 20. llm package setup + LlmGateway interface
+- [x] 20. llm package setup + LlmGateway interface
   **What to do**: 创建 packages/llm，定义 LlmGateway 和 LlmStream 接口
   **Must NOT do**: 不依赖 @langchain/*
   **Acceptance**: `pnpm --filter @tianji/llm build` 成功
   **Commit**: NO
 
-- [ ] 21. Message conversion (AppMessage ↔ ModelMessage)
+- [x] 21. Message conversion (AppMessage ↔ ModelMessage)
   **What to do**: 实现 AppMessage 到 AI SDK ModelMessage 的双向转换
   **Acceptance**: 双向转换无损，测试通过
   **Commit**: NO
@@ -784,7 +784,7 @@ Max Concurrent: 7 (Waves 1 & 4)
   **Acceptance**: streaming 和 tool calling 测试通过
   **Commit**: NO
 
-- [ ] 25. Tool schema bridge
+- [x] 25. Tool schema bridge
   **What to do**: 实现 ToolSpec 到 AI SDK tool schema 的转换
   **Acceptance**: 工具参数正确映射，测试通过
   **Commit**: NO
