@@ -1,20 +1,20 @@
 {
-	"folders": [
-		{
-			"name": "tianji-ai",
-			"path": "."
-		},
-		{
-			"name": "pi-mono",
-			"path": "/workspaces/dev_docker/pi-mono"
-		},
-		{
-			"name": "openclaw",
-			"path": "/workspaces/dev_docker/openclaw"
-		},
-		{
-			"name": "mastra",
-			"path": "/workspaces/dev_docker/mastra"
-		}
-	]
+  "folders": [
+    {
+      "name": "tianji-ai",
+      "path": "."
+    },
+    {
+      "name": "pi-mono",
+      "path": "/workspaces/dev_docker/pi-mono"
+    },
+    {
+      "name": "openclaw",
+      "path": "/workspaces/dev_docker/openclaw"
+    },
+    {
+      "name": "mastra",
+      "path": "/workspaces/dev_docker/mastra"
+    }
+  ]
 }
