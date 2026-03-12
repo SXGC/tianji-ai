@@ -1,0 +1,103 @@
+import { describe, expect, it } from 'vitest'
+
+interface PackageJson {
+  readonly name?: string
+  readonly dependencies?: Record<string, string>
+}
+
+interface PackageNode {
+  readonly name: string
+  readonly dependencies: readonly string[]
+}
+
+async function loadPackageJson(relativePath: string): Promise<PackageJson> {
+  const module = (await import(relativePath, {
+    assert: { type: 'json' },
+  })) as { default: PackageJson }
+
+  return module.default
+}
+
+function findCycle(nodes: readonly PackageNode[]): readonly string[] | undefined {
+  const edges = new Map(nodes.map((node) => [node.name, [...node.dependencies]]))
+  const visiting = new Set<string>()
+  const visited = new Set<string>()
+
+  function visit(nodeName: string, trail: readonly string[]): readonly string[] | undefined {
+    if (visiting.has(nodeName)) {
+      const cycleStart = trail.indexOf(nodeName)
+      return [...trail.slice(cycleStart), nodeName]
+    }
+
+    if (visited.has(nodeName)) {
+      return undefined
+    }
+
+    visiting.add(nodeName)
+
+    for (const dependency of edges.get(nodeName) ?? []) {
+      const cycle = visit(dependency, [...trail, dependency])
+
+      if (cycle !== undefined) {
+        return cycle
+      }
+    }
+
+    visiting.delete(nodeName)
+    visited.add(nodeName)
+    return undefined
+  }
+
+  for (const node of nodes) {
+    const cycle = visit(node.name, [node.name])
+
+    if (cycle !== undefined) {
+      return cycle
+    }
+  }
+
+  return undefined
+}
+
+describe('foundation wave 6 verification', () => {
+  it('preserves dependency constraints across contracts, llm, shared, and runtime', async () => {
+    const [contractsPkg, sharedPkg, llmPkg, runtimePkg] = await Promise.all([
+      loadPackageJson('../../../contracts/package.json'),
+      loadPackageJson('../../../shared/package.json'),
+      loadPackageJson('../../../llm/package.json'),
+      loadPackageJson('../../package.json'),
+    ])
+
+    const contractDependencies = Object.keys(contractsPkg.dependencies ?? {})
+    const sharedDependencies = Object.keys(sharedPkg.dependencies ?? {})
+    const llmDependencies = Object.keys(llmPkg.dependencies ?? {})
+    const runtimeDependencies = Object.keys(runtimePkg.dependencies ?? {})
+
+    expect(contractDependencies).toHaveLength(0)
+    expect(sharedDependencies.filter((dependency) => dependency.startsWith('@tianji/'))).toEqual([])
+    expect(llmDependencies.filter((dependency) => dependency.startsWith('@langchain/'))).toEqual([])
+    expect(runtimeDependencies).toContain('@langchain/core')
+    expect(runtimeDependencies).toContain('@langchain/langgraph')
+    expect(runtimeDependencies).not.toContain('ai')
+  })
+
+  it('keeps the internal package dependency graph acyclic', async () => {
+    const [contractsPkg, sharedPkg, llmPkg, runtimePkg] = await Promise.all([
+      loadPackageJson('../../../contracts/package.json'),
+      loadPackageJson('../../../shared/package.json'),
+      loadPackageJson('../../../llm/package.json'),
+      loadPackageJson('../../package.json'),
+    ])
+
+    const packageNodes: PackageNode[] = [contractsPkg, sharedPkg, llmPkg, runtimePkg].map(
+      (pkg) => ({
+        name: pkg.name ?? 'unknown-package',
+        dependencies: Object.keys(pkg.dependencies ?? {}).filter((dependency) =>
+          dependency.startsWith('@tianji/')
+        ),
+      })
+    )
+
+    expect(findCycle(packageNodes)).toBeUndefined()
+  })
+})
