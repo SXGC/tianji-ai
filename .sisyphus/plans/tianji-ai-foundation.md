@@ -840,24 +840,24 @@ Max Concurrent: 7 (Waves 1 & 4)
 
 ### Wave 6: Integration + Verification (4 tasks, parallel)
 
-- [ ] 34. E2E test: single turn conversation
+- [x] 34. E2E test: single turn conversation
   **What to do**: 编写端到端测试，验证完整对话流程
   **Category**: `deep`
   **Acceptance**: createSession → runTurn → 验证输出 测试通过
   **Commit**: NO
 
-- [ ] 35. E2E test: streaming output
+- [x] 35. E2E test: streaming output
   **What to do**: 编写流式输出测试
   **Category**: `deep`
   **Acceptance**: 流式 delta 正确聚合，测试通过
   **Commit**: NO
 
-- [ ] 36. Dependency constraint verification
+- [x] 36. Dependency constraint verification
   **What to do**: 验证 contracts 零依赖，llm 无 @langchain/*
   **Acceptance**: 约束验证通过
   **Commit**: NO
 
-- [ ] 37. Final type exports verification
+- [x] 37. Final type exports verification
   **What to do**: 验证所有类型正确导出
   **Acceptance**: 类型导出验证通过
   **Commit**: YES (Wave 6)
