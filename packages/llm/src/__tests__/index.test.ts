@@ -4,7 +4,7 @@
  * This test verifies:
  * - Package can be imported
  * - Interface types are exported correctly
- * - Package dependencies are correct (only @tianji/contracts and @tianji/shared)
+ * - Package dependencies are correct and stay within the allowed AI SDK boundary
  */
 import { createRunId } from '@tianji/contracts'
 
@@ -184,7 +184,7 @@ describe('@tianji/llm', () => {
         }),
       }
 
-      const _toolExecutionOptions: LlmToolExecutionOptions = {}
+      const _toolExecutionOptions: LlmToolExecutionOptions = { toolCallId: 'tool-call-1' }
       const _toolExecutor: LlmToolExecutor = async (_toolName, _args, _options) => ({ ok: true })
 
       const mockGateway: LlmGateway = {
@@ -242,6 +242,8 @@ describe('@tianji/llm', () => {
       for (const dep of actualDeps) {
         expect(allowedDeps).toContain(dep)
       }
+
+      expect(actualDeps.filter((dep) => dep.startsWith('@langchain/'))).toEqual([])
     })
   })
 
