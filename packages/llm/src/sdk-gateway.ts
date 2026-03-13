@@ -387,6 +387,7 @@ export class SdkLlmGateway implements LlmGateway {
     return (
       this.config.apiKey !== undefined ||
       this.config.baseUrl !== undefined ||
+      this.config.headers !== undefined ||
       Boolean(process.env[envVarForProvider(this.provider)])
     )
   }

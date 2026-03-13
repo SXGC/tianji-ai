@@ -18,11 +18,7 @@
  * Each artifact type represents a distinct category of content
  * that the AI can produce during execution.
  */
-export type ArtifactType =
-	| 'code-snippet'
-	| 'file-change'
-	| 'image'
-	| 'structured-result'
+export type ArtifactType = 'code-snippet' | 'file-change' | 'image' | 'structured-result'
 
 // ============================================================================
 // Artifact
@@ -75,18 +71,18 @@ export type ArtifactType =
  * ```
  */
 export interface Artifact {
-	/** Unique identifier for this artifact */
-	readonly id: string
-	/** Type discriminator determining how to interpret content */
-	readonly type: ArtifactType
-	/** Human-readable name or title for the artifact */
-	readonly name: string
-	/** The artifact content (shape depends on type) */
-	readonly content: unknown
-	/** MIME type for rendering purposes (e.g., 'text/plain', 'image/png') */
-	readonly mimeType?: string
-	/** Unix timestamp (milliseconds) when the artifact was created */
-	readonly createdAt: number
-	/** Optional metadata for additional context */
-	readonly metadata?: Record<string, unknown>
+  /** Unique identifier for this artifact */
+  readonly id: string
+  /** Type discriminator determining how to interpret content */
+  readonly type: ArtifactType
+  /** Human-readable name or title for the artifact */
+  readonly name: string
+  /** The artifact content (shape depends on type) */
+  readonly content: unknown
+  /** MIME type for rendering purposes (e.g., 'text/plain', 'image/png') */
+  readonly mimeType?: string
+  /** Unix timestamp (milliseconds) when the artifact was created */
+  readonly createdAt: number
+  /** Optional metadata for additional context */
+  readonly metadata?: Record<string, unknown>
 }

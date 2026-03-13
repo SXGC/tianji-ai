@@ -18,20 +18,13 @@
     "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
-"dependencies": {
-"zod": "^3.24.0"
+  "dependencies": {
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0"
   },
-  "files": [
-    "dist",
-    "src"
-  ],
-  "keywords": [
-    "tianji",
-    "shared",
-    "utilities"
-  ],
+  "files": ["dist", "src"],
+  "keywords": ["tianji", "shared", "utilities"],
   "license": "MIT"
 }

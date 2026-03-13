@@ -41,7 +41,7 @@ export type RunId = string & { readonly __brand: unique symbol }
  * @returns A SessionId branded string
  */
 export function createSessionId(value: string): SessionId {
-	return value as SessionId
+  return value as SessionId
 }
 
 /**
@@ -50,7 +50,7 @@ export function createSessionId(value: string): SessionId {
  * @returns A ThreadId branded string
  */
 export function createThreadId(value: string): ThreadId {
-	return value as ThreadId
+  return value as ThreadId
 }
 
 /**
@@ -59,7 +59,7 @@ export function createThreadId(value: string): ThreadId {
  * @returns A RunId branded string
  */
 export function createRunId(value: string): RunId {
-	return value as RunId
+  return value as RunId
 }
 
 // ============================================================================
@@ -74,7 +74,7 @@ export function createRunId(value: string): RunId {
  * @returns True if the value is a string (branded as SessionId at compile time)
  */
 export function isSessionId(value: unknown): value is SessionId {
-	return typeof value === 'string'
+  return typeof value === 'string'
 }
 
 /**
@@ -85,7 +85,7 @@ export function isSessionId(value: unknown): value is SessionId {
  * @returns True if the value is a string (branded as ThreadId at compile time)
  */
 export function isThreadId(value: unknown): value is ThreadId {
-	return typeof value === 'string'
+  return typeof value === 'string'
 }
 
 /**
@@ -96,5 +96,5 @@ export function isThreadId(value: unknown): value is ThreadId {
  * @returns True if the value is a string (branded as RunId at compile time)
  */
 export function isRunId(value: unknown): value is RunId {
-	return typeof value === 'string'
+  return typeof value === 'string'
 }

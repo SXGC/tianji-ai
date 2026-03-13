@@ -26,16 +26,16 @@ import type { ToolInvocation, ToolResult } from './tool.js'
  * - Tool lifecycle: started, completed, failed
  */
 export type RuntimeEventType =
-	| 'run.started'
-	| 'run.completed'
-	| 'run.failed'
-	| 'run.cancelled'
-	| 'message.started'
-	| 'message.delta'
-	| 'message.completed'
-	| 'tool.started'
-	| 'tool.completed'
-	| 'tool.failed'
+  | 'run.started'
+  | 'run.completed'
+  | 'run.failed'
+  | 'run.cancelled'
+  | 'message.started'
+  | 'message.delta'
+  | 'message.completed'
+  | 'tool.started'
+  | 'tool.completed'
+  | 'tool.failed'
 
 // ============================================================================
 // Run Events
@@ -45,58 +45,58 @@ export type RuntimeEventType =
  * Emitted when a run starts execution.
  */
 export interface RunStartedEvent {
-	/** Discriminator for run.started event */
-	readonly type: 'run.started'
-	/** Unique identifier for this run */
-	readonly runId: RunId
-	/** Session this run belongs to */
-	readonly sessionId: SessionId
-	/** Unix timestamp (milliseconds) when the run started */
-	readonly timestamp: number
+  /** Discriminator for run.started event */
+  readonly type: 'run.started'
+  /** Unique identifier for this run */
+  readonly runId: RunId
+  /** Session this run belongs to */
+  readonly sessionId: SessionId
+  /** Unix timestamp (milliseconds) when the run started */
+  readonly timestamp: number
 }
 
 /**
  * Emitted when a run completes successfully.
  */
 export interface RunCompletedEvent {
-	/** Discriminator for run.completed event */
-	readonly type: 'run.completed'
-	/** Unique identifier for this run */
-	readonly runId: RunId
-	/** Session this run belongs to */
-	readonly sessionId: SessionId
-	/** Unix timestamp (milliseconds) when the run completed */
-	readonly timestamp: number
+  /** Discriminator for run.completed event */
+  readonly type: 'run.completed'
+  /** Unique identifier for this run */
+  readonly runId: RunId
+  /** Session this run belongs to */
+  readonly sessionId: SessionId
+  /** Unix timestamp (milliseconds) when the run completed */
+  readonly timestamp: number
 }
 
 /**
  * Emitted when a run fails with an error.
  */
 export interface RunFailedEvent {
-	/** Discriminator for run.failed event */
-	readonly type: 'run.failed'
-	/** Unique identifier for this run */
-	readonly runId: RunId
-	/** Session this run belongs to */
-	readonly sessionId: SessionId
-	/** The error that caused the run to fail */
-	readonly error: TianjiError
-	/** Unix timestamp (milliseconds) when the run failed */
-	readonly timestamp: number
+  /** Discriminator for run.failed event */
+  readonly type: 'run.failed'
+  /** Unique identifier for this run */
+  readonly runId: RunId
+  /** Session this run belongs to */
+  readonly sessionId: SessionId
+  /** The error that caused the run to fail */
+  readonly error: TianjiError
+  /** Unix timestamp (milliseconds) when the run failed */
+  readonly timestamp: number
 }
 
 /**
  * Emitted when a run is cancelled.
  */
 export interface RunCancelledEvent {
-	/** Discriminator for run.cancelled event */
-	readonly type: 'run.cancelled'
-	/** Unique identifier for this run */
-	readonly runId: RunId
-	/** Session this run belongs to */
-	readonly sessionId: SessionId
-	/** Unix timestamp (milliseconds) when the run was cancelled */
-	readonly timestamp: number
+  /** Discriminator for run.cancelled event */
+  readonly type: 'run.cancelled'
+  /** Unique identifier for this run */
+  readonly runId: RunId
+  /** Session this run belongs to */
+  readonly sessionId: SessionId
+  /** Unix timestamp (milliseconds) when the run was cancelled */
+  readonly timestamp: number
 }
 
 // ============================================================================
@@ -107,16 +107,16 @@ export interface RunCancelledEvent {
  * Emitted when a message starts being generated.
  */
 export interface MessageStartedEvent {
-	/** Discriminator for message.started event */
-	readonly type: 'message.started'
-	/** Run this message belongs to */
-	readonly runId: RunId
-	/** Unique identifier for this message */
-	readonly messageId: string
-	/** The message being generated (may be partial) */
-	readonly message: AppMessage
-	/** Unix timestamp (milliseconds) when the message started */
-	readonly timestamp: number
+  /** Discriminator for message.started event */
+  readonly type: 'message.started'
+  /** Run this message belongs to */
+  readonly runId: RunId
+  /** Unique identifier for this message */
+  readonly messageId: string
+  /** The message being generated (may be partial) */
+  readonly message: AppMessage
+  /** Unix timestamp (milliseconds) when the message started */
+  readonly timestamp: number
 }
 
 /**
@@ -134,8 +134,8 @@ export type MessageDeltaChannel = 'text' | 'thinking'
  * Task 14 will define the complete MessageDelta type with full aggregation support.
  */
 export interface MessageDeltaPayload {
-	/** The delta content (text for 'text' channel, thinking for 'thinking' channel) */
-	readonly content: string
+  /** The delta content (text for 'text' channel, thinking for 'thinking' channel) */
+  readonly content: string
 }
 
 /**
@@ -145,36 +145,36 @@ export interface MessageDeltaPayload {
  * The channel indicates which part of the message is being updated.
  */
 export interface MessageDeltaEvent {
-	/** Discriminator for message.delta event */
-	readonly type: 'message.delta'
-	/** Run this message belongs to */
-	readonly runId: RunId
-	/** Unique identifier for this message */
-	readonly messageId: string
-	/** Monotonically increasing sequence number for ordering */
-	readonly sequence: number
-	/** The content channel being updated (text, thinking, etc.) */
-	readonly channel: MessageDeltaChannel
-	/** The delta payload for this chunk */
-	readonly payload: MessageDeltaPayload
-	/** Unix timestamp (milliseconds) when the delta was generated */
-	readonly timestamp: number
+  /** Discriminator for message.delta event */
+  readonly type: 'message.delta'
+  /** Run this message belongs to */
+  readonly runId: RunId
+  /** Unique identifier for this message */
+  readonly messageId: string
+  /** Monotonically increasing sequence number for ordering */
+  readonly sequence: number
+  /** The content channel being updated (text, thinking, etc.) */
+  readonly channel: MessageDeltaChannel
+  /** The delta payload for this chunk */
+  readonly payload: MessageDeltaPayload
+  /** Unix timestamp (milliseconds) when the delta was generated */
+  readonly timestamp: number
 }
 
 /**
  * Emitted when a message is fully generated.
  */
 export interface MessageCompletedEvent {
-	/** Discriminator for message.completed event */
-	readonly type: 'message.completed'
-	/** Run this message belongs to */
-	readonly runId: RunId
-	/** Unique identifier for this message */
-	readonly messageId: string
-	/** The complete message */
-	readonly message: AppMessage
-	/** Unix timestamp (milliseconds) when the message completed */
-	readonly timestamp: number
+  /** Discriminator for message.completed event */
+  readonly type: 'message.completed'
+  /** Run this message belongs to */
+  readonly runId: RunId
+  /** Unique identifier for this message */
+  readonly messageId: string
+  /** The complete message */
+  readonly message: AppMessage
+  /** Unix timestamp (milliseconds) when the message completed */
+  readonly timestamp: number
 }
 
 // ============================================================================
@@ -185,50 +185,50 @@ export interface MessageCompletedEvent {
  * Emitted when a tool execution starts.
  */
 export interface ToolStartedEvent {
-	/** Discriminator for tool.started event */
-	readonly type: 'tool.started'
-	/** Run this tool call belongs to */
-	readonly runId: RunId
-	/** Unique identifier for this tool call */
-	readonly toolCallId: string
-	/** The tool invocation details */
-	readonly invocation: ToolInvocation
-	/** Unix timestamp (milliseconds) when the tool started */
-	readonly timestamp: number
+  /** Discriminator for tool.started event */
+  readonly type: 'tool.started'
+  /** Run this tool call belongs to */
+  readonly runId: RunId
+  /** Unique identifier for this tool call */
+  readonly toolCallId: string
+  /** The tool invocation details */
+  readonly invocation: ToolInvocation
+  /** Unix timestamp (milliseconds) when the tool started */
+  readonly timestamp: number
 }
 
 /**
  * Emitted when a tool execution completes successfully.
  */
 export interface ToolCompletedEvent {
-	/** Discriminator for tool.completed event */
-	readonly type: 'tool.completed'
-	/** Run this tool call belongs to */
-	readonly runId: RunId
-	/** Unique identifier for this tool call */
-	readonly toolCallId: string
-	/** The tool execution result */
-	readonly result: ToolResult
-	/** Unix timestamp (milliseconds) when the tool completed */
-	readonly timestamp: number
+  /** Discriminator for tool.completed event */
+  readonly type: 'tool.completed'
+  /** Run this tool call belongs to */
+  readonly runId: RunId
+  /** Unique identifier for this tool call */
+  readonly toolCallId: string
+  /** The tool execution result */
+  readonly result: ToolResult
+  /** Unix timestamp (milliseconds) when the tool completed */
+  readonly timestamp: number
 }
 
 /**
  * Emitted when a tool execution fails.
  */
 export interface ToolFailedEvent {
-	/** Discriminator for tool.failed event */
-	readonly type: 'tool.failed'
-	/** Run this tool call belongs to */
-	readonly runId: RunId
-	/** Unique identifier for this tool call */
-	readonly toolCallId: string
-	/** The tool invocation that failed */
-	readonly invocation: ToolInvocation
-	/** The error that caused the tool to fail */
-	readonly error: ToolError
-	/** Unix timestamp (milliseconds) when the tool failed */
-	readonly timestamp: number
+  /** Discriminator for tool.failed event */
+  readonly type: 'tool.failed'
+  /** Run this tool call belongs to */
+  readonly runId: RunId
+  /** Unique identifier for this tool call */
+  readonly toolCallId: string
+  /** The tool invocation that failed */
+  readonly invocation: ToolInvocation
+  /** The error that caused the tool to fail */
+  readonly error: ToolError
+  /** Unix timestamp (milliseconds) when the tool failed */
+  readonly timestamp: number
 }
 
 // ============================================================================
@@ -260,13 +260,13 @@ export interface ToolFailedEvent {
  * ```
  */
 export type RuntimeEvent =
-	| RunStartedEvent
-	| RunCompletedEvent
-	| RunFailedEvent
-	| RunCancelledEvent
-	| MessageStartedEvent
-	| MessageDeltaEvent
-	| MessageCompletedEvent
-	| ToolStartedEvent
-	| ToolCompletedEvent
-	| ToolFailedEvent
+  | RunStartedEvent
+  | RunCompletedEvent
+  | RunFailedEvent
+  | RunCancelledEvent
+  | MessageStartedEvent
+  | MessageDeltaEvent
+  | MessageCompletedEvent
+  | ToolStartedEvent
+  | ToolCompletedEvent
+  | ToolFailedEvent

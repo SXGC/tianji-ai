@@ -4,14 +4,19 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "check": "turbo check",
+    "check": "pnpm exec biome check --files-ignore-unknown=true --error-on-warnings . && pnpm typecheck",
     "build": "turbo build",
     "test": "turbo test",
-    "lint": "turbo lint",
-    "format": "turbo format"
+    "lint": "pnpm exec biome lint --files-ignore-unknown=true --error-on-warnings .",
+    "format": "pnpm exec biome format --write --files-ignore-unknown=true .",
+    "format:check": "pnpm exec biome check --formatter-enabled=true --linter-enabled=false --organize-imports-enabled=false --files-ignore-unknown=true .",
+    "typecheck": "pnpm -r --if-present --filter \"./packages/*\" typecheck",
+    "precommit:check": "pnpm exec biome check --staged --files-ignore-unknown=true --no-errors-on-unmatched --error-on-warnings && pnpm typecheck",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
+    "husky": "^9.1.7",
     "turbo": "^2.8.16",
     "typescript": "^5.8.2",
     "vitest": "^3.0.0"

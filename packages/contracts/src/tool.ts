@@ -22,28 +22,28 @@ import type { ToolError } from './errors.js'
  * but this contract captures the essential structure.
  */
 export interface JSONSchema {
-	/** The JSON Schema version (typically "http://json-schema.org/draft-07/schema#") */
-	$schema?: string
-	/** Type of the schema (e.g., "object", "string", "array") */
-	type: string
-	/** Description of what this schema represents */
-	description?: string
-	/** Properties for object type schemas */
-	properties?: Record<string, JSONSchema>
-	/** List of required property names for object type */
-	required?: string[]
-	/** Schema for array items when type is "array" */
-	items?: JSONSchema
-	/** Allowed values for enum type */
-	enum?: string[]
-	/** Default value */
-	default?: unknown
-	/** Additional schema definitions to reference */
-	definitions?: Record<string, JSONSchema>
-	/** Reference to another schema definition */
-	$ref?: string
-	/** Additional properties allowed on the schema */
-	[key: string]: unknown
+  /** The JSON Schema version (typically "http://json-schema.org/draft-07/schema#") */
+  $schema?: string
+  /** Type of the schema (e.g., "object", "string", "array") */
+  type: string
+  /** Description of what this schema represents */
+  description?: string
+  /** Properties for object type schemas */
+  properties?: Record<string, JSONSchema>
+  /** List of required property names for object type */
+  required?: string[]
+  /** Schema for array items when type is "array" */
+  items?: JSONSchema
+  /** Allowed values for enum type */
+  enum?: string[]
+  /** Default value */
+  default?: unknown
+  /** Additional schema definitions to reference */
+  definitions?: Record<string, JSONSchema>
+  /** Reference to another schema definition */
+  $ref?: string
+  /** Additional properties allowed on the schema */
+  [key: string]: unknown
 }
 
 // ============================================================================
@@ -75,14 +75,14 @@ export interface JSONSchema {
  * ```
  */
 export interface ToolSpec {
-	/** Unique name/identifier for the tool (e.g., "read_file", "execute_command") */
-	name: string
-	/** Human-readable description explaining what the tool does and when to use it */
-	description: string
-	/** JSON Schema describing the expected parameters/arguments */
-	parameters: JSONSchema
-	/** Optional list of permission names required to execute this tool */
-	permissions?: string[]
+  /** Unique name/identifier for the tool (e.g., "read_file", "execute_command") */
+  name: string
+  /** Human-readable description explaining what the tool does and when to use it */
+  description: string
+  /** JSON Schema describing the expected parameters/arguments */
+  parameters: JSONSchema
+  /** Optional list of permission names required to execute this tool */
+  permissions?: string[]
 }
 
 // ============================================================================
@@ -107,12 +107,12 @@ export interface ToolSpec {
  * ```
  */
 export interface ToolInvocation {
-	/** Unique identifier for this specific tool call */
-	toolCallId: string
-	/** Name of the tool to invoke (must match a ToolSpec.name) */
-	toolName: string
-	/** Arguments to pass to the tool (should match the ToolSpec.parameters schema) */
-	args: unknown
+  /** Unique identifier for this specific tool call */
+  toolCallId: string
+  /** Name of the tool to invoke (must match a ToolSpec.name) */
+  toolName: string
+  /** Arguments to pass to the tool (should match the ToolSpec.parameters schema) */
+  args: unknown
 }
 
 // ============================================================================
@@ -147,10 +147,10 @@ export interface ToolInvocation {
  * ```
  */
 export interface ToolResult {
-	/** Unique identifier matching the ToolInvocation this result corresponds to */
-	toolCallId: string
-	/** The return value from the tool execution (may be undefined) */
-	result: unknown
-	/** Error information if the tool execution failed */
-	error?: ToolError
+  /** Unique identifier matching the ToolInvocation this result corresponds to */
+  toolCallId: string
+  /** The return value from the tool execution (may be undefined) */
+  result: unknown
+  /** Error information if the tool execution failed */
+  error?: ToolError
 }

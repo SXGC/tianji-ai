@@ -30,10 +30,10 @@ export type MessageRole = 'user' | 'assistant' | 'system'
  * The most common content type, representing plain text.
  */
 export interface TextContent {
-	/** Discriminator for text content */
-	readonly type: 'text'
-	/** The text content */
-	readonly text: string
+  /** Discriminator for text content */
+  readonly type: 'text'
+  /** The text content */
+  readonly text: string
 }
 
 /**
@@ -43,10 +43,10 @@ export interface TextContent {
  * in specialized UI contexts (e.g., "thinking" blocks in Claude).
  */
 export interface ThinkingContent {
-	/** Discriminator for thinking content */
-	readonly type: 'thinking'
-	/** The thinking/reasoning content */
-	readonly thinking: string
+  /** Discriminator for thinking content */
+  readonly type: 'thinking'
+  /** The thinking/reasoning content */
+  readonly thinking: string
 }
 
 /**
@@ -56,12 +56,12 @@ export interface ThinkingContent {
  * mimeType is optional when URL includes recognizable extension.
  */
 export interface ImageContent {
-	/** Discriminator for image content */
-	readonly type: 'image'
-	/** URL or data URI of the image */
-	readonly url: string
-	/** Optional MIME type (e.g., 'image/png', 'image/jpeg') */
-	readonly mimeType?: string
+  /** Discriminator for image content */
+  readonly type: 'image'
+  /** URL or data URI of the image */
+  readonly url: string
+  /** Optional MIME type (e.g., 'image/png', 'image/jpeg') */
+  readonly mimeType?: string
 }
 
 /**
@@ -71,14 +71,14 @@ export interface ImageContent {
  * The toolCallId is used to correlate with the corresponding ToolResult.
  */
 export interface ToolCall {
-	/** Discriminator for tool call content */
-	readonly type: 'tool-call'
-	/** Unique identifier for this tool call, used to correlate with ToolResult */
-	readonly toolCallId: string
-	/** Name of the tool to invoke (must match a registered ToolSpec) */
-	readonly toolName: string
-	/** Arguments to pass to the tool (should match tool's parameter schema) */
-	readonly args: unknown
+  /** Discriminator for tool call content */
+  readonly type: 'tool-call'
+  /** Unique identifier for this tool call, used to correlate with ToolResult */
+  readonly toolCallId: string
+  /** Name of the tool to invoke (must match a registered ToolSpec) */
+  readonly toolName: string
+  /** Arguments to pass to the tool (should match tool's parameter schema) */
+  readonly args: unknown
 }
 
 // ============================================================================
@@ -137,12 +137,12 @@ export type MessagePart = TextContent | ThinkingContent | ImageContent | ToolCal
  * ```
  */
 export interface AppMessage {
-	/** Unique identifier for this message */
-	readonly id: string
-	/** Role of the message sender */
-	readonly role: MessageRole
-	/** Array of content parts comprising the message */
-	readonly content: MessagePart[]
-	/** Unix timestamp (milliseconds) when the message was created */
-	readonly createdAt: number
+  /** Unique identifier for this message */
+  readonly id: string
+  /** Role of the message sender */
+  readonly role: MessageRole
+  /** Array of content parts comprising the message */
+  readonly content: MessagePart[]
+  /** Unix timestamp (milliseconds) when the message was created */
+  readonly createdAt: number
 }

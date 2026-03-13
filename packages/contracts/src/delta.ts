@@ -56,20 +56,20 @@ export type DeltaOp = 'append' | 'replace' | 'complete'
  * ```
  */
 export interface MessageDelta {
-	/** Run this message belongs to */
-	readonly runId: RunId
-	/** Unique identifier for this message */
-	readonly messageId: string
-	/** Monotonically increasing sequence number for ordering */
-	readonly sequence: number
-	/** Operation to perform with this delta */
-	readonly op: DeltaOp
-	/** The content channel being updated (text, thinking, etc.) */
-	readonly channel: MessageDeltaChannel
-	/** The delta content (interpretation depends on channel and op) */
-	readonly payload: unknown
-	/** Unix timestamp (milliseconds) when the delta was generated */
-	readonly timestamp: number
+  /** Run this message belongs to */
+  readonly runId: RunId
+  /** Unique identifier for this message */
+  readonly messageId: string
+  /** Monotonically increasing sequence number for ordering */
+  readonly sequence: number
+  /** Operation to perform with this delta */
+  readonly op: DeltaOp
+  /** The content channel being updated (text, thinking, etc.) */
+  readonly channel: MessageDeltaChannel
+  /** The delta content (interpretation depends on channel and op) */
+  readonly payload: unknown
+  /** Unix timestamp (milliseconds) when the delta was generated */
+  readonly timestamp: number
 }
 
 // ============================================================================
@@ -110,20 +110,20 @@ export type ToolProgressChannel = 'stdout' | 'stderr' | 'progress' | 'result'
  * ```
  */
 export interface ToolProgressDelta {
-	/** Run this tool call belongs to */
-	readonly runId: RunId
-	/** Unique identifier for this tool call */
-	readonly toolCallId: string
-	/** Monotonically increasing sequence number for ordering */
-	readonly sequence: number
-	/** Operation to perform with this delta */
-	readonly op: DeltaOp
-	/** The content channel being updated (stdout, stderr, progress, result) */
-	readonly channel: ToolProgressChannel
-	/** The delta content (interpretation depends on channel and op) */
-	readonly payload: unknown
-	/** Unix timestamp (milliseconds) when the delta was generated */
-	readonly timestamp: number
+  /** Run this tool call belongs to */
+  readonly runId: RunId
+  /** Unique identifier for this tool call */
+  readonly toolCallId: string
+  /** Monotonically increasing sequence number for ordering */
+  readonly sequence: number
+  /** Operation to perform with this delta */
+  readonly op: DeltaOp
+  /** The content channel being updated (stdout, stderr, progress, result) */
+  readonly channel: ToolProgressChannel
+  /** The delta content (interpretation depends on channel and op) */
+  readonly payload: unknown
+  /** Unix timestamp (milliseconds) when the delta was generated */
+  readonly timestamp: number
 }
 
 // ============================================================================

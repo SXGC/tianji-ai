@@ -1,24 +1,24 @@
 {
-	"name": "@tianji/contracts",
-	"version": "0.0.1",
-	"description": "Public domain contracts for tianji-ai - zero dependency type definitions",
-	"type": "module",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"exports": {
-		".": {
-			"types": "./dist/index.d.ts",
-			"import": "./dist/index.js"
-		}
-	},
-	"files": ["dist", "src"],
-	"scripts": {
-		"build": "tsc --project tsconfig.build.json",
-		"typecheck": "tsc --noEmit",
-		"test": "vitest run",
-		"test:watch": "vitest",
-		"clean": "rm -rf dist"
-	},
-	"keywords": ["tianji", "contracts", "types", "ai", "agent"],
-	"license": "MIT"
+  "name": "@tianji/contracts",
+  "version": "0.0.1",
+  "description": "Public domain contracts for tianji-ai - zero dependency type definitions",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src"],
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
+  },
+  "keywords": ["tianji", "contracts", "types", "ai", "agent"],
+  "license": "MIT"
 }

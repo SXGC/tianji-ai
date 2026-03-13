@@ -20,13 +20,13 @@ import { jsonSchema } from 'ai'
  * Custom error for tool schema conversion failures
  */
 export class ToolSchemaError extends Error {
-	constructor(
-		message: string,
-		public readonly cause?: 'duplicate_name' | 'invalid_schema',
-	) {
-		super(message)
-		this.name = 'ToolSchemaError'
-	}
+  constructor(
+    message: string,
+    public readonly cause?: 'duplicate_name' | 'invalid_schema'
+  ) {
+    super(message)
+    this.name = 'ToolSchemaError'
+  }
 }
 
 // ============================================================================
@@ -46,15 +46,15 @@ export class ToolSchemaError extends Error {
  * will add execution logic as needed.
  */
 function convertToolSpec(spec: ToolSpec): Tool {
-	// Convert our JSONSchema to AI SDK Schema using jsonSchema function
-	// Our JSONSchema type is compatible with JSONSchema7 used by AI SDK
-	const parameters = jsonSchema(spec.parameters as Parameters<typeof jsonSchema>[0])
+  // Convert our JSONSchema to AI SDK Schema using jsonSchema function
+  // Our JSONSchema type is compatible with JSONSchema7 used by AI SDK
+  const parameters = jsonSchema(spec.parameters as Parameters<typeof jsonSchema>[0])
 
-	return {
-		parameters,
-		description: spec.description,
-		// No execute function - provider adapters will add this
-	}
+  return {
+    parameters,
+    description: spec.description,
+    // No execute function - provider adapters will add this
+  }
 }
 
 /**
@@ -82,21 +82,21 @@ function convertToolSpec(spec: ToolSpec): Tool {
  * ```
  */
 export function convertToolSpecs(specs: readonly ToolSpec[]): Record<string, Tool> {
-	const result: Record<string, Tool> = {}
-	const seenNames = new Set<string>()
+  const result: Record<string, Tool> = {}
+  const seenNames = new Set<string>()
 
-	for (const spec of specs) {
-		// Check for duplicate tool names
-		if (seenNames.has(spec.name)) {
-			throw new ToolSchemaError(
-				`Duplicate tool name detected: "${spec.name}". Each tool must have a unique name.`,
-				'duplicate_name',
-			)
-		}
+  for (const spec of specs) {
+    // Check for duplicate tool names
+    if (seenNames.has(spec.name)) {
+      throw new ToolSchemaError(
+        `Duplicate tool name detected: "${spec.name}". Each tool must have a unique name.`,
+        'duplicate_name'
+      )
+    }
 
-		seenNames.add(spec.name)
-		result[spec.name] = convertToolSpec(spec)
-	}
+    seenNames.add(spec.name)
+    result[spec.name] = convertToolSpec(spec)
+  }
 
-	return result
+  return result
 }

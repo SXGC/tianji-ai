@@ -17,6 +17,8 @@ packages/*/dist-firefox/
 .sisyphus/drafts/
 .sisyphus/boulder.json
 
+# factory
+
 # Environment
 .env
 

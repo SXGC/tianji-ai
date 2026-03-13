@@ -44,4 +44,16 @@ describe('createLlmGateway', () => {
     })
     expect(gateway.isReady()).toBe(true)
   })
+
+  it('treats provider headers as a ready configuration', () => {
+    const gateway = createLlmGateway({
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      headers: {
+        authorization: 'Bearer test-token',
+      },
+    })
+
+    expect(gateway.isReady()).toBe(true)
+  })
 })

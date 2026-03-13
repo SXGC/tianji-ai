@@ -31,45 +31,45 @@
  * @returns A deep copy of the value
  */
 export function deepClone<T>(value: T): T {
-	// Handle primitives and null
-	if (value === null || typeof value !== 'object') {
-		return value
-	}
+  // Handle primitives and null
+  if (value === null || typeof value !== 'object') {
+    return value
+  }
 
-	// Handle Date
-	if (value instanceof Date) {
-		return new Date(value.getTime()) as T
-	}
+  // Handle Date
+  if (value instanceof Date) {
+    return new Date(value.getTime()) as T
+  }
 
-	// Handle Map
-	if (value instanceof Map) {
-		const cloned = new Map()
-		for (const [key, val] of value) {
-			cloned.set(deepClone(key), deepClone(val))
-		}
-		return cloned as T
-	}
+  // Handle Map
+  if (value instanceof Map) {
+    const cloned = new Map()
+    for (const [key, val] of value) {
+      cloned.set(deepClone(key), deepClone(val))
+    }
+    return cloned as T
+  }
 
-	// Handle Set
-	if (value instanceof Set) {
-		const cloned = new Set()
-		for (const item of value) {
-			cloned.add(deepClone(item))
-		}
-		return cloned as T
-	}
+  // Handle Set
+  if (value instanceof Set) {
+    const cloned = new Set()
+    for (const item of value) {
+      cloned.add(deepClone(item))
+    }
+    return cloned as T
+  }
 
-	// Handle Array
-	if (Array.isArray(value)) {
-		return value.map((item) => deepClone(item)) as T
-	}
+  // Handle Array
+  if (Array.isArray(value)) {
+    return value.map((item) => deepClone(item)) as T
+  }
 
-	// Handle plain object
-	const cloned: Record<string, unknown> = {}
-	for (const key of Object.keys(value)) {
-		cloned[key] = deepClone((value as Record<string, unknown>)[key])
-	}
-	return cloned as T
+  // Handle plain object
+  const cloned: Record<string, unknown> = {}
+  for (const key of Object.keys(value)) {
+    cloned[key] = deepClone((value as Record<string, unknown>)[key])
+  }
+  return cloned as T
 }
 
 // ============================================================================
@@ -83,9 +83,9 @@ export function deepClone<T>(value: T): T {
  * @returns A promise that resolves after the specified duration
  */
 export function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => {
-		setTimeout(resolve, ms)
-	})
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
 }
 
 // ============================================================================
@@ -96,21 +96,21 @@ export function sleep(ms: number): Promise<void> {
  * Options for retry behavior.
  */
 export interface RetryOptions {
-	/** Maximum number of attempts (including the initial attempt) */
-	maxAttempts?: number
-	/** Base delay in milliseconds for exponential backoff */
-	baseDelayMs?: number
-	/** Maximum delay in milliseconds for backoff cap */
-	maxDelayMs?: number
+  /** Maximum number of attempts (including the initial attempt) */
+  maxAttempts?: number
+  /** Base delay in milliseconds for exponential backoff */
+  baseDelayMs?: number
+  /** Maximum delay in milliseconds for backoff cap */
+  maxDelayMs?: number
 }
 
 /**
  * Default retry options.
  */
 export const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
-	maxAttempts: 3,
-	baseDelayMs: 300,
-	maxDelayMs: 3000,
+  maxAttempts: 3,
+  baseDelayMs: 300,
+  maxDelayMs: 3000,
 }
 
 /**
@@ -121,14 +121,10 @@ export const DEFAULT_RETRY_OPTIONS: Required<RetryOptions> = {
  * @param maxDelayMs - Maximum delay cap
  * @returns The calculated delay in milliseconds
  */
-function calculateBackoff(
-	attempt: number,
-	baseDelayMs: number,
-	maxDelayMs: number,
-): number {
-	// Exponential backoff: baseDelay * 2^attempt
-	const delay = baseDelayMs * Math.pow(2, attempt)
-	return Math.min(delay, maxDelayMs)
+function calculateBackoff(attempt: number, baseDelayMs: number, maxDelayMs: number): number {
+  // Exponential backoff: baseDelay * 2^attempt
+  const delay = baseDelayMs * 2 ** attempt
+  return Math.min(delay, maxDelayMs)
 }
 
 /**
@@ -139,31 +135,28 @@ function calculateBackoff(
  * @returns The result of the operation if successful
  * @throws The last error if all attempts fail
  */
-export async function retry<T>(
-	operation: () => Promise<T>,
-	options?: RetryOptions,
-): Promise<T> {
-	const { maxAttempts, baseDelayMs, maxDelayMs } = {
-		...DEFAULT_RETRY_OPTIONS,
-		...options,
-	}
+export async function retry<T>(operation: () => Promise<T>, options?: RetryOptions): Promise<T> {
+  const { maxAttempts, baseDelayMs, maxDelayMs } = {
+    ...DEFAULT_RETRY_OPTIONS,
+    ...options,
+  }
 
-	let lastError: Error | undefined
+  let lastError: Error | undefined
 
-	for (let attempt = 0; attempt < maxAttempts; attempt++) {
-		try {
-			return await operation()
-		} catch (error) {
-			lastError = error instanceof Error ? error : new Error(String(error))
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      return await operation()
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error))
 
-			// Don't wait after the last attempt
-			if (attempt < maxAttempts - 1) {
-				const delay = calculateBackoff(attempt, baseDelayMs, maxDelayMs)
-				await sleep(delay)
-			}
-		}
-	}
+      // Don't wait after the last attempt
+      if (attempt < maxAttempts - 1) {
+        const delay = calculateBackoff(attempt, baseDelayMs, maxDelayMs)
+        await sleep(delay)
+      }
+    }
+  }
 
-	// All attempts failed, throw the last error
-	throw lastError
+  // All attempts failed, throw the last error
+  throw lastError
 }

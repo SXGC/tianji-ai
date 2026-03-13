@@ -11,10 +11,7 @@
       "import": "./dist/index.js"
     }
   },
-  "files": [
-    "dist",
-    "src"
-  ],
+  "files": ["dist", "src"],
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
     "typecheck": "tsc --noEmit",
@@ -32,11 +29,6 @@
   "devDependencies": {
     "@types/node": "^22.0.0"
   },
-  "keywords": [
-    "tianji",
-    "runtime",
-    "langgraph",
-    "session"
-  ],
+  "keywords": ["tianji", "runtime", "langgraph", "session"],
   "license": "MIT"
 }

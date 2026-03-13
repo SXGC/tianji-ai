@@ -5,17 +5,17 @@
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
-	test: {
-		// Extend root config
-		extends: '../../vitest.config.ts',
+  test: {
+    // Extend root config
+    extends: '../../vitest.config.ts',
 
-		// Package-specific settings
-		name: '@tianji/contracts',
+    // Package-specific settings
+    name: '@tianji/contracts',
 
-		// Test file patterns for this package
-		include: ['src/__tests__/**/*.{test,spec}.ts', 'src/**/*.{test,spec}.ts'],
+    // Test file patterns for this package
+    include: ['src/__tests__/**/*.{test,spec}.ts', 'src/**/*.{test,spec}.ts'],
 
-		// Exclude patterns
-		exclude: ['node_modules', 'dist'],
-	},
+    // Exclude patterns
+    exclude: ['node_modules', 'dist'],
+  },
 })
