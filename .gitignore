@@ -11,6 +11,12 @@ packages/*/dist-firefox/
 *.d.ts
 *.d.ts.map
 
+# opencode
+.sisyphus/evidence/
+.sisyphus/notepads/
+.sisyphus/drafts/
+.sisyphus/boulder.json
+
 # Environment
 .env
 
