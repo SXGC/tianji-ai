@@ -1,7 +1,7 @@
 {
   "name": "@tianji/runtime",
   "version": "0.0.1",
-  "description": "Session runtime for tianji-ai with internal LangGraph orchestration",
+  "description": "Session runtime for tianji-ai with deepagents-backed execution",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -20,15 +20,17 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@langchain/core": "^1.1.31",
     "@langchain/langgraph": "^1.2.2",
+    "@langchain/core": "^1.1.33",
     "@tianji/contracts": "workspace:*",
     "@tianji/llm": "workspace:*",
-    "@tianji/shared": "workspace:*"
+    "@tianji/shared": "workspace:*",
+    "deepagents": "^1.8.4",
+    "langchain": "^1.2.34"
   },
   "devDependencies": {
     "@types/node": "^22.0.0"
   },
-  "keywords": ["tianji", "runtime", "langgraph", "session"],
+  "keywords": ["tianji", "runtime", "deepagents", "session"],
   "license": "MIT"
 }

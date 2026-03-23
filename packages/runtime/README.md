@@ -1,16 +1,18 @@
 # @tianji/runtime
 
-`tianji-ai` 的会话运行时包，内部基于 LangGraph 做编排。
+`tianji-ai` 的会话运行时包，v2 公共 API 现已收敛到 deepagents-native 配置面。
 
 ## 包职责
 
-`@tianji/runtime` 是会话状态与执行过程的编排层，对外通过统一的运行时 API 组合共享契约、LLM 网关、快照持久化、事件流与运行时工具注册能力。
+`@tianji/runtime` 是会话状态与执行过程的编排层，对外通过统一的运行时 API 组合共享契约、快照持久化、事件流与运行时工具注册能力。
 
 该包的公开表面刻意保持收敛：应用侧应通过 `createSessionRuntime` 以及导出的持久化、事件流、工具注册原语接入，而不是依赖内部工作流细节。
 
+从 v2 开始，`SessionRuntimeOptions` 默认围绕 `deepagents` 配置块组织；`snapshotStore` 与 `toolCatalog` 继续保留在公共 API 中。当前 package 的运行时执行面已经收敛为 deepagents-only；历史 legacy session/run snapshot 仍可通过 metadata helper 读取，用于迁移校验与兼容验证。
+
 ## 当前公开内容
 
-- 运行时入口与类型：`createSessionRuntime`、`SessionRuntime`、`SessionRuntimeOptions`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`
+- 运行时入口与类型：`createSessionRuntime`、`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`、`readSessionRuntimeMetadata`、`readRunRuntimeMetadata`、`readDeepagentsRunWorkflowState`
 - 事件流：`ReplayableEventStream`
 - 快照持久化：`SnapshotStore`、`InMemorySnapshotStore`、`FileSnapshotStore`
 - 工具注册与策略校验：`ToolRegistry`、`ensureToolAllowed`、`RuntimeToolDefinition`、`RuntimeToolExecutionContext`、`RuntimeToolSideEffect`、`ToolCatalog`
@@ -19,20 +21,37 @@
 
 ```ts
 import { createSessionRuntime, InMemorySnapshotStore, ToolRegistry } from '@tianji/runtime'
-import { createLlmGateway } from '@tianji/llm'
 
 const runtime = createSessionRuntime({
-  llmGateway: createLlmGateway({
-    provider: 'openai',
-    model: 'gpt-4.1',
-    apiKey: process.env.OPENAI_API_KEY,
-  }),
+  deepagents: {
+    model: 'openai:gpt-5.1',
+    middleware: [],
+    backend: { kind: 'state-backend' },
+    checkpointer: { kind: 'memory-saver' },
+    store: { kind: 'memory-store' },
+    subagents: [],
+    skills: ['/skills/'],
+  },
   snapshotStore: new InMemorySnapshotStore(),
   toolCatalog: new ToolRegistry(),
 })
 
 void runtime
 ```
+
+## `SessionRuntimeOptions` v2 说明
+
+- `engine?: 'deepagents'`：未显式指定时默认使用 `deepagents`；历史 legacy 标记仅通过 metadata helper 暴露，不再作为可执行 runtime 选项。
+- `deepagents`：v2 主配置块，当前公开字段为 `model`、`middleware`、`backend`、`checkpointer`、`store`、`subagents`、`skills`、`interruptOn`。
+- `snapshotStore` / `toolCatalog`：继续作为稳定公共 API 暴露。
+
+注意事项：
+
+- 当前版本已经接入 deepagents bootstrap，可执行基础文本轮次并写回 runtime metadata。
+- `middleware`、`subagents` 会按当前配置原样透传给上游 deepagents；其具体行为与兼容性约束遵循 upstream 实现。
+- `interruptOn` 现在支持真实 checkpoint 恢复，但必须与 `checkpointer` 一起使用；被中断的 run 会把 checkpoint 信息写入 runtime metadata，并把 interrupt payload 写入 `RunSnapshot.workflowState`。
+- 当 run 因 HITL 中断而暂停时，调用方应先读取 `readRunRuntimeMetadata(run.metadata)` 和 `readDeepagentsRunWorkflowState(run.workflowState)`，再通过 `resumeRun({ runId, resumeValue })` 提交与上游 LangGraph `Command({ resume })` 兼容的 JSON 值。
+- `readSessionRuntimeMetadata` 与 `readRunRuntimeMetadata` 仍会识别 legacy metadata，便于校验历史快照、迁移脚本和只读兼容测试。
 
 ## 开发命令
 

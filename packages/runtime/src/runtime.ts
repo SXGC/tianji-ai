@@ -1,12 +1,24 @@
+/**
+ * SessionRuntime 核心实现。
+ *
+ * 业务职责：
+ * - 维护 session/run 快照、事件流、取消恢复与工具执行状态。
+ * - 统一协调 deepagents 引擎与快照存储之间的运行时协议。
+ * - 保留对历史 legacy 元数据的读取兼容，但不再支持 legacy 执行。
+ *
+ * 对外触点：
+ * - 通过 createSessionRuntime 暴露给 packages/runtime 公共入口。
+ * - 调用 ./engines/deepagents-engine.ts 执行实际推理与工具调用。
+ * - 依赖 @tianji/contracts 提供快照、事件、错误与策略类型。
+ */
 import { randomUUID } from 'node:crypto'
 
+import type { BaseLanguageModel } from '@langchain/core/language_models/base'
 import {
-  type AggregatedMessageDeltaState,
   type AppMessage,
   CancelledError,
   DEFAULT_EXECUTION_POLICY,
   type ExecutionPolicy,
-  type MessageDelta,
   ProviderError,
   type RunId,
   type RunSnapshot,
@@ -14,27 +26,17 @@ import {
   type SessionId,
   type SessionSnapshot,
   TianjiError,
-  TimeoutError,
-  ToolError,
-  type ToolInvocation,
-  type ToolResult,
-  type ToolSpec,
-  applyMessageDelta,
   createRunId,
   createSessionId,
 } from '@tianji/contracts'
-import type { LlmGenerationConfig, LlmResponse } from '@tianji/llm'
+import type { LlmGenerationConfig } from '@tianji/llm'
+import type { InterruptOnConfig } from 'langchain'
 
+import { executeDeepagentsRun } from './engines/deepagents-engine.js'
 import { ReplayableEventStream } from './event-stream.js'
 import type { SnapshotStore } from './snapshot-store.js'
 import { InMemorySnapshotStore } from './snapshot-store.js'
-import {
-  type RuntimeToolDefinition,
-  type ToolCatalog,
-  ToolRegistry,
-  ensureToolAllowed,
-} from './tool-catalog.js'
-import { type RuntimeWorkflowState, createRuntimeWorkflow } from './workflow.js'
+import { type RuntimeToolDefinition, type ToolCatalog, ToolRegistry } from './tool-catalog.js'
 
 export interface CreateSessionOptions {
   readonly sessionId?: SessionId
@@ -58,54 +60,48 @@ export interface ResumeRunOptions {
   readonly abortSignal?: AbortSignal
   readonly systemPrompt?: string
   readonly config?: LlmGenerationConfig
+  readonly resumeValue?: unknown
 }
 
-interface SessionRuntimeLlmToolExecutionOptions {
-  readonly toolCallId: string
-  readonly abortSignal?: AbortSignal
+export type SessionRuntimeEngine = 'legacy' | 'deepagents'
+
+export interface SessionRuntimeMetadata {
+  readonly engine: SessionRuntimeEngine
 }
 
-interface SessionRuntimeLlmRequest {
-  readonly runId: RunId
-  readonly messages: readonly AppMessage[]
-  readonly config?: LlmGenerationConfig
-  readonly systemPrompt?: string
-  readonly tools?: readonly ToolSpec[]
-  readonly executeTool?: (
-    toolName: string,
-    args: unknown,
-    options: SessionRuntimeLlmToolExecutionOptions
-  ) => Promise<unknown>
-  readonly abortSignal?: AbortSignal
+export interface RunRuntimeMetadata extends SessionRuntimeMetadata {
+  readonly threadId?: string
+  readonly checkpointId?: string
 }
 
-type SessionRuntimeLlmStreamEvent =
-  | {
-      readonly type: 'delta'
-      readonly payload: { readonly delta: string; readonly isFinal: boolean }
-    }
-  | { readonly type: 'complete'; readonly payload: { readonly response: LlmResponse } }
-  | {
-      readonly type: 'error'
-      readonly payload: { readonly message: string; readonly code?: string }
-    }
-
-interface SessionRuntimeLlmStream {
-  readonly onEvent: (callback: (event: SessionRuntimeLlmStreamEvent) => void) => void
-  readonly abort: () => void
-  readonly waitUntilComplete: () => Promise<LlmResponse>
+export interface SessionRuntimeDeepagentsConfig {
+  readonly model: string | BaseLanguageModel
+  readonly middleware?: readonly unknown[]
+  readonly backend?: unknown
+  readonly checkpointer?: boolean | unknown
+  readonly store?: unknown
+  readonly subagents?: readonly { readonly name: string; [key: string]: unknown }[]
+  readonly skills?: readonly string[]
+  readonly interruptOn?: Record<string, boolean | InterruptOnConfig>
 }
 
-interface SessionRuntimeLlmGateway {
-  readonly stream: (request: SessionRuntimeLlmRequest) => Promise<SessionRuntimeLlmStream>
+export interface DeepagentsInterruptRecord {
+  readonly id?: string
+  readonly value?: unknown
+}
+
+export interface DeepagentsRunWorkflowState {
+  readonly kind: 'deepagents-interrupt'
+  readonly threadId: string
+  readonly checkpointId?: string
+  readonly interrupts: readonly DeepagentsInterruptRecord[]
 }
 
 export interface SessionRuntimeOptions {
-  readonly llmGateway: SessionRuntimeLlmGateway
+  readonly engine?: Extract<SessionRuntimeEngine, 'deepagents'>
+  readonly deepagents?: SessionRuntimeDeepagentsConfig
   readonly snapshotStore?: SnapshotStore
   readonly toolCatalog?: ToolCatalog | ToolRegistry | readonly RuntimeToolDefinition[]
-  readonly defaultSystemPrompt?: string
-  readonly defaultGenerationConfig?: LlmGenerationConfig
 }
 
 export interface SessionRuntime {
@@ -124,7 +120,6 @@ interface ActiveRun {
   readonly sessionId: SessionId
   readonly controller: AbortController
   readonly events: ReplayableEventStream<RuntimeEvent>
-  readonly startedAt: number
 }
 
 interface ExecuteRunInput {
@@ -136,45 +131,144 @@ interface ExecuteRunInput {
   readonly systemPrompt?: string
   readonly config?: LlmGenerationConfig
   readonly sourceRunId?: RunId
+  readonly threadId?: string
+  readonly checkpointId?: string
+  readonly resumeValue?: unknown
 }
 
 interface RunExecutionContext {
-  readonly activeRun: ActiveRun
-  readonly policy: ExecutionPolicy
   readonly signal: AbortSignal
   readonly toolCatalog: ToolCatalog
   readonly sequence: {
     current: number
   }
   readonly pendingOperations: Map<string, RunSnapshot['pendingOperations'][number]>
-  messageState: AggregatedMessageDeltaState | undefined
+  readonly destructiveOperationIds: Set<string>
+}
+
+interface AbortSignalScope {
+  readonly signal: AbortSignal | undefined
+  readonly cleanup: () => void
 }
 
 export function createSessionRuntime(options: SessionRuntimeOptions): SessionRuntime {
+  // 统一隐藏具体实现，确保外部仅依赖稳定的 SessionRuntime 接口。
   return new SessionRuntimeImpl(options)
 }
 
+export function readSessionRuntimeMetadata(
+  metadata: Record<string, unknown> | undefined
+): SessionRuntimeMetadata | undefined {
+  const engine = readRuntimeEngine(metadata)
+
+  if (engine === undefined) {
+    return undefined
+  }
+
+  return { engine }
+}
+
+export function readRunRuntimeMetadata(
+  metadata: Record<string, unknown> | undefined
+): RunRuntimeMetadata | undefined {
+  const engine = readRuntimeEngine(metadata)
+
+  if (engine === undefined) {
+    return undefined
+  }
+
+  const runtime = readRuntimeMetadataRecord(metadata)
+
+  return {
+    engine,
+    threadId: typeof runtime?.threadId === 'string' ? runtime.threadId : undefined,
+    checkpointId: typeof runtime?.checkpointId === 'string' ? runtime.checkpointId : undefined,
+  }
+}
+
+export function readDeepagentsRunWorkflowState(
+  workflowState: unknown
+): DeepagentsRunWorkflowState | undefined {
+  // 仅识别当前 runtime 约定的 interrupt 快照结构，避免历史脏数据污染恢复流程。
+  if (!isRecord(workflowState) || workflowState.kind !== 'deepagents-interrupt') {
+    return undefined
+  }
+
+  if (typeof workflowState.threadId !== 'string') {
+    return undefined
+  }
+
+  const interrupts = Array.isArray(workflowState.interrupts)
+    ? workflowState.interrupts.filter(isDeepagentsInterruptRecord)
+    : undefined
+
+  if (interrupts === undefined) {
+    return undefined
+  }
+
+  return {
+    kind: 'deepagents-interrupt',
+    threadId: workflowState.threadId,
+    checkpointId:
+      typeof workflowState.checkpointId === 'string' ? workflowState.checkpointId : undefined,
+    interrupts,
+  }
+}
+
 class SessionRuntimeImpl implements SessionRuntime {
+  private readonly engine: SessionRuntimeEngine
   private readonly snapshotStore: SnapshotStore
   private readonly toolCatalog: ToolCatalog
-  private readonly workflow = createRuntimeWorkflow((state) => this.executeAssistantTurn(state))
   private readonly activeRuns = new Map<RunId, ActiveRun>()
   private readonly eventStreams = new Map<RunId, ReplayableEventStream<RuntimeEvent>>()
-  private readonly runContexts = new Map<RunId, RunExecutionContext>()
 
   constructor(private readonly options: SessionRuntimeOptions) {
+    const requestedEngine = readRequestedEngine(options) ?? 'deepagents'
+
+    if (requestedEngine === 'legacy') {
+      throw new TianjiError(
+        'state',
+        'UNSUPPORTED_RUNTIME_ENGINE',
+        'The legacy runtime engine has been removed. Historical legacy snapshots remain readable, but runtime execution now requires deepagents.'
+      )
+    }
+
+    this.engine = requestedEngine
+
+    if (!hasConfiguredDeepagentsModel(options.deepagents)) {
+      throw new TianjiError(
+        'state',
+        'INVALID_DEEPAGENTS_CONFIG',
+        'deepagents.model is required when runtime execution uses deepagents'
+      )
+    }
+
+    if (
+      hasInterruptConfiguration(options.deepagents) &&
+      !hasConfiguredDeepagentsCheckpointer(options.deepagents)
+    ) {
+      throw new TianjiError(
+        'state',
+        'INVALID_DEEPAGENTS_CONFIG',
+        'deepagents.checkpointer is required when deepagents.interruptOn is configured'
+      )
+    }
+
     this.snapshotStore = options.snapshotStore ?? new InMemorySnapshotStore()
     this.toolCatalog = normalizeToolCatalog(options.toolCatalog)
   }
 
   readonly createSession = async (options: CreateSessionOptions = {}): Promise<SessionSnapshot> => {
     const timestamp = Date.now()
+    const metadata = writeSessionRuntimeMetadata(cloneMetadata(options.metadata), {
+      engine: this.engine,
+    })
     const snapshot: SessionSnapshot = {
       sessionId: options.sessionId ?? createSessionId(`session_${randomUUID()}`),
       messages: [...(options.messages ?? [])],
       createdAt: timestamp,
       updatedAt: timestamp,
-      metadata: cloneMetadata(options.metadata),
+      metadata,
       policy: options.policy ?? DEFAULT_EXECUTION_POLICY,
     }
 
@@ -212,6 +306,7 @@ class SessionRuntimeImpl implements SessionRuntime {
   readonly runTurn = async (options: RunTurnOptions): Promise<RunId> => {
     const sessionSnapshot = await this.requireSessionSnapshot(options.sessionId)
     ensureSessionOpen(sessionSnapshot)
+    ensureSessionEngineMatches(sessionSnapshot, this.engine)
 
     const nextPolicy = options.policy ?? sessionSnapshot.policy ?? DEFAULT_EXECUTION_POLICY
     const nextSessionSnapshot: SessionSnapshot = {
@@ -219,7 +314,10 @@ class SessionRuntimeImpl implements SessionRuntime {
       messages: [...sessionSnapshot.messages, options.message],
       updatedAt: Date.now(),
       policy: nextPolicy,
-      metadata: mergeMetadata(sessionSnapshot.metadata, options.metadata),
+      metadata: writeSessionRuntimeMetadata(
+        mergeMetadata(sessionSnapshot.metadata, options.metadata),
+        { engine: this.engine }
+      ),
     }
 
     await this.snapshotStore.saveSession(nextSessionSnapshot)
@@ -231,20 +329,62 @@ class SessionRuntimeImpl implements SessionRuntime {
       messages: nextSessionSnapshot.messages,
       policy: nextPolicy,
       abortSignal: options.abortSignal,
-      systemPrompt: options.systemPrompt ?? this.options.defaultSystemPrompt,
-      config: options.config ?? this.options.defaultGenerationConfig,
+      systemPrompt: options.systemPrompt,
+      config: options.config,
     })
 
     return runId
   }
 
   readonly resumeRun = async (options: ResumeRunOptions): Promise<RunId> => {
+    // 恢复逻辑同时兼容 checkpoint 恢复与纯重放恢复，但两者的输入约束不同。
     const previousRun = await this.requireRunSnapshot(options.runId)
     const sessionSnapshot = await this.requireSessionSnapshot(previousRun.sessionId)
+    const runtimeMetadata = readRunRuntimeMetadata(previousRun.metadata)
+    const workflowState = readDeepagentsRunWorkflowState(previousRun.workflowState)
+    const canCheckpointResume =
+      typeof runtimeMetadata?.threadId === 'string' &&
+      typeof runtimeMetadata.checkpointId === 'string'
+    const requiresCheckpointResume = workflowState !== undefined || canCheckpointResume
+
     ensureSessionOpen(sessionSnapshot)
+    ensureSessionEngineMatches(sessionSnapshot, this.engine)
+    ensureRunEngineMatches(previousRun, this.engine)
 
     if (previousRun.status !== 'cancelled') {
       throw new TianjiError('state', 'RUN_NOT_CANCELLABLE', 'Only cancelled runs can be resumed')
+    }
+
+    if (requiresCheckpointResume && !canCheckpointResume) {
+      throw new TianjiError(
+        'state',
+        'UNSUPPORTED_DEEPAGENTS_RESUME',
+        'This run captured an interrupt but is missing checkpoint metadata needed for deepagents resume'
+      )
+    }
+
+    if (canCheckpointResume && options.resumeValue === undefined) {
+      throw new TianjiError(
+        'state',
+        'MISSING_RESUME_VALUE',
+        'Checkpoint-based deepagents resume requires options.resumeValue'
+      )
+    }
+
+    if (!canCheckpointResume && options.resumeValue !== undefined) {
+      throw new TianjiError(
+        'state',
+        'INVALID_RESUME_VALUE',
+        'options.resumeValue can only be used when the run includes deepagents checkpoint metadata'
+      )
+    }
+
+    if (!canCheckpointResume && previousRun.resumeHint === 'require-user-confirmation') {
+      throw new TianjiError(
+        'state',
+        'UNSUPPORTED_DEEPAGENTS_RESUME',
+        'This run requires user confirmation but cannot be resumed safely because no deepagents checkpoint was persisted'
+      )
     }
 
     const resumedRunId = createRunId(`run_${randomUUID()}`)
@@ -254,15 +394,12 @@ class SessionRuntimeImpl implements SessionRuntime {
       messages: previousRun.messages,
       policy: previousRun.policy ?? sessionSnapshot.policy ?? DEFAULT_EXECUTION_POLICY,
       abortSignal: options.abortSignal,
-      systemPrompt:
-        options.systemPrompt ??
-        readStoredSystemPrompt(previousRun.metadata) ??
-        this.options.defaultSystemPrompt,
-      config:
-        options.config ??
-        readStoredGenerationConfig(previousRun.metadata) ??
-        this.options.defaultGenerationConfig,
+      systemPrompt: options.systemPrompt ?? readStoredSystemPrompt(previousRun.metadata),
+      config: options.config ?? readStoredGenerationConfig(previousRun.metadata),
       sourceRunId: previousRun.runId,
+      threadId: runtimeMetadata?.threadId ?? sessionSnapshot.sessionId,
+      checkpointId: canCheckpointResume ? runtimeMetadata?.checkpointId : undefined,
+      resumeValue: canCheckpointResume ? options.resumeValue : undefined,
     })
 
     return resumedRunId
@@ -275,7 +412,7 @@ class SessionRuntimeImpl implements SessionRuntime {
       throw new TianjiError(
         'state',
         'RUN_EVENTS_NOT_FOUND',
-        `No event stream is available for run \"${runId}\"`
+        `No event stream is available for run "${runId}"`
       )
     }
 
@@ -304,11 +441,18 @@ class SessionRuntimeImpl implements SessionRuntime {
       updatedAt: timestamp,
       pendingOperations: [],
       policy: input.policy,
-      metadata: {
-        systemPrompt: input.systemPrompt,
-        generationConfig: input.config,
-        resumedFromRunId: input.sourceRunId,
-      },
+      metadata: writeRunRuntimeMetadata(
+        {
+          systemPrompt: input.systemPrompt,
+          generationConfig: input.config,
+          resumedFromRunId: input.sourceRunId,
+        },
+        {
+          engine: this.engine,
+          threadId: input.threadId ?? input.sessionSnapshot.sessionId,
+          checkpointId: input.checkpointId,
+        }
+      ),
     }
 
     const events = new ReplayableEventStream<RuntimeEvent>()
@@ -317,7 +461,6 @@ class SessionRuntimeImpl implements SessionRuntime {
       sessionId: input.sessionSnapshot.sessionId,
       controller: new AbortController(),
       events,
-      startedAt: timestamp,
     }
 
     this.activeRuns.set(input.runId, activeRun)
@@ -332,20 +475,14 @@ class SessionRuntimeImpl implements SessionRuntime {
     runSnapshot: RunSnapshot,
     input: ExecuteRunInput
   ): Promise<void> {
-    const signal =
-      mergeAbortSignals(input.abortSignal, activeRun.controller.signal) ??
-      activeRun.controller.signal
+    const abortSignalScope = createAbortSignalScope(input.abortSignal, activeRun.controller.signal)
     const context: RunExecutionContext = {
-      activeRun,
-      policy: input.policy,
-      signal,
+      signal: abortSignalScope.signal ?? activeRun.controller.signal,
       toolCatalog: this.toolCatalog,
       sequence: { current: 0 },
       pendingOperations: new Map(),
-      messageState: undefined,
+      destructiveOperationIds: new Set(),
     }
-
-    this.runContexts.set(activeRun.runId, context)
 
     try {
       activeRun.events.push({
@@ -355,21 +492,42 @@ class SessionRuntimeImpl implements SessionRuntime {
         timestamp: Date.now(),
       })
 
-      const workflowResult = await this.workflow.invoke(
-        {
-          sessionId: activeRun.sessionId,
-          runId: activeRun.runId,
-          messages: input.messages,
-          policy: input.policy,
-          systemPrompt: input.systemPrompt,
-          generationConfig: input.config,
-        },
-        {
-          signal,
-        }
-      )
+      const result = await this.executeDeepagentsTurn(activeRun, input, context)
+      const finalMessage = result.finalMessage
+      const completedRunMetadata = writeRunRuntimeMetadata(runSnapshot.metadata, {
+        engine: this.engine,
+        threadId: result.threadId,
+        checkpointId: result.checkpointId,
+      })
 
-      const finalMessage = workflowResult.finalMessage
+      if (result.interrupts !== undefined && result.interrupts.length > 0) {
+        // deepagents 进入 HITL 中断时将其映射为 cancelled run，并持久化恢复所需 checkpoint/interrupt 信息。
+        const interruptedRunSnapshot: RunSnapshot = {
+          ...runSnapshot,
+          status: 'cancelled',
+          updatedAt: Date.now(),
+          cancelPoint: 'human-in-the-loop',
+          pendingOperations: [...context.pendingOperations.values()],
+          resumeHint: 'require-user-confirmation',
+          workflowState: writeDeepagentsRunWorkflowState({
+            threadId: result.threadId,
+            checkpointId: result.checkpointId,
+            interrupts: result.interrupts,
+          }),
+          metadata: completedRunMetadata,
+        }
+
+        await this.snapshotStore.saveRun(interruptedRunSnapshot)
+
+        activeRun.events.push({
+          type: 'run.cancelled',
+          runId: activeRun.runId,
+          sessionId: activeRun.sessionId,
+          timestamp: Date.now(),
+        })
+        activeRun.events.close()
+        return
+      }
 
       if (finalMessage === undefined) {
         throw new ProviderError(
@@ -389,6 +547,7 @@ class SessionRuntimeImpl implements SessionRuntime {
         messages: nextSessionSnapshot.messages,
         updatedAt: Date.now(),
         pendingOperations: [...context.pendingOperations.values()],
+        metadata: completedRunMetadata,
       }
 
       await this.snapshotStore.saveSession(nextSessionSnapshot)
@@ -402,14 +561,14 @@ class SessionRuntimeImpl implements SessionRuntime {
       })
       activeRun.events.close()
     } catch (error) {
-      if (isCancellationError(error, signal)) {
+      if (isCancellationError(error, context.signal)) {
         const cancelledRunSnapshot: RunSnapshot = {
           ...runSnapshot,
           status: 'cancelled',
           updatedAt: Date.now(),
           cancelPoint: 'assistant_turn',
           pendingOperations: [...context.pendingOperations.values()],
-          resumeHint: hasSideEffect(context.pendingOperations)
+          resumeHint: hasSideEffect(context.pendingOperations, context.destructiveOperationIds)
             ? 'require-user-confirmation'
             : 'replay',
         }
@@ -447,237 +606,56 @@ class SessionRuntimeImpl implements SessionRuntime {
         activeRun.events.fail(resolvedError)
       }
     } finally {
-      this.runContexts.delete(activeRun.runId)
+      abortSignalScope.cleanup()
       this.activeRuns.delete(activeRun.runId)
     }
   }
 
-  private async executeAssistantTurn(
-    state: RuntimeWorkflowState
-  ): Promise<Pick<RuntimeWorkflowState, 'finalMessage' | 'response'>> {
-    const context = this.runContexts.get(state.runId)
+  private async executeDeepagentsTurn(
+    activeRun: ActiveRun,
+    input: ExecuteRunInput,
+    context: RunExecutionContext
+  ): Promise<{
+    finalMessage?: AppMessage
+    threadId: string
+    checkpointId?: string
+    interrupts?: readonly DeepagentsInterruptRecord[]
+  }> {
+    const deepagents = this.options.deepagents
 
-    if (context === undefined) {
+    if (deepagents === undefined) {
       throw new TianjiError(
         'state',
-        'RUN_CONTEXT_NOT_FOUND',
-        `Missing execution context for run \"${state.runId}\"`
+        'MISSING_DEEPAGENTS_CONFIG',
+        'deepagents configuration is required when engine is set to deepagents'
       )
     }
 
-    const messageId = `msg_${randomUUID()}`
-    const messageStartedAt = Date.now()
-    const initialMessage: AppMessage = {
-      id: messageId,
-      role: 'assistant',
-      content: [],
-      createdAt: messageStartedAt,
-    }
-
-    context.activeRun.events.push({
-      type: 'message.started',
-      runId: state.runId,
-      messageId,
-      message: initialMessage,
-      timestamp: messageStartedAt,
+    return executeDeepagentsRun({
+      sessionId: activeRun.sessionId,
+      runId: activeRun.runId,
+      messages: input.messages,
+      signal: context.signal,
+      policy: input.policy,
+      config: input.config,
+      systemPrompt: input.systemPrompt,
+      deepagents,
+      threadId: input.threadId,
+      checkpointId: input.checkpointId,
+      resumeValue: input.resumeValue,
+      toolCatalog: context.toolCatalog,
+      pendingOperations: context.pendingOperations,
+      destructiveOperationIds: context.destructiveOperationIds,
+      sequence: context.sequence,
+      emitEvent: (event) => activeRun.events.push(event),
     })
-
-    const llmStream = await this.options.llmGateway.stream(this.buildLlmRequest(state, context))
-
-    llmStream.onEvent((event: SessionRuntimeLlmStreamEvent) => {
-      if (event.type !== 'delta' || event.payload.isFinal || event.payload.delta.length === 0) {
-        return
-      }
-
-      const timestamp = Date.now()
-      const delta: MessageDelta = {
-        runId: state.runId,
-        messageId,
-        sequence: nextSequence(context.sequence),
-        op: 'append',
-        channel: 'text',
-        payload: event.payload.delta,
-        timestamp,
-      }
-
-      context.messageState = applyMessageDelta(context.messageState, delta)
-      context.activeRun.events.push({
-        type: 'message.delta',
-        runId: state.runId,
-        messageId,
-        sequence: delta.sequence,
-        channel: 'text',
-        payload: { content: event.payload.delta },
-        timestamp,
-      })
-    })
-
-    const response = await llmStream.waitUntilComplete()
-    const completedState = applyMessageDelta(context.messageState, {
-      runId: state.runId,
-      messageId,
-      sequence: nextSequence(context.sequence),
-      op: 'complete',
-      channel: 'text',
-      payload: '',
-      timestamp: Date.now(),
-    })
-
-    const finalMessage = buildAssistantMessage(
-      messageId,
-      messageStartedAt,
-      completedState?.message,
-      response.content
-    )
-
-    context.activeRun.events.push({
-      type: 'message.completed',
-      runId: state.runId,
-      messageId,
-      message: finalMessage,
-      timestamp: Date.now(),
-    })
-
-    return {
-      finalMessage,
-      response,
-    }
-  }
-
-  private buildLlmRequest(state: RuntimeWorkflowState, context: RunExecutionContext) {
-    const toolSpecs = context.toolCatalog.getToolSpecs()
-
-    return {
-      runId: state.runId,
-      messages: state.messages,
-      config: state.generationConfig,
-      systemPrompt: state.systemPrompt,
-      tools: toolSpecs,
-      executeTool:
-        toolSpecs.length === 0
-          ? undefined
-          : async (
-              toolName: string,
-              args: unknown,
-              options: { toolCallId: string; abortSignal?: AbortSignal }
-            ) =>
-              this.executeToolCall(state, context, {
-                toolCallId: options.toolCallId,
-                toolName,
-                args,
-              }),
-      abortSignal: context.signal,
-    }
-  }
-
-  private async executeToolCall(
-    state: RuntimeWorkflowState,
-    context: RunExecutionContext,
-    invocation: ToolInvocation
-  ): Promise<unknown> {
-    const definition = context.toolCatalog.getTool(invocation.toolName)
-
-    if (definition === undefined) {
-      throw new ToolError('TOOL_NOT_FOUND', `Tool \"${invocation.toolName}\" is not registered`)
-    }
-
-    ensureToolAllowed(definition, context.policy.tool.allowDestructive)
-
-    const timestamp = Date.now()
-    context.pendingOperations.set(invocation.toolCallId, {
-      id: invocation.toolCallId,
-      invocation,
-      status: 'running',
-      timestamp,
-    })
-    context.activeRun.events.push({
-      type: 'tool.started',
-      runId: state.runId,
-      toolCallId: invocation.toolCallId,
-      invocation,
-      timestamp,
-    })
-
-    try {
-      const result = await executeWithTimeout(
-        () =>
-          context.toolCatalog.executeTool(invocation, {
-            sessionId: state.sessionId,
-            runId: state.runId,
-            toolCallId: invocation.toolCallId,
-            abortSignal: context.signal,
-          }),
-        context.policy.tool.timeoutMs,
-        context.signal
-      )
-
-      const completedResult: ToolResult = {
-        toolCallId: invocation.toolCallId,
-        result,
-      }
-
-      context.pendingOperations.set(invocation.toolCallId, {
-        id: invocation.toolCallId,
-        invocation,
-        status: 'completed',
-        timestamp,
-      })
-      context.activeRun.events.push({
-        type: 'tool.completed',
-        runId: state.runId,
-        toolCallId: invocation.toolCallId,
-        result: completedResult,
-        timestamp: Date.now(),
-      })
-
-      return result
-    } catch (error) {
-      if (isCancellationError(error, context.signal)) {
-        context.pendingOperations.set(invocation.toolCallId, {
-          id: invocation.toolCallId,
-          invocation,
-          status:
-            definition.sideEffect === 'destructive' ? 'aborted-with-side-effect' : 'aborted-clean',
-          timestamp,
-        })
-        throw new CancelledError('RUN_CANCELLED', 'Run cancelled during tool execution', {
-          cause: toError(error),
-        })
-      }
-
-      const resolvedError =
-        error instanceof ToolError
-          ? error
-          : error instanceof TimeoutError
-            ? new ToolError('TOOL_TIMEOUT', error.message, { cause: error })
-            : new ToolError('TOOL_EXECUTION_FAILED', toError(error).message, {
-                cause: toError(error),
-              })
-
-      context.pendingOperations.set(invocation.toolCallId, {
-        id: invocation.toolCallId,
-        invocation,
-        status:
-          definition.sideEffect === 'destructive' ? 'aborted-with-side-effect' : 'aborted-clean',
-        timestamp,
-      })
-      context.activeRun.events.push({
-        type: 'tool.failed',
-        runId: state.runId,
-        toolCallId: invocation.toolCallId,
-        invocation,
-        error: resolvedError,
-        timestamp: Date.now(),
-      })
-      throw resolvedError
-    }
   }
 
   private async requireSessionSnapshot(sessionId: SessionId): Promise<SessionSnapshot> {
     const snapshot = await this.snapshotStore.loadSession(sessionId)
 
     if (snapshot === undefined) {
-      throw new TianjiError('state', 'SESSION_NOT_FOUND', `Session \"${sessionId}\" does not exist`)
+      throw new TianjiError('state', 'SESSION_NOT_FOUND', `Session "${sessionId}" does not exist`)
     }
 
     return snapshot
@@ -687,7 +665,7 @@ class SessionRuntimeImpl implements SessionRuntime {
     const snapshot = await this.snapshotStore.loadRun(runId)
 
     if (snapshot === undefined) {
-      throw new TianjiError('state', 'RUN_NOT_FOUND', `Run \"${runId}\" does not exist`)
+      throw new TianjiError('state', 'RUN_NOT_FOUND', `Run "${runId}" does not exist`)
     }
 
     return snapshot
@@ -718,95 +696,61 @@ function isToolCatalog(value: SessionRuntimeOptions['toolCatalog']): value is To
   return value !== undefined && !Array.isArray(value) && !(value instanceof ToolRegistry)
 }
 
-function buildAssistantMessage(
-  messageId: string,
-  createdAt: number,
-  aggregatedMessage: AppMessage | undefined,
-  finalContent: string
-): AppMessage {
-  const aggregatedText = readTextContent(aggregatedMessage)
-
-  if (aggregatedMessage !== undefined && aggregatedText === finalContent) {
-    return aggregatedMessage
-  }
-
-  return {
-    id: messageId,
-    role: 'assistant',
-    content: finalContent.length === 0 ? [] : [{ type: 'text', text: finalContent }],
-    createdAt,
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
 }
 
-function readTextContent(message: AppMessage | undefined): string {
-  if (message === undefined) {
-    return ''
+function isDeepagentsInterruptRecord(value: unknown): value is DeepagentsInterruptRecord {
+  if (!isRecord(value)) {
+    return false
   }
 
-  return message.content
-    .filter(
-      (part): part is Extract<AppMessage['content'][number], { type: 'text' }> =>
-        part.type === 'text'
-    )
-    .map((part) => part.text)
-    .join('')
+  return (
+    (value.id === undefined || typeof value.id === 'string') &&
+    ('value' in value || value.value === undefined)
+  )
 }
 
-function mergeAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
+function createAbortSignalScope(...signals: Array<AbortSignal | undefined>): AbortSignalScope {
   const activeSignals = signals.filter((signal): signal is AbortSignal => signal !== undefined)
 
   if (activeSignals.length === 0) {
-    return undefined
+    return {
+      signal: undefined,
+      cleanup: () => {},
+    }
   }
 
   if (activeSignals.length === 1) {
-    return activeSignals[0]
+    return {
+      signal: activeSignals[0],
+      cleanup: () => {},
+    }
   }
 
   const controller = new AbortController()
-  const abort = (): void => controller.abort()
 
-  for (const signal of activeSignals) {
-    if (signal.aborted) {
-      controller.abort()
-      return controller.signal
+  if (activeSignals.some((signal) => signal.aborted)) {
+    controller.abort()
+    return {
+      signal: controller.signal,
+      cleanup: () => {},
     }
+  }
 
+  const listeners = activeSignals.map((signal) => {
+    const abort = (): void => controller.abort()
     signal.addEventListener('abort', abort, { once: true })
-  }
+    return { signal, abort }
+  })
 
-  return controller.signal
-}
-
-async function executeWithTimeout<T>(
-  operation: () => Promise<T>,
-  timeoutMs: number,
-  abortSignal?: AbortSignal
-): Promise<T> {
-  if (timeoutMs <= 0) {
-    return operation()
-  }
-
-  const timeoutController = new AbortController()
-  const signal = mergeAbortSignals(abortSignal, timeoutController.signal)
-  const timeoutId = setTimeout(() => timeoutController.abort(), timeoutMs)
-
-  try {
-    if (signal?.aborted && !timeoutController.signal.aborted) {
-      throw new CancelledError('RUN_CANCELLED', 'Run cancelled before tool execution started')
-    }
-
-    return await operation()
-  } catch (error) {
-    if (timeoutController.signal.aborted && !(abortSignal?.aborted ?? false)) {
-      throw new TimeoutError('TOOL_TIMEOUT', `Tool execution exceeded ${timeoutMs}ms`, {
-        cause: toError(error),
-      })
-    }
-
-    throw error
-  } finally {
-    clearTimeout(timeoutId)
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      for (const listener of listeners) {
+        listener.signal.removeEventListener('abort', listener.abort)
+      }
+    },
   }
 }
 
@@ -828,11 +772,6 @@ function toTianjiError(error: unknown): TianjiError {
   })
 }
 
-function nextSequence(sequence: { current: number }): number {
-  sequence.current += 1
-  return sequence.current
-}
-
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
@@ -842,10 +781,13 @@ function isCancellationError(error: unknown, signal?: AbortSignal): boolean {
 }
 
 function hasSideEffect(
-  pendingOperations: Map<string, RunSnapshot['pendingOperations'][number]>
+  pendingOperations: Map<string, RunSnapshot['pendingOperations'][number]>,
+  destructiveOperationIds: ReadonlySet<string>
 ): boolean {
   return [...pendingOperations.values()].some(
-    (operation) => operation.status === 'aborted-with-side-effect'
+    (operation) =>
+      operation.status === 'aborted-with-side-effect' ||
+      (operation.status === 'completed' && destructiveOperationIds.has(operation.id))
   )
 }
 
@@ -874,8 +816,113 @@ function ensureSessionOpen(snapshot: SessionSnapshot): void {
     throw new TianjiError(
       'state',
       'SESSION_CLOSED',
-      `Session \"${snapshot.sessionId}\" has been closed`
+      `Session "${snapshot.sessionId}" has been closed`
     )
+  }
+}
+
+function ensureSessionEngineMatches(
+  snapshot: SessionSnapshot,
+  expectedEngine: SessionRuntimeEngine
+): void {
+  const storedEngine = readSessionRuntimeMetadata(snapshot.metadata)?.engine ?? 'legacy'
+
+  if (storedEngine !== expectedEngine) {
+    throw new TianjiError(
+      'state',
+      'SESSION_ENGINE_MISMATCH',
+      `Session "${snapshot.sessionId}" is bound to runtime engine "${storedEngine}", but the current runtime is using "${expectedEngine}"`
+    )
+  }
+}
+
+function ensureRunEngineMatches(snapshot: RunSnapshot, expectedEngine: SessionRuntimeEngine): void {
+  const storedEngine = readRunRuntimeMetadata(snapshot.metadata)?.engine ?? 'legacy'
+
+  if (storedEngine === expectedEngine) {
+    return
+  }
+
+  throw new TianjiError(
+    'state',
+    'SESSION_ENGINE_MISMATCH',
+    `Run "${snapshot.runId}" is bound to runtime engine "${storedEngine}", but the current runtime is using "${expectedEngine}"`
+  )
+}
+
+function readRuntimeMetadataRecord(
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  const runtime = metadata?.runtime
+
+  if (typeof runtime !== 'object' || runtime === null || Array.isArray(runtime)) {
+    return undefined
+  }
+
+  return runtime as Record<string, unknown>
+}
+
+function readRuntimeEngine(
+  metadata: Record<string, unknown> | undefined
+): SessionRuntimeEngine | undefined {
+  const engine = readRuntimeMetadataRecord(metadata)?.engine
+
+  return engine === 'legacy' || engine === 'deepagents' ? engine : undefined
+}
+
+function readRequestedEngine(options: SessionRuntimeOptions): SessionRuntimeEngine | undefined {
+  const engine = (options as Record<string, unknown>).engine
+
+  return engine === 'legacy' || engine === 'deepagents' ? engine : undefined
+}
+
+function writeSessionRuntimeMetadata(
+  metadata: Record<string, unknown> | undefined,
+  runtimeMetadata: SessionRuntimeMetadata
+): Record<string, unknown> {
+  return {
+    ...(metadata ?? {}),
+    runtime: {
+      ...(readRuntimeMetadataRecord(metadata) ?? {}),
+      engine: runtimeMetadata.engine,
+    },
+  }
+}
+
+function writeRunRuntimeMetadata(
+  metadata: Record<string, unknown> | undefined,
+  runtimeMetadata: RunRuntimeMetadata
+): Record<string, unknown> {
+  const nextRuntimeMetadata: Record<string, unknown> = {
+    ...(readRuntimeMetadataRecord(metadata) ?? {}),
+    engine: runtimeMetadata.engine,
+  }
+
+  if (runtimeMetadata.threadId !== undefined) {
+    nextRuntimeMetadata.threadId = runtimeMetadata.threadId
+  }
+
+  if (runtimeMetadata.checkpointId !== undefined) {
+    nextRuntimeMetadata.checkpointId = runtimeMetadata.checkpointId
+  }
+
+  return {
+    ...(metadata ?? {}),
+    runtime: nextRuntimeMetadata,
+  }
+}
+
+function writeDeepagentsRunWorkflowState(
+  state: Omit<DeepagentsRunWorkflowState, 'kind'>
+): DeepagentsRunWorkflowState {
+  return {
+    kind: 'deepagents-interrupt',
+    threadId: state.threadId,
+    checkpointId: state.checkpointId,
+    interrupts: state.interrupts.map((interrupt) => ({
+      id: interrupt.id,
+      value: interrupt.value,
+    })),
   }
 }
 
@@ -889,4 +936,30 @@ function readStoredGenerationConfig(
 ): LlmGenerationConfig | undefined {
   const config = metadata?.generationConfig
   return typeof config === 'object' && config !== null ? (config as LlmGenerationConfig) : undefined
+}
+
+function hasConfiguredDeepagentsModel(
+  deepagents: SessionRuntimeOptions['deepagents']
+): deepagents is SessionRuntimeDeepagentsConfig {
+  if (deepagents === undefined) {
+    return false
+  }
+
+  if (typeof deepagents.model === 'string') {
+    return deepagents.model.length > 0
+  }
+
+  return deepagents.model !== undefined
+}
+
+function hasInterruptConfiguration(
+  deepagents: SessionRuntimeDeepagentsConfig | undefined
+): boolean {
+  return deepagents?.interruptOn !== undefined && Object.keys(deepagents.interruptOn).length > 0
+}
+
+function hasConfiguredDeepagentsCheckpointer(
+  deepagents: SessionRuntimeDeepagentsConfig | undefined
+): boolean {
+  return deepagents?.checkpointer !== undefined && deepagents.checkpointer !== false
 }

@@ -1,5 +1,16 @@
+/**
+ * runtime 包根入口回归测试。
+ *
+ * 业务职责：
+ * - 校验 @tianji/runtime 的公共导出、类型边界与 package.json 对外声明保持一致。
+ * - 防止后续重构破坏入口可导入性或引入未授权依赖。
+ *
+ * 对外触点：
+ * - 直接校验 ../index.js 公共入口。
+ * - 读取 ../../package.json 验证 exports 与 dependencies 边界。
+ */
+import { FakeListChatModel } from '@langchain/core/utils/testing'
 import { createRunId, createSessionId } from '@tianji/contracts'
-import type { LlmRequest, LlmResponse } from '@tianji/llm'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -9,6 +20,7 @@ import {
   ToolRegistry,
   createSessionRuntime,
   ensureToolAllowed,
+  readDeepagentsRunWorkflowState,
 } from '../index.js'
 import type {
   CreateSessionOptions,
@@ -29,28 +41,6 @@ interface PackageJson {
       readonly types: string
       readonly import: string
     }
-  }
-}
-
-function createMockResponse(content: string): LlmResponse {
-  return {
-    content,
-    usage: {
-      inputTokens: 1,
-      outputTokens: 1,
-      totalTokens: 2,
-      cost: {
-        currency: 'USD',
-        inputCost: 0,
-        outputCost: 0,
-        totalCost: 0,
-        pricingSource: 'unavailable',
-      },
-    },
-    meta: { provider: 'openai', model: 'fake' },
-    finishReason: 'stop',
-    toolCalls: [],
-    toolResults: [],
   }
 }
 
@@ -87,12 +77,8 @@ describe('@tianji/runtime', () => {
     }
     const toolCatalog: ToolCatalog = new ToolRegistry([toolDefinition]).createCatalog()
     const runtimeOptions: SessionRuntimeOptions = {
-      llmGateway: {
-        stream: async (_request: LlmRequest) => ({
-          onEvent: () => {},
-          abort: () => {},
-          waitUntilComplete: async () => createMockResponse('hello from runtime'),
-        }),
+      deepagents: {
+        model: new FakeListChatModel({ responses: ['hello from runtime'] }),
       },
       snapshotStore: new InMemorySnapshotStore(),
       toolCatalog: [toolDefinition],
@@ -112,6 +98,7 @@ describe('@tianji/runtime', () => {
     }
     const resumeRunOptions: ResumeRunOptions = {
       runId: executionContext.runId,
+      resumeValue: { decisions: [{ type: 'approve' }] },
     }
     const runtime: SessionRuntime = createSessionRuntime(runtimeOptions)
     const eventStream = new ReplayableEventStream<number>()
@@ -130,6 +117,7 @@ describe('@tianji/runtime', () => {
     expect(createSessionOptions.sessionId).toBe(executionContext.sessionId)
     expect(runTurnOptions.sessionId).toBe(executionContext.sessionId)
     expect(resumeRunOptions.runId).toBe(executionContext.runId)
+    expect(readDeepagentsRunWorkflowState(undefined)).toBeUndefined()
     expect(replayedValues).toEqual([1])
   })
 
@@ -148,11 +136,13 @@ describe('@tianji/runtime', () => {
     expect(dependencies['@tianji/llm']).toBe('workspace:*')
     expect(dependencies['@tianji/shared']).toBe('workspace:*')
     expect(dependencyNames).toEqual([
-      '@langchain/core',
       '@langchain/langgraph',
+      '@langchain/core',
       '@tianji/contracts',
       '@tianji/llm',
       '@tianji/shared',
+      'deepagents',
+      'langchain',
     ])
     expect(dependencyNames).not.toContain('ai')
   })

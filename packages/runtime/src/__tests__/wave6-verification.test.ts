@@ -1,3 +1,14 @@
+/**
+ * foundation wave 6 依赖边界验证测试。
+ *
+ * 业务职责：
+ * - 校验 contracts、shared、llm、runtime 四个内部包之间的依赖约束。
+ * - 防止内部包图出现循环依赖，保证分层稳定。
+ *
+ * 对外触点：
+ * - 读取各包 package.json 声明。
+ * - 通过本地图遍历验证 @tianji/* 依赖关系。
+ */
 import { describe, expect, it } from 'vitest'
 
 interface PackageJson {
@@ -77,7 +88,7 @@ describe('foundation wave 6 verification', () => {
     expect(sharedDependencies.filter((dependency) => dependency.startsWith('@tianji/'))).toEqual([])
     expect(llmDependencies.filter((dependency) => dependency.startsWith('@langchain/'))).toEqual([])
     expect(runtimeDependencies).toContain('@langchain/core')
-    expect(runtimeDependencies).toContain('@langchain/langgraph')
+    expect(runtimeDependencies).toContain('deepagents')
     expect(runtimeDependencies).not.toContain('ai')
   })
 
