@@ -12,7 +12,10 @@
 
 ## 当前公开内容
 
-- 运行时入口与类型：`createSessionRuntime`、`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`、`readSessionRuntimeMetadata`、`readRunRuntimeMetadata`、`readDeepagentsRunWorkflowState`
+- 运行时入口：`createSessionRuntime`
+- 运行时接口与配置类型：`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`
+- Metadata 读取：`readSessionRuntimeMetadata`、`readRunRuntimeMetadata`、`readDeepagentsRunWorkflowState`
+- Metadata 类型：`SessionRuntimeMetadata`、`RunRuntimeMetadata`、`DeepagentsRunWorkflowState`、`DeepagentsInterruptRecord`
 - 事件流：`ReplayableEventStream`
 - 快照持久化：`SnapshotStore`、`InMemorySnapshotStore`、`FileSnapshotStore`
 - 工具注册与策略校验：`ToolRegistry`、`ensureToolAllowed`、`RuntimeToolDefinition`、`RuntimeToolExecutionContext`、`RuntimeToolSideEffect`、`ToolCatalog`
@@ -52,6 +55,14 @@ void runtime
 - `interruptOn` 现在支持真实 checkpoint 恢复，但必须与 `checkpointer` 一起使用；被中断的 run 会把 checkpoint 信息写入 runtime metadata，并把 interrupt payload 写入 `RunSnapshot.workflowState`。
 - 当 run 因 HITL 中断而暂停时，调用方应先读取 `readRunRuntimeMetadata(run.metadata)` 和 `readDeepagentsRunWorkflowState(run.workflowState)`，再通过 `resumeRun({ runId, resumeValue })` 提交与上游 LangGraph `Command({ resume })` 兼容的 JSON 值。
 - `readSessionRuntimeMetadata` 与 `readRunRuntimeMetadata` 仍会识别 legacy metadata，便于校验历史快照、迁移脚本和只读兼容测试。
+
+## 主要依赖
+
+- `deepagents` — 运行时执行引擎
+- `@langchain/langgraph` / `@langchain/core` / `langchain` — LangGraph 状态机与 checkpoint 基础设施
+- `@tianji/contracts` — 公共领域协议（快照、事件、错误、策略类型）
+- `@tianji/llm` — LLM 接入层（generation config 类型）
+- `@tianji/shared` — 共享配置模型与工具函数
 
 ## 开发命令
 

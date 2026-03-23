@@ -66,14 +66,15 @@ LLM 接入层，提供统一的 provider-agnostic gateway 抽象，当前公开�
 
 ### `@tianji/runtime`
 
-会话运行时包，负责管理 session 与执行过程，当前公开能力包括：
+会话运行时包，负责管理 session 与执行过程。v2 公共 API 已收敛到 deepagents-native 配置面，运行时执行引擎为 deepagents-only，历史 legacy snapshot 仅通过 metadata helper 提供只读兼容。当前公开能力包括：
 
-- `createSessionRuntime`
-- `ReplayableEventStream`
-- `FileSnapshotStore` / `InMemorySnapshotStore`
-- `ToolRegistry`、工具权限校验与相关运行时类型
+- 运行时入口与类型：`createSessionRuntime`、`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`
+- Metadata 读取：`readSessionRuntimeMetadata`、`readRunRuntimeMetadata`、`readDeepagentsRunWorkflowState`
+- 事件流：`ReplayableEventStream`
+- 快照持久化：`SnapshotStore`、`InMemorySnapshotStore`、`FileSnapshotStore`
+- 工具注册与策略校验：`ToolRegistry`、`ensureToolAllowed`、`ToolCatalog` 及相关运行时类型
 
-该包是编排层与运行时状态的核心承载位置。
+该包是编排层与运行时状态的核心承载位置。`SessionRuntimeOptions` 默认围绕 `deepagents` 配置块组织，支持 model、middleware、subagents、skills、interruptOn 等字段；`snapshotStore` 与 `toolCatalog` 继续作为稳定公共 API 暴露。
 
 ## 开发命令
 
