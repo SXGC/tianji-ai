@@ -109,6 +109,16 @@ interface AbortSignalScope {
   readonly cleanup: () => void
 }
 
+/**
+ * 执行一次 deepagents 运行并将其完整映射为 RuntimeEvent / RunResult。
+ *
+ * 处理流程：
+ * 1. 校验运行配置并初始化 assistant 消息占位。
+ * 2. 创建 deepagents agent，并把运行时工具目录包装为 deepagents tools。
+ * 3. 消费流式事件，持续转发文本增量，同时记录模型侧观测到的工具调用。
+ * 4. 在运行结束后读取 checkpoint 状态，识别 interrupt / checkpoint 元数据。
+ * 5. 若存在 interrupt，则返回恢复所需信息；否则产出最终 assistant 消息。
+ */
 export async function executeDeepagentsRun(
   options: ExecuteDeepagentsRunOptions
 ): Promise<DeepagentsRunResult> {
@@ -231,6 +241,10 @@ export async function executeDeepagentsRun(
   }
 }
 
+/**
+ * 将一次运行请求转换为 deepagents 可接受的输入。
+ * 恢复执行时优先构造 Command.resume；普通执行则把历史消息序列转换为 deepagents messages。
+ */
 function readDeepagentsInput(options: ExecuteDeepagentsRunOptions): unknown {
   if (options.resumeValue !== undefined) {
     return new Command({ resume: options.resumeValue })
@@ -241,6 +255,9 @@ function readDeepagentsInput(options: ExecuteDeepagentsRunOptions): unknown {
   }
 }
 
+/**
+ * 在启用 checkpointer 时回读 deepagents 状态快照，用于提取 checkpoint 与 interrupt 信息。
+ */
 async function maybeReadDeepagentsStateSnapshot(
   agent: DeepagentsAgentInstance,
   options: ExecuteDeepagentsRunOptions,
@@ -257,6 +274,10 @@ async function maybeReadDeepagentsStateSnapshot(
   })
 }
 
+/**
+ * 从 LangGraph 状态快照中提取运行恢复所需的 thread_id、checkpoint_id 与 interrupt 列表。
+ * 这里会容错 deepagents 返回的松散结构，统一回落到运行时可消费的稳定元数据格式。
+ */
 function readDeepagentsStateMetadata(
   snapshot: StateSnapshot,
   fallbackThreadId: string
@@ -285,6 +306,9 @@ function readDeepagentsStateMetadata(
   }
 }
 
+/**
+ * 读取 StateSnapshot.config.configurable；结构不符合预期时返回 undefined。
+ */
 function readConfigurableState(
   config: StateSnapshot['config']
 ): Record<string, unknown> | undefined {
@@ -295,6 +319,9 @@ function readConfigurableState(
   return config.configurable
 }
 
+/**
+ * 判断某个 interrupt 记录是否满足 runtime 侧可接受的最小结构。
+ */
 function isDeepagentsInterruptRecord(value: unknown): value is DeepagentsInterruptRecord {
   if (!isRecord(value)) {
     return false
@@ -306,6 +333,10 @@ function isDeepagentsInterruptRecord(value: unknown): value is DeepagentsInterru
   )
 }
 
+/**
+ * 根据运行时工具目录创建 deepagents 工具列表。
+ * 每个 deepagents tool 最终都会回流到 runtime 的 executeTool 流程，以复用统一的权限、超时、取消和事件分发逻辑。
+ */
 function createDeepagentsTools(
   options: ExecuteDeepagentsRunOptions,
   observedToolCalls: DeepagentsPendingToolCall[]
@@ -325,6 +356,15 @@ function createDeepagentsTools(
   )
 }
 
+/**
+ * 执行一次来自 deepagents 的工具调用，并把运行时事件、挂起状态与错误语义同步到平台侧。
+ *
+ * 关键职责：
+ * - 校验工具是否存在且是否允许执行破坏性操作。
+ * - 结合模型流式观测结果复用 toolCallId，保证事件与快照中的工具调用可关联。
+ * - 在统一超时/取消控制下执行工具，并维护 pendingOperations 的状态迁移。
+ * - 将原始错误归一化为 contracts 中定义的 ToolError / CancelledError / TimeoutError。
+ */
 async function executeDeepagentsToolCall(
   options: ExecuteDeepagentsRunOptions,
   observedToolCalls: DeepagentsPendingToolCall[],
@@ -443,6 +483,9 @@ async function executeDeepagentsToolCall(
   }
 }
 
+/**
+ * 合并模型流式阶段观测到的工具调用片段，逐步补全参数文本并生成可比较的参数对象。
+ */
 function registerObservedToolCalls(
   chunk: unknown,
   observedToolCalls: DeepagentsPendingToolCall[]
@@ -466,6 +509,9 @@ function registerObservedToolCalls(
   }
 }
 
+/**
+ * 优先复用模型侧已观测到的 toolCallId；匹配失败时退化为生成本地 ID。
+ */
 function resolveToolCallId(
   observedToolCalls: DeepagentsPendingToolCall[],
   toolName: string,
@@ -487,6 +533,9 @@ function resolveToolCallId(
   return `tool_${randomUUID()}`
 }
 
+/**
+ * 将 AppMessage 压平为 deepagents 只接受的 role + string content 结构。
+ */
 function convertAppMessageToDeepagentsMessage(message: AppMessage): {
   readonly role: 'user' | 'assistant' | 'system'
   readonly content: string
@@ -497,6 +546,9 @@ function convertAppMessageToDeepagentsMessage(message: AppMessage): {
   }
 }
 
+/**
+ * 序列化单个消息片段，尽量保留文本语义，并为图片/工具调用生成可读占位文本。
+ */
 function serializeDeepagentsMessagePart(part: AppMessage['content'][number]): string {
   if (part.type === 'text') {
     return part.text
@@ -516,6 +568,9 @@ function serializeDeepagentsMessagePart(part: AppMessage['content'][number]): st
   return `[tool-call id=${part.toolCallId} name=${part.toolName} args=${stableSerialize(part.args)}]`
 }
 
+/**
+ * 从 data URI 中提取 mime type；不是 data URI 或格式非法时返回 undefined。
+ */
 function readDataUriMimeType(url: string): string | undefined {
   if (!url.startsWith('data:')) {
     return undefined
@@ -532,6 +587,9 @@ function readDataUriMimeType(url: string): string | undefined {
   return mimeType.length > 0 ? mimeType : undefined
 }
 
+/**
+ * 从 deepagents 最终输出中提取最后一条 assistant 文本；若提取失败则回退到流式聚合文本。
+ */
 function buildAssistantMessageFromDeepagentsOutput(
   messageId: string,
   createdAt: number,
@@ -546,6 +604,9 @@ function buildAssistantMessageFromDeepagentsOutput(
   return buildAssistantMessage(messageId, createdAt, extractedText ?? aggregatedText)
 }
 
+/**
+ * 构造标准 assistant 消息对象，并在空文本时保持 content 为空数组。
+ */
 function buildAssistantMessage(messageId: string, createdAt: number, content: string): AppMessage {
   return {
     id: messageId,
@@ -555,6 +616,9 @@ function buildAssistantMessage(messageId: string, createdAt: number, content: st
   }
 }
 
+/**
+ * 读取单个模型流式 chunk 中的文本增量。
+ */
 function readChunkText(chunk: unknown): string {
   if (isRecord(chunk) && typeof chunk.content === 'string') {
     return chunk.content
@@ -564,6 +628,9 @@ function readChunkText(chunk: unknown): string {
   return typeof kwargs?.content === 'string' ? kwargs.content : ''
 }
 
+/**
+ * 读取 chunk 中按片段返回的 tool_call_chunks。
+ */
 function readToolCallChunks(chunk: unknown): Array<Record<string, unknown>> {
   if (isRecord(chunk) && Array.isArray(chunk.tool_call_chunks)) {
     return chunk.tool_call_chunks.filter(isRecord)
@@ -579,6 +646,9 @@ function readToolCallChunks(chunk: unknown): Array<Record<string, unknown>> {
   return toolCallChunks.filter(isRecord)
 }
 
+/**
+ * 读取 chunk 中已聚合完成的 tool_calls。
+ */
 function readToolCalls(chunk: unknown): Array<Record<string, unknown>> {
   if (isRecord(chunk) && Array.isArray(chunk.tool_calls)) {
     return chunk.tool_calls.filter(isRecord)
@@ -594,6 +664,9 @@ function readToolCalls(chunk: unknown): Array<Record<string, unknown>> {
   return toolCalls.filter(isRecord)
 }
 
+/**
+ * 从 chunk 中提取 runtime 可跟踪的工具调用观测记录，兼容增量片段和完整调用两种格式。
+ */
 function readObservedToolCalls(chunk: unknown): DeepagentsPendingToolCall[] {
   const chunkCalls = readToolCallChunks(chunk).map((toolCallChunk) => ({
     toolCallId:
@@ -627,6 +700,9 @@ function readObservedToolCalls(chunk: unknown): DeepagentsPendingToolCall[] {
   })
 }
 
+/**
+ * 读取 chunk.kwargs，并确保其为对象结构。
+ */
 function readChunkKwargs(chunk: unknown): Record<string, unknown> | undefined {
   if (!isRecord(chunk)) {
     return undefined
@@ -635,6 +711,9 @@ function readChunkKwargs(chunk: unknown): Record<string, unknown> | undefined {
   return isRecord(chunk.kwargs) ? chunk.kwargs : undefined
 }
 
+/**
+ * 提取 deepagents 最终消息中的文本内容。
+ */
 function readFinalOutputText(message: unknown): string | undefined {
   if (!isRecord(message)) {
     return undefined
@@ -648,6 +727,9 @@ function readFinalOutputText(message: unknown): string | undefined {
   return typeof kwargs?.content === 'string' ? kwargs.content : undefined
 }
 
+/**
+ * 解析工具参数字符串；无法解析为 JSON 时保留原始字符串。
+ */
 function parseToolArgs(value: string): unknown {
   if (value.length === 0) {
     return undefined
@@ -660,6 +742,10 @@ function parseToolArgs(value: string): unknown {
   }
 }
 
+/**
+ * 以稳定顺序序列化任意值，供工具参数比较和日志占位使用。
+ * 该实现额外处理 bigint、循环引用与对象键排序，避免相同语义对象因键顺序不同而无法匹配。
+ */
 function stableSerialize(value: unknown): string {
   if (value === undefined) {
     return 'undefined'
@@ -696,6 +782,9 @@ function stableSerialize(value: unknown): string {
   }
 }
 
+/**
+ * 递归前对对象键排序，保证 JSON 序列化结果稳定。
+ */
 function sortJsonKeys(_key: string, value: unknown): unknown {
   if (!isRecord(value) || Array.isArray(value)) {
     return value
@@ -709,15 +798,27 @@ function sortJsonKeys(_key: string, value: unknown): unknown {
     }, {})
 }
 
+/**
+ * 判断值是否为非 null 对象。
+ */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
+/**
+ * 递增并返回事件序号。
+ */
 function nextSequence(sequence: { current: number }): number {
   sequence.current += 1
   return sequence.current
 }
 
+/**
+ * 在统一取消信号之上为异步操作叠加超时控制。
+ *
+ * 该函数会把外部取消与内部 timeout 合并为单个 abortSignal，使用 Promise.race 抢占结果，
+ * 并在 finally 中清理所有监听器，避免长生命周期会话中出现事件监听泄漏。
+ */
 async function executeWithTimeout<T>(
   operation: (abortSignal?: AbortSignal) => Promise<T>,
   timeoutMs: number,
@@ -769,14 +870,23 @@ async function executeWithTimeout<T>(
   }
 }
 
+/**
+ * 判断错误是否可视为取消中断。
+ */
 function isCancellationError(error: unknown, signal?: AbortSignal): boolean {
   return error instanceof CancelledError || isAbortError(error) || Boolean(signal?.aborted)
 }
 
+/**
+ * 判断错误是否为标准 AbortError。
+ */
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError'
 }
 
+/**
+ * 将未知错误规范化为 Error 实例。
+ */
 function toError(error: unknown): Error {
   if (error instanceof Error) {
     return error
@@ -785,6 +895,10 @@ function toError(error: unknown): Error {
   return new Error(String(error))
 }
 
+/**
+ * 合并多个 AbortSignal，并返回可清理的监听作用域。
+ * 只要任一信号中断，合成信号就会立刻中断；cleanup 用于移除注册的事件监听器。
+ */
 function createAbortSignalScope(...signals: Array<AbortSignal | undefined>): AbortSignalScope {
   const activeSignals = signals.filter((signal): signal is AbortSignal => signal !== undefined)
 
@@ -828,6 +942,9 @@ function createAbortSignalScope(...signals: Array<AbortSignal | undefined>): Abo
   }
 }
 
+/**
+ * 解析 checkpointer 配置，占位配置或无效值时返回 undefined。
+ */
 function resolveDeepagentsCheckpointer(value: SessionRuntimeDeepagentsConfig['checkpointer']) {
   if (value === undefined || typeof value === 'boolean') {
     return value
@@ -840,6 +957,9 @@ function resolveDeepagentsCheckpointer(value: SessionRuntimeDeepagentsConfig['ch
   return value
 }
 
+/**
+ * 解析 middleware 配置并复制数组，避免调用方后续修改原始引用。
+ */
 function resolveDeepagentsMiddleware(value: SessionRuntimeDeepagentsConfig['middleware']) {
   if (value === undefined || value.length === 0) {
     return undefined
@@ -848,6 +968,9 @@ function resolveDeepagentsMiddleware(value: SessionRuntimeDeepagentsConfig['midd
   return [...value]
 }
 
+/**
+ * 解析 subagents 配置并复制数组，避免共享可变引用。
+ */
 function resolveDeepagentsSubagents(value: SessionRuntimeDeepagentsConfig['subagents']) {
   if (value === undefined || value.length === 0) {
     return undefined
@@ -856,6 +979,9 @@ function resolveDeepagentsSubagents(value: SessionRuntimeDeepagentsConfig['subag
   return [...value]
 }
 
+/**
+ * 解析 store 配置，占位配置时返回 undefined。
+ */
 function resolveDeepagentsStore(value: SessionRuntimeDeepagentsConfig['store']) {
   if (value === undefined || isPlaceholderConfig(value)) {
     return undefined
@@ -864,6 +990,9 @@ function resolveDeepagentsStore(value: SessionRuntimeDeepagentsConfig['store']) 
   return value
 }
 
+/**
+ * 解析 backend 配置，过滤 null / 占位配置。
+ */
 function resolveDeepagentsBackend(value: SessionRuntimeDeepagentsConfig['backend']) {
   if (value === undefined || value === null || isPlaceholderConfig(value)) {
     return undefined
@@ -872,6 +1001,9 @@ function resolveDeepagentsBackend(value: SessionRuntimeDeepagentsConfig['backend
   return value
 }
 
+/**
+ * 深拷贝 interruptOn 配置，避免 deepagents 在运行期间修改调用方传入对象。
+ */
 function resolveDeepagentsInterruptOn(value: SessionRuntimeDeepagentsConfig['interruptOn']) {
   if (value === undefined) {
     return undefined
@@ -894,10 +1026,16 @@ function resolveDeepagentsInterruptOn(value: SessionRuntimeDeepagentsConfig['int
   )
 }
 
+/**
+ * 判断配置对象是否为 runtime 内部占位标记。
+ */
 function isPlaceholderConfig(value: unknown): value is { readonly kind: string } {
   return isRecord(value) && typeof value.kind === 'string'
 }
 
+/**
+ * 判断 deepagents.model 是否已配置。
+ */
 function hasDeepagentsModel(value: SessionRuntimeDeepagentsConfig['model']): boolean {
   if (typeof value === 'string') {
     return value.length > 0
@@ -906,6 +1044,9 @@ function hasDeepagentsModel(value: SessionRuntimeDeepagentsConfig['model']): boo
   return value !== undefined
 }
 
+/**
+ * 判断当前运行是否启用了可读取状态的 checkpointer。
+ */
 function hasConfiguredDeepagentsCheckpointer(
   value: SessionRuntimeDeepagentsConfig['checkpointer']
 ): boolean {
