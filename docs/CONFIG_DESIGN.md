@@ -1,137 +1,137 @@
-# Tianji AI Configuration Design v1
+# Tianji AI 配置设计 v1
 
-> Status: Draft v1  
-> Scope: Detailed configuration mechanics for `tianji-ai`  
-> Related: [`./ARCHITECTURE_V1.md`](./ARCHITECTURE_V1.md)
+> 状态：Draft v1  
+> 范围：`tianji-ai` 的详细配置机制  
+> 相关文档：[`./ARCHITECTURE_V1.md`](./ARCHITECTURE_V1.md)
 
 ---
 
-## 1. Purpose
+## 1. 目的
 
-This document defines **how configuration is stored, loaded, merged, validated, and resolved** in `tianji-ai`.
+本文档定义了 `tianji-ai` 中配置是如何被**存储、加载、合并、校验与解析**的。
 
-The main architecture document remains the source of truth for:
+主架构文档仍然是以下内容的唯一事实来源：
 
-- ownership boundaries
-- runtime invariants
+- 归属边界
+- 运行时不变量
 - cancellation / snapshot truth
-- delta / event semantics
-- tool path-security rules
+- delta / event 语义
+- 工具路径安全规则
 
-This document focuses on the operational mechanics of configuration.
-
----
-
-## 2. Design Principles
-
-1. **Configuration is JSON-first**  
-   User-visible configuration lives in JSON files, not scattered environment variables.
-
-2. **Secrets are env-backed**  
-   Sensitive values are injected from environment variables via placeholders.
-
-3. **Runtime resolves configuration once**  
-   `packages/runtime` is the only component that merges config layers and resolves placeholders.
-
-4. **Schema lives in `packages/shared`**  
-   Type definitions, validation schemas, migration helpers, and placeholder syntax rules are defined in `packages/shared`.
-
-5. **Later layers override earlier layers**  
-   Override behavior is deterministic and field-based.
+本文聚焦于配置的操作机制。
 
 ---
 
-## 3. Configuration Layers
+## 2. 设计原则
 
-`tianji-ai` uses three JSON config layers.
+1. **配置以 JSON 为核心**  
+   面向用户的配置存放在 JSON 文件中，而不是分散在各处的环境变量里。
 
-### 3.1 Project Layer
+2. **密钥由环境变量承载**  
+   敏感值通过占位符从环境变量中注入。
 
-Path:
+3. **运行时只解析一次配置**  
+   `packages/runtime` 是唯一负责合并配置层并解析占位符的组件。
+
+4. **Schema 位于 `packages/shared`**  
+   类型定义、校验 schema、迁移辅助工具以及占位符语法规则都定义在 `packages/shared` 中。
+
+5. **后置层覆盖前置层**  
+   覆盖行为是确定性的，并且基于字段路径进行处理。
+
+---
+
+## 3. 配置层
+
+`tianji-ai` 使用三层 JSON 配置。
+
+### 3.1 项目层
+
+路径：
 
 ```text
 <project-root>/tianji.config.json
 ```
 
-Role:
+作用：
 
-- project defaults
-- team-shared behavior
-- default model routing
-- default tool policy
-- default observer settings
+- 项目默认值
+- 团队共享行为
+- 默认模型路由
+- 默认工具策略
+- 默认 observer 设置
 
-This is the **factory/default** configuration for a repository.
+这是仓库的**工厂默认**配置。
 
-### 3.2 User Layer
+### 3.2 用户层
 
-Path:
+路径：
 
 ```text
 ~/.config/tianji-ai/tianji.json
 ```
 
-Role:
+作用：
 
-- user-wide overrides
-- personal defaults across repositories
-- preferred providers, UI-related defaults, personal non-secret settings
+- 用户级覆盖
+- 跨仓库的个人默认值
+- 偏好的 provider、UI 相关默认值、个人非敏感设置
 
-This layer overrides the project layer.
+这一层会覆盖项目层。
 
-### 3.3 Workspace Layer
+### 3.3 工作区层
 
-Path:
+路径：
 
 ```text
 ~/.config/tianji-ai/workspaces/<workspace-id>.json
 ```
 
-Role:
+作用：
 
-- workspace-specific overrides
-- repo-local user behavior
-- local exceptions for tools, models, or runtime settings
+- 工作区特定覆盖
+- 仓库本地的用户行为
+- 针对工具、模型或运行时设置的本地例外
 
-This layer overrides both project and user layers.
+这一层会同时覆盖项目层和用户层。
 
 ---
 
-## 4. Precedence Rules
+## 4. 优先级规则
 
-From low to high priority:
+从低到高的优先级顺序：
 
-1. project layer
-2. user layer
-3. workspace layer
+1. 项目层
+2. 用户层
+3. 工作区层
 
-In shorthand:
+简写为：
 
 > **project < user < workspace**
 
-Rules:
+规则：
 
-- later layers overwrite earlier fields with the same path
-- absent fields fall back to lower layers
-- invalid higher-layer config must fail validation rather than silently falling back
-- runtime must expose the final resolved view as `ResolvedConfig`
+- 后置层会覆盖前置层中相同路径的字段
+- 缺失字段会回退到更低优先级的层
+- 更高优先级层中的非法配置必须直接校验失败，而不是静默回退
+- 运行时必须将最终解析结果以 `ResolvedConfig` 形式暴露出来
 
 ---
 
-## 5. Environment Variable Placeholders
+## 5. 环境变量占位符
 
-Environment variables are **not a fourth config layer**.
+环境变量**不是第四层配置**。
 
-They are only used for:
+它们只用于：
 
-- API keys
-- tokens / secrets
-- sensitive endpoints / credentials
-- optional bootstrap values (for example, a custom config path)
+- API key
+- token / secret
+- 敏感 endpoint / 凭据
+- 可选的启动参数值（例如自定义配置路径）
 
-### 5.1 Placeholder Syntax
+### 5.1 占位符语法
 
-JSON may reference env values using placeholders:
+JSON 可以通过占位符引用环境变量值：
 
 ```json
 {
@@ -145,69 +145,69 @@ JSON may reference env values using placeholders:
 }
 ```
 
-Suggested v1 syntax:
+建议的 v1 语法：
 
 - `${env:VAR_NAME}`
 
-v1 does **not** need a full template language. A single explicit env placeholder syntax is enough.
+v1 **不需要**完整的模板语言。一个明确的环境变量占位符语法就足够了。
 
-### 5.2 Resolution Rules
+### 5.2 解析规则
 
-Runtime resolves placeholders **after JSON merge, before final config becomes active**.
+运行时会在 **JSON 合并之后、最终配置生效之前** 解析占位符。
 
-Rules:
+规则：
 
-- unresolved placeholder => configuration error
-- empty string env value is treated as an explicit resolved value, not “missing”
-- placeholders are only resolved in string values
-- resolved secret values must not be written back to JSON files
-- logs and diagnostics must redact resolved secret values
-
----
-
-## 6. Runtime Loading Pipeline
-
-The runtime loader should execute the following pipeline:
-
-1. read project config JSON
-2. read user config JSON
-3. read workspace config JSON
-4. merge them in precedence order
-5. validate merged raw structure against schema
-6. resolve `${env:VAR_NAME}` placeholders
-7. build `ResolvedConfig`
-8. distribute `ResolvedConfig` to `llm`, `tools-node`, `observer`, and apps
-
-Important:
-
-- merging and env resolution must happen in one central loader
-- internal packages must not independently read config files or env
-- runtime should expose both the raw-source metadata and the resolved config snapshot for diagnostics
+- 未解析的占位符 => 配置错误
+- 空字符串环境变量值视为显式解析值，而不是“缺失”
+- 只在字符串值中解析占位符
+- 解析后的敏感值不得回写到 JSON 文件
+- 日志和诊断信息必须对解析后的敏感值进行脱敏
 
 ---
 
-## 7. Workspace ID Mapping
+## 6. 运行时加载流水线
 
-`<workspace-id>` should be derived from the workspace root path using a stable mapping.
+运行时加载器应执行以下流水线：
 
-Requirements:
+1. 读取项目配置 JSON
+2. 读取用户配置 JSON
+3. 读取工作区配置 JSON
+4. 按优先级顺序合并
+5. 使用 schema 校验合并后的原始结构
+6. 解析 `${env:VAR_NAME}` 占位符
+7. 构建 `ResolvedConfig`
+8. 将 `ResolvedConfig` 分发给 `llm`、`tools-node`、`observer` 和应用
 
-- same workspace path always maps to the same ID
-- different workspace paths must not collide in practice
-- ID must be filesystem-safe
+重要说明：
 
-Recommended pattern:
-
-- normalized absolute workspace path
-- hashed into a short stable identifier
-
-The human-readable source path should remain visible in metadata for debugging.
+- 合并和环境变量解析必须在一个中心化加载器中完成
+- 内部包不得各自独立读取配置文件或环境变量
+- 运行时应同时暴露原始来源元数据与解析后的配置快照，供诊断使用
 
 ---
 
-## 8. Suggested Top-Level Config Shape
+## 7. 工作区 ID 映射
 
-The exact schema may evolve, but v1 should converge around a shape similar to:
+`<workspace-id>` 应基于工作区根路径通过稳定映射生成。
+
+要求：
+
+- 相同工作区路径始终映射到相同 ID
+- 不同工作区路径在实践中不得发生冲突
+- ID 必须可安全用于文件系统
+
+推荐模式：
+
+- 归一化后的工作区绝对路径
+- 哈希为一个稳定且简短的标识符
+
+为了便于调试，人类可读的源路径应继续保留在元数据中。
+
+---
+
+## 8. 建议的顶层配置结构
+
+精确 schema 后续可能演进，但 v1 应收敛到类似如下的结构：
 
 ```json
 {
@@ -249,39 +249,39 @@ The exact schema may evolve, but v1 should converge around a shape similar to:
 }
 ```
 
-This example is illustrative, not normative for every default value.
+这个示例仅用于说明，并不对每个默认值做强制规定。
 
 ---
 
-## 9. Merge Semantics
+## 9. 合并语义
 
-Suggested v1 semantics:
+建议的 v1 语义：
 
-- **object fields**: deep merge
-- **scalar fields**: replace
-- **arrays**: replace by default
+- **对象字段**：深度合并
+- **标量字段**：替换
+- **数组**：默认整体替换
 
-Why arrays replace instead of merge:
+数组采用替换而不是合并的原因：
 
-- simpler to reason about
-- avoids accidental deny/allow list duplication
-- easier to debug effective configuration
+- 更容易理解
+- 可避免 deny/allow 列表的意外重复
+- 更容易调试最终生效配置
 
-If future use cases require smarter merges, they should be introduced field-by-field rather than globally.
+如果未来用例需要更智能的合并策略，应按字段逐项引入，而不是全局启用。
 
 ---
 
-## 10. Validation and Error Handling
+## 10. 校验与错误处理
 
-Validation must fail fast when:
+以下情况必须快速失败：
 
-- JSON is malformed
-- unknown required structure is missing
-- placeholder syntax is invalid
-- env placeholder is unresolved
-- a higher-precedence config introduces invalid data
+- JSON 格式非法
+- 未知的必需结构缺失
+- 占位符语法非法
+- 环境变量占位符未解析
+- 更高优先级配置引入了非法数据
 
-Recommended error categories:
+建议的错误分类：
 
 - `config.parse_error`
 - `config.schema_error`
@@ -289,35 +289,35 @@ Recommended error categories:
 - `config.env_missing`
 - `config.workspace_resolution_error`
 
-Diagnostics should report:
+诊断信息应报告：
 
-- which file contributed the invalid field
-- field path
-- expected type or rule
-- whether the error happened before or after env resolution
-
----
-
-## 11. Non-Goals for v1
-
-v1 does **not** aim to provide:
-
-- dynamic remote config service
-- hot reload across all runtimes
-- arbitrary expression language inside JSON
-- role-based multi-tenant config inheritance
-- plugin-defined config files scattered across packages
+- 哪个文件提供了非法字段
+- 字段路径
+- 期望类型或规则
+- 错误发生在环境变量解析之前还是之后
 
 ---
 
-## 12. Summary
+## 11. v1 非目标
 
-`tianji-ai` v1 uses:
+v1 **不**打算提供：
 
-- **three JSON config layers** for defaults and overrides
-- **env placeholders** for sensitive values
-- **runtime-owned resolution** for final effective config
+- 动态远程配置服务
+- 覆盖所有运行时的热重载
+- JSON 内任意表达式语言
+- 基于角色的多租户配置继承
+- 分散在各包中的插件自定义配置文件
 
-In one line:
+---
 
-> Project defaults live in `tianji.config.json`, user and workspace JSON files override them, and runtime resolves env placeholders into a single `ResolvedConfig`.
+## 12. 总结
+
+`tianji-ai` v1 使用：
+
+- **三层 JSON 配置**来承载默认值与覆盖项
+- **环境变量占位符**来承载敏感值
+- **由 runtime 持有的解析流程**来生成最终生效配置
+
+一句话概括：
+
+> 项目默认值位于 `tianji.config.json`，用户和工作区 JSON 文件在其之上进行覆盖，最终由 runtime 将环境变量占位符解析为统一的 `ResolvedConfig`。
