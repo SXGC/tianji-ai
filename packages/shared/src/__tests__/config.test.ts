@@ -1,7 +1,13 @@
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_AGENTS_CONFIG,
+  DEFAULT_AGENT_CONFIG,
   DEFAULT_OBSERVER_CONFIG,
   DEFAULT_PATH_POLICY_CONFIG,
+  DEFAULT_PROVIDERS_CONFIG,
   DEFAULT_RETRY_CONFIG,
   DEFAULT_RUNTIME_CONFIG,
   DEFAULT_TIANJI_CONFIG,
@@ -9,8 +15,13 @@ import {
   type EnvResolver,
   type TianjiConfig,
   TianjiConfigSchema,
+  createDefaultUserTianjiConfig,
   extractEnvVarName,
+  getAgentSoulPath,
+  getDefaultAgentDefinition,
   isEnvPlaceholder,
+  loadAgentSoul,
+  parseAgentModelRef,
   resolveConfigPlaceholders,
   resolveEnvPlaceholder,
   safeValidateTianjiConfig,
@@ -94,39 +105,35 @@ describe('config', () => {
       return env[varName]
     }
 
-    it('should resolve placeholders in simple object', () => {
+    it('should resolve placeholders in provider config', () => {
       const config = {
-        llm: {
-          providers: {
-            openai: {
-              apiKey: '${env:OPENAI_API_KEY}',
-            },
+        providers: {
+          openai: {
+            apiKey: '${env:OPENAI_API_KEY}',
           },
         },
       }
 
       const result = resolveConfigPlaceholders(config, mockResolver)
-      expect(result.config.llm.providers.openai.apiKey).toBe('sk-test-key')
+      expect(result.config.providers.openai.apiKey).toBe('sk-test-key')
       expect(result.resolvedVars).toContain('OPENAI_API_KEY')
     })
 
     it('should resolve multiple placeholders', () => {
       const config = {
-        llm: {
-          providers: {
-            openai: {
-              apiKey: '${env:OPENAI_API_KEY}',
-            },
-            anthropic: {
-              apiKey: '${env:ANTHROPIC_API_KEY}',
-            },
+        providers: {
+          openai: {
+            apiKey: '${env:OPENAI_API_KEY}',
+          },
+          anthropic: {
+            apiKey: '${env:ANTHROPIC_API_KEY}',
           },
         },
       }
 
       const result = resolveConfigPlaceholders(config, mockResolver)
-      expect(result.config.llm.providers.openai.apiKey).toBe('sk-test-key')
-      expect(result.config.llm.providers.anthropic.apiKey).toBe('ant-test-key')
+      expect(result.config.providers.openai.apiKey).toBe('sk-test-key')
+      expect(result.config.providers.anthropic.apiKey).toBe('ant-test-key')
       expect(result.resolvedVars).toHaveLength(2)
     })
 
@@ -170,11 +177,9 @@ describe('config', () => {
 
     it('should throw for unresolved placeholder', () => {
       const config = {
-        llm: {
-          providers: {
-            openai: {
-              apiKey: '${env:UNDEFINED_VAR}',
-            },
+        providers: {
+          openai: {
+            apiKey: '${env:UNDEFINED_VAR}',
           },
         },
       }
@@ -186,17 +191,15 @@ describe('config', () => {
 
     it('should resolve empty string env value', () => {
       const config = {
-        llm: {
-          providers: {
-            test: {
-              apiKey: '${env:EMPTY_VAR}',
-            },
+        providers: {
+          test: {
+            apiKey: '${env:EMPTY_VAR}',
           },
         },
       }
 
       const result = resolveConfigPlaceholders(config, mockResolver)
-      expect(result.config.llm.providers.test.apiKey).toBe('')
+      expect(result.config.providers.test.apiKey).toBe('')
     })
   })
 
@@ -212,15 +215,22 @@ describe('config', () => {
 
     it('should validate complete config', () => {
       const config = {
-        llm: {
-          defaultProvider: 'openai',
-          defaultModel: 'gpt-4.1',
-          providers: {
-            openai: {
-              apiKey: 'sk-test',
+        providers: {
+          openai: {
+            apiKey: 'sk-test',
+          },
+          anthropic: {
+            apiKey: 'ant-test',
+          },
+        },
+        agents: {
+          defaultAgent: 'default',
+          items: {
+            default: {
+              model: 'openai/gpt-4.1',
             },
-            anthropic: {
-              apiKey: 'ant-test',
+            reviewer: {
+              model: 'anthropic/claude-3-7-sonnet',
             },
           },
         },
@@ -252,24 +262,40 @@ describe('config', () => {
 
     it('should validate config with placeholders', () => {
       const config = {
-        llm: {
-          providers: {
-            openai: {
-              apiKey: '${env:OPENAI_API_KEY}',
+        providers: {
+          openai: {
+            apiKey: '${env:OPENAI_API_KEY}',
+          },
+        },
+        agents: {
+          defaultAgent: 'default',
+          items: {
+            default: {
+              model: 'openai/gpt-4.1',
             },
           },
         },
       }
 
       const result = TianjiConfigSchema.parse(config)
-      expect(result.llm?.providers?.openai?.apiKey).toBe('${env:OPENAI_API_KEY}')
+      expect(result.providers?.openai?.apiKey).toBe('${env:OPENAI_API_KEY}')
     })
 
-    it('should reject invalid types', () => {
+    it('should reject invalid types and names', () => {
       expect(() =>
         TianjiConfigSchema.parse({
-          llm: {
-            defaultProvider: 123, // Should be string
+          providers: {
+            openai: {
+              apiKey: 123,
+            },
+          },
+        })
+      ).toThrow()
+
+      expect(() =>
+        TianjiConfigSchema.parse({
+          agents: {
+            defaultAgent: 'Default',
           },
         })
       ).toThrow()
@@ -278,7 +304,7 @@ describe('config', () => {
         TianjiConfigSchema.parse({
           runtime: {
             retry: {
-              maxAttempts: 'three', // Should be number
+              maxAttempts: 'three',
             },
           },
         })
@@ -289,20 +315,35 @@ describe('config', () => {
   describe('validateTianjiConfig', () => {
     it('should return typed config on valid input', () => {
       const config = {
-        llm: {
-          defaultProvider: 'openai',
+        providers: {
+          openai: {
+            apiKey: 'sk-test',
+          },
+        },
+        agents: {
+          defaultAgent: 'default',
+          items: {
+            default: {
+              model: 'openai/gpt-4.1',
+            },
+          },
         },
       }
 
       const result = validateTianjiConfig(config)
-      expect(result.llm?.defaultProvider).toBe('openai')
+      expect(result.agents?.defaultAgent).toBe('default')
     })
 
     it('should throw on invalid input', () => {
       expect(() =>
         validateTianjiConfig({
-          llm: {
-            defaultProvider: 123,
+          agents: {
+            defaultAgent: 'default',
+            items: {
+              default: {
+                model: 'openai/',
+              },
+            },
           },
         })
       ).toThrow()
@@ -312,25 +353,178 @@ describe('config', () => {
   describe('safeValidateTianjiConfig', () => {
     it('should return success true on valid input', () => {
       const config = {
-        llm: {
-          defaultProvider: 'openai',
+        agents: {
+          defaultAgent: 'default',
+          items: {
+            default: {
+              model: 'openai/gpt-4.1',
+            },
+          },
         },
       }
 
       const result = safeValidateTianjiConfig(config)
       expect(result.success).toBe(true)
       if (result.success) {
-        expect(result.data.llm?.defaultProvider).toBe('openai')
+        expect(result.data.agents?.defaultAgent).toBe('default')
       }
     })
 
     it('should return success false on invalid input', () => {
       const result = safeValidateTianjiConfig({
-        llm: {
-          defaultProvider: 123,
+        agents: {
+          defaultAgent: 'default',
+          items: {
+            default: {
+              model: 'openai/',
+            },
+          },
         },
       })
       expect(result.success).toBe(false)
+    })
+  })
+
+  describe('parseAgentModelRef', () => {
+    it('should parse provider and model name', () => {
+      expect(parseAgentModelRef('openai/gpt-4.1')).toEqual({
+        provider: 'openai',
+        modelName: 'gpt-4.1',
+      })
+    })
+
+    it('should split on the first slash only', () => {
+      expect(parseAgentModelRef('openai/responses/gpt-4.1')).toEqual({
+        provider: 'openai',
+        modelName: 'responses/gpt-4.1',
+      })
+    })
+
+    it('should reject missing provider', () => {
+      expect(() => parseAgentModelRef('/gpt-4.1')).toThrow('must include a provider before "/"')
+    })
+
+    it('should reject missing model name', () => {
+      expect(() => parseAgentModelRef('openai/')).toThrow('must include a model name after "/"')
+    })
+
+    it('should reject missing slash', () => {
+      expect(() => parseAgentModelRef('openai')).toThrow('must include "/"')
+    })
+  })
+
+  describe('getDefaultAgentDefinition', () => {
+    it('should return the configured default agent', () => {
+      const config: TianjiConfig = {
+        agents: {
+          defaultAgent: 'reviewer',
+          items: {
+            default: {
+              model: 'openai/gpt-4.1',
+            },
+            reviewer: {
+              model: 'anthropic/claude-3-7-sonnet',
+            },
+          },
+        },
+      }
+
+      expect(getDefaultAgentDefinition(config)).toEqual({
+        agentName: 'reviewer',
+        agent: {
+          model: 'anthropic/claude-3-7-sonnet',
+        },
+      })
+    })
+
+    it('should throw when agents.defaultAgent is missing', () => {
+      const config: TianjiConfig = {
+        agents: {
+          items: {
+            default: {
+              model: 'openai/gpt-4.1',
+            },
+          },
+        },
+      }
+
+      expect(() => getDefaultAgentDefinition(config)).toThrow(
+        'Missing agents.defaultAgent in Tianji config'
+      )
+    })
+
+    it('should throw when agents.items is missing', () => {
+      const config: TianjiConfig = {
+        agents: {
+          defaultAgent: 'default',
+        },
+      }
+
+      expect(() => getDefaultAgentDefinition(config)).toThrow(
+        'Missing agents.items in Tianji config'
+      )
+    })
+
+    it('should throw when the default item is missing', () => {
+      const config: TianjiConfig = {
+        agents: {
+          defaultAgent: 'default',
+          items: {
+            reviewer: {
+              model: 'openai/gpt-4.1',
+            },
+          },
+        },
+      }
+
+      expect(() => getDefaultAgentDefinition(config)).toThrow(
+        'Default agent "default" is not defined in agents.items'
+      )
+    })
+  })
+
+  describe('getAgentSoulPath', () => {
+    it('should build the conventional soul path', () => {
+      expect(getAgentSoulPath('/tmp/tianji', 'default')).toBe(
+        join('/tmp/tianji', 'agents', 'default', 'SOUL.md')
+      )
+    })
+  })
+
+  describe('loadAgentSoul', () => {
+    it('should read non-empty soul content', async () => {
+      const tempDir = await mkdtemp(join(tmpdir(), 'tianji-shared-'))
+
+      try {
+        const agentDir = join(tempDir, 'agents', 'default')
+        await mkdir(agentDir, { recursive: true })
+        const filePath = join(agentDir, 'SOUL.md')
+        await writeFile(filePath, '# Default Agent\n\nKeep answers concise.\n', 'utf8')
+
+        await expect(loadAgentSoul(filePath)).resolves.toBe(
+          '# Default Agent\n\nKeep answers concise.\n'
+        )
+      } finally {
+        await rm(tempDir, { recursive: true, force: true })
+      }
+    })
+
+    it('should reject empty or whitespace-only files', async () => {
+      const tempDir = await mkdtemp(join(tmpdir(), 'tianji-shared-'))
+
+      try {
+        const filePath = join(tempDir, 'SOUL.md')
+        await writeFile(filePath, '   \n\t', 'utf8')
+
+        await expect(loadAgentSoul(filePath)).rejects.toThrow('Agent soul file is empty')
+      } finally {
+        await rm(tempDir, { recursive: true, force: true })
+      }
+    })
+
+    it('should reject missing files', async () => {
+      const missingPath = join(tmpdir(), 'tianji-shared-missing', 'SOUL.md')
+      await expect(loadAgentSoul(missingPath)).rejects.toThrow('Agent soul file does not exist')
     })
   })
 
@@ -340,73 +534,75 @@ describe('config', () => {
       expect(DEFAULT_RETRY_CONFIG.baseDelayMs).toBe(300)
       expect(DEFAULT_RETRY_CONFIG.maxDelayMs).toBe(3000)
     })
-
-    it('should match CONFIG_DESIGN.md defaults', () => {
-      // From docs/CONFIG_DESIGN.md lines 224-227
-      expect(DEFAULT_RETRY_CONFIG.maxAttempts).toBe(2)
-      expect(DEFAULT_RETRY_CONFIG.baseDelayMs).toBe(300)
-      expect(DEFAULT_RETRY_CONFIG.maxDelayMs).toBe(3000)
-    })
   })
 
   describe('DEFAULT_PATH_POLICY_CONFIG', () => {
-    it('should have required fields', () => {
-      expect(Array.isArray(DEFAULT_PATH_POLICY_CONFIG.forbidDirectories)).toBe(true)
-      expect(Array.isArray(DEFAULT_PATH_POLICY_CONFIG.filenameDenyPatterns)).toBe(true)
-    })
-
-    it('should include common forbidden directories', () => {
+    it('should include safe path defaults', () => {
       expect(DEFAULT_PATH_POLICY_CONFIG.forbidDirectories).toContain('.git/')
       expect(DEFAULT_PATH_POLICY_CONFIG.forbidDirectories).toContain('node_modules/')
-    })
-
-    it('should include common deny patterns', () => {
       expect(DEFAULT_PATH_POLICY_CONFIG.filenameDenyPatterns).toContain('^\\.env($|\\.)')
       expect(DEFAULT_PATH_POLICY_CONFIG.filenameDenyPatterns).toContain('(^|/)id_rsa$')
     })
   })
 
   describe('DEFAULT_TOOL_CONFIG', () => {
-    it('should have required fields', () => {
+    it('should keep safe tool defaults', () => {
       expect(DEFAULT_TOOL_CONFIG.timeoutMs).toBe(120000)
       expect(DEFAULT_TOOL_CONFIG.maxConcurrency).toBe(4)
-      expect(DEFAULT_TOOL_CONFIG.allowDestructive).toBe(false)
-    })
-
-    it('should match CONFIG_DESIGN.md defaults', () => {
-      // From docs/CONFIG_DESIGN.md lines 229-233
-      expect(DEFAULT_TOOL_CONFIG.timeoutMs).toBe(120000)
-      expect(DEFAULT_TOOL_CONFIG.maxConcurrency).toBe(4)
-      expect(DEFAULT_TOOL_CONFIG.allowDestructive).toBe(false)
-    })
-
-    it('should have safe default for allowDestructive', () => {
       expect(DEFAULT_TOOL_CONFIG.allowDestructive).toBe(false)
     })
   })
 
+  describe('DEFAULT_RUNTIME_CONFIG', () => {
+    it('should keep retry and tool defaults', () => {
+      expect(DEFAULT_RUNTIME_CONFIG.retry).toEqual(DEFAULT_RETRY_CONFIG)
+      expect(DEFAULT_RUNTIME_CONFIG.tool).toEqual(DEFAULT_TOOL_CONFIG)
+    })
+  })
+
   describe('DEFAULT_OBSERVER_CONFIG', () => {
-    it('should have required fields', () => {
+    it('should keep observer defaults', () => {
       expect(DEFAULT_OBSERVER_CONFIG.enabled).toBe(true)
       expect(DEFAULT_OBSERVER_CONFIG.redactSecrets).toBe(true)
     })
+  })
 
-    it('should match CONFIG_DESIGN.md defaults', () => {
-      // From docs/CONFIG_DESIGN.md lines 245-248
-      expect(DEFAULT_OBSERVER_CONFIG.enabled).toBe(true)
-      expect(DEFAULT_OBSERVER_CONFIG.redactSecrets).toBe(true)
+  describe('default agent config helpers', () => {
+    it('should expose provider and agent defaults', () => {
+      expect(DEFAULT_PROVIDERS_CONFIG.openai.apiKey).toBe('${env:OPENAI_API_KEY}')
+      expect(DEFAULT_AGENT_CONFIG.model).toBe('openai/gpt-4.1')
+      expect(DEFAULT_AGENTS_CONFIG.defaultAgent).toBe('default')
+      expect(DEFAULT_AGENTS_CONFIG.items?.default).toEqual(DEFAULT_AGENT_CONFIG)
+    })
+
+    it('should create an isolated default user config', () => {
+      const created = createDefaultUserTianjiConfig()
+      created.providers = {
+        test: {
+          apiKey: 'overridden',
+        },
+      }
+
+      expect(DEFAULT_TIANJI_CONFIG.providers).toEqual(DEFAULT_PROVIDERS_CONFIG)
+      expect(created.providers).not.toEqual(DEFAULT_TIANJI_CONFIG.providers)
     })
   })
 
   describe('DEFAULT_TIANJI_CONFIG', () => {
     it('should have all top-level sections', () => {
-      expect(DEFAULT_TIANJI_CONFIG.llm).toBeDefined()
+      expect(DEFAULT_TIANJI_CONFIG.providers).toBeDefined()
+      expect(DEFAULT_TIANJI_CONFIG.agents).toBeDefined()
       expect(DEFAULT_TIANJI_CONFIG.runtime).toBeDefined()
       expect(DEFAULT_TIANJI_CONFIG.observer).toBeDefined()
     })
 
     it('should be valid against schema', () => {
       const result = TianjiConfigSchema.safeParse(DEFAULT_TIANJI_CONFIG)
+      expect(result.success).toBe(true)
+    })
+
+    it('should produce a valid user config factory result', () => {
+      const result = TianjiConfigSchema.safeParse(createDefaultUserTianjiConfig())
       expect(result.success).toBe(true)
     })
   })

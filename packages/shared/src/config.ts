@@ -7,6 +7,9 @@
  * Note: This module MUST NOT depend on any internal @tianji/* packages.
  */
 
+import { constants as fsConstants } from 'node:fs'
+import { access, readFile } from 'node:fs/promises'
+import { join } from 'node:path'
 import { z } from 'zod'
 
 // ============================================================================
@@ -212,34 +215,96 @@ export const RuntimeConfigSchema = z.object({
 export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>
 
 /**
- * Schema for a single LLM provider configuration.
+ * Safe agent name pattern used by both config schema and file path helpers.
  */
-export const LlmProviderConfigSchema = z
+export const AGENT_NAME_PATTERN = /^[a-z0-9][a-z0-9-_]*$/
+
+function getAgentNameValidationError(agentName: string): string | null {
+  if (!AGENT_NAME_PATTERN.test(agentName)) {
+    return `Agent name "${agentName}" must match ${AGENT_NAME_PATTERN}`
+  }
+
+  return null
+}
+
+function getAgentModelRefValidationError(modelRef: string): string | null {
+  const slashIndex = modelRef.indexOf('/')
+
+  if (slashIndex === -1) {
+    return 'agents.items.<name>.model must include "/" and use "provider/modelName" format'
+  }
+
+  if (slashIndex === 0) {
+    return 'agents.items.<name>.model must include a provider before "/"'
+  }
+
+  if (slashIndex === modelRef.length - 1) {
+    return 'agents.items.<name>.model must include a model name after "/"'
+  }
+
+  return null
+}
+
+/**
+ * Schema for a single provider connection configuration.
+ */
+export const TianjiProviderConfigSchema = z
   .object({
     apiKey: z.string().optional(),
     // Allow additional provider-specific options
   })
   .passthrough()
 
-export type LlmProviderConfig = z.infer<typeof LlmProviderConfigSchema>
+export type TianjiProviderConfig = z.infer<typeof TianjiProviderConfigSchema>
 
 /**
- * Schema for LLM providers map.
+ * Schema for provider configuration map.
  */
-export const LlmProvidersConfigSchema = z.record(z.string(), LlmProviderConfigSchema)
+export const TianjiProvidersConfigSchema = z.record(z.string(), TianjiProviderConfigSchema)
 
-export type LlmProvidersConfig = z.infer<typeof LlmProvidersConfigSchema>
+export type TianjiProvidersConfig = z.infer<typeof TianjiProvidersConfigSchema>
 
 /**
- * Schema for LLM configuration.
+ * Schema for the `provider/modelName` model reference string.
  */
-export const LlmConfigSchema = z.object({
-  defaultProvider: z.string().optional(),
-  defaultModel: z.string().optional(),
-  providers: LlmProvidersConfigSchema.optional(),
+export const AgentModelRefSchema = z
+  .string()
+  .refine((value) => getAgentModelRefValidationError(value) === null, {
+    message: 'agents.items.<name>.model must use "provider/modelName" format',
+  })
+
+export type AgentModelRef = z.infer<typeof AgentModelRefSchema>
+
+/**
+ * Schema for a single agent configuration.
+ */
+export const TianjiAgentConfigSchema = z.object({
+  model: AgentModelRefSchema,
 })
 
-export type LlmConfig = z.infer<typeof LlmConfigSchema>
+export type TianjiAgentConfig = z.infer<typeof TianjiAgentConfigSchema>
+
+/**
+ * Schema for the agent configuration collection.
+ */
+export const TianjiAgentsConfigSchema = z.object({
+  defaultAgent: z
+    .string()
+    .refine((value) => getAgentNameValidationError(value) === null, {
+      message: `Agent names must match ${AGENT_NAME_PATTERN}`,
+    })
+    .optional(),
+  items: z
+    .record(
+      z.string().refine((value) => getAgentNameValidationError(value) === null, {
+        message: `Agent names must match ${AGENT_NAME_PATTERN}`,
+      }),
+      TianjiAgentConfigSchema
+    )
+    .optional(),
+})
+
+export type TianjiAgentsConfig = z.infer<typeof TianjiAgentsConfigSchema>
 
 /**
  * Schema for observer configuration.
@@ -258,7 +323,8 @@ export type ObserverConfig = z.infer<typeof ObserverConfigSchema>
  * All fields are optional to support partial configurations across layers.
  */
 export const TianjiConfigSchema = z.object({
-  llm: LlmConfigSchema.optional(),
+  providers: TianjiProvidersConfigSchema.optional(),
+  agents: TianjiAgentsConfigSchema.optional(),
   runtime: RuntimeConfigSchema.optional(),
   observer: ObserverConfigSchema.optional(),
 })
@@ -338,19 +404,168 @@ export const DEFAULT_OBSERVER_CONFIG: Required<ObserverConfig> = {
 }
 
 /**
- * Default LLM configuration.
+ * Default provider configuration.
  */
-export const DEFAULT_LLM_CONFIG: LlmConfig = {
-  defaultProvider: undefined,
-  defaultModel: undefined,
-  providers: {},
+export const DEFAULT_PROVIDERS_CONFIG: TianjiProvidersConfig = {
+  openai: {
+    apiKey: '${env:OPENAI_API_KEY}',
+  },
+}
+
+/**
+ * Default agent configuration.
+ */
+export const DEFAULT_AGENT_CONFIG: TianjiAgentConfig = {
+  model: 'openai/gpt-4.1',
+}
+
+/**
+ * Default agents configuration.
+ */
+export const DEFAULT_AGENTS_CONFIG: TianjiAgentsConfig = {
+  defaultAgent: 'default',
+  items: {
+    default: {
+      ...DEFAULT_AGENT_CONFIG,
+    },
+  },
 }
 
 /**
  * Full default tianji-ai configuration.
  */
 export const DEFAULT_TIANJI_CONFIG: TianjiConfig = {
-  llm: DEFAULT_LLM_CONFIG,
+  providers: DEFAULT_PROVIDERS_CONFIG,
+  agents: DEFAULT_AGENTS_CONFIG,
   runtime: DEFAULT_RUNTIME_CONFIG,
   observer: DEFAULT_OBSERVER_CONFIG,
+}
+
+/**
+ * Creates a fresh default user configuration object that is safe to mutate.
+ *
+ * This helper is intended for first-run config initialization where callers
+ * need a writable object without sharing references to exported default
+ * configuration constants.
+ *
+ * @returns A deep-cloned default Tianji configuration object
+ */
+export function createDefaultUserTianjiConfig(): TianjiConfig {
+  return structuredClone(DEFAULT_TIANJI_CONFIG)
+}
+
+/**
+ * Parses an agent model reference into provider and model name parts.
+ *
+ * The parser only splits on the first `/` so that model names can continue to
+ * contain nested path segments in the future.
+ *
+ * @param modelRef - The raw `provider/modelName` reference from config
+ * @returns The parsed provider name and model name
+ * @throws Error if the reference is missing `/`, provider, or model name
+ */
+export function parseAgentModelRef(modelRef: string): {
+  provider: string
+  modelName: string
+} {
+  const validationError = getAgentModelRefValidationError(modelRef)
+  if (validationError !== null) {
+    throw new Error(`Invalid agent model reference "${modelRef}": ${validationError}`)
+  }
+
+  const slashIndex = modelRef.indexOf('/')
+
+  return {
+    provider: modelRef.slice(0, slashIndex),
+    modelName: modelRef.slice(slashIndex + 1),
+  }
+}
+
+/**
+ * Resolves the configured default agent definition.
+ *
+ * This helper centralizes the explicit error semantics needed by higher-level
+ * loaders so they do not need to duplicate missing-field checks.
+ *
+ * @param config - The validated or partially merged Tianji config
+ * @returns The default agent name and its resolved configuration object
+ * @throws Error if `agents.defaultAgent`, `agents.items`, or the default item is missing
+ */
+export function getDefaultAgentDefinition(config: TianjiConfig): {
+  agentName: string
+  agent: TianjiAgentConfig
+} {
+  const defaultAgent = config.agents?.defaultAgent
+  if (defaultAgent === undefined) {
+    throw new Error('Missing agents.defaultAgent in Tianji config')
+  }
+
+  const agentItems = config.agents?.items
+  if (agentItems === undefined) {
+    throw new Error('Missing agents.items in Tianji config')
+  }
+
+  const agent = agentItems[defaultAgent]
+  if (agent === undefined) {
+    throw new Error(`Default agent "${defaultAgent}" is not defined in agents.items`)
+  }
+
+  return {
+    agentName: defaultAgent,
+    agent,
+  }
+}
+
+/**
+ * Builds the conventional `SOUL.md` path for a named agent.
+ *
+ * @param configDir - The root Tianji config directory
+ * @param agentName - The agent name that owns the soul file
+ * @returns The absolute or relative `agents/<name>/SOUL.md` path
+ * @throws Error if the agent name is not a safe filesystem name
+ */
+export function getAgentSoulPath(configDir: string, agentName: string): string {
+  const validationError = getAgentNameValidationError(agentName)
+  if (validationError !== null) {
+    throw new Error(validationError)
+  }
+
+  return join(configDir, 'agents', agentName, 'SOUL.md')
+}
+
+/**
+ * Loads and validates an agent `SOUL.md` file.
+ *
+ * The helper ensures the file exists, is readable, and contains at least one
+ * non-whitespace character so downstream runtime code can rely on meaningful
+ * content.
+ *
+ * @param filePath - The `SOUL.md` file path to read
+ * @returns The raw file contents
+ * @throws Error if the file does not exist, is unreadable, or is empty
+ */
+export async function loadAgentSoul(filePath: string): Promise<string> {
+  try {
+    await access(filePath, fsConstants.F_OK)
+  } catch (error) {
+    const errorCode = error instanceof Error && 'code' in error ? error.code : undefined
+    if (errorCode === 'ENOENT') {
+      throw new Error(`Agent soul file does not exist: ${filePath}`)
+    }
+
+    throw new Error(`Agent soul file is not readable: ${filePath}`)
+  }
+
+  try {
+    await access(filePath, fsConstants.R_OK)
+  } catch {
+    throw new Error(`Agent soul file is not readable: ${filePath}`)
+  }
+
+  const content = await readFile(filePath, 'utf8')
+  if (content.trim().length === 0) {
+    throw new Error(`Agent soul file is empty: ${filePath}`)
+  }
+
+  return content
 }
