@@ -1,8 +1,8 @@
 # tianji-ai
 
-`tianji-ai` 是一个基于 `pnpm` 和 `turbo` 的 TypeScript monorepo，用于构建 AI 会话运行时、公共协议、配置模型、LLM 接入层与命令行应用。
+`tianji-ai` 是一个基于 `pnpm` 和 `turbo` 的 TypeScript monorepo，用于构建 AI 会话运行时、共享协议与配置模型，以及命令行应用。
 
-当前仓库包含 `contracts`、`shared`、`llm`、`runtime` 四个核心 package，以及 `apps/cli` 命令行应用。
+当前仓库包含 `shared`、`runtime`、`agent` 三个核心 package，以及 `apps/cli` 命令行应用。
 
 ## 当前范围
 
@@ -21,8 +21,7 @@ tianji-ai/
 │  ├─ ARCHITECTURE_V1.md
 │  └─ CONFIG_DESIGN.md
 ├─ packages/
-│  ├─ contracts/
-│  ├─ llm/
+│  ├─ agent/
 │  ├─ runtime/
 │  └─ shared/
 ├─ biome.json
@@ -34,41 +33,21 @@ tianji-ai/
 
 ## 核心包说明
 
-### `@tianji/contracts`
-
-公共领域协议包，负责定义系统对外共享的核心类型，包含：
-
-- `SessionId` / `ThreadId` / `RunId` 等标识符
-- `AppMessage`、`MessagePart` 等消息模型
-- `RuntimeEvent`、`ToolSpec`、`ToolResult` 等运行时协议
-- `ExecutionPolicy`、错误类型、artifact、snapshot、delta 与 delta 聚合能力
-
-该包的目标是作为系统统一契约层，避免上层直接依赖具体框架内部类型。
-
 ### `@tianji/shared`
 
 共享工具与配置模型包，当前主要包含：
 
+- `SessionId` / `ThreadId` / `RunId`、`AppMessage`、`RuntimeEvent`、`ToolSpec` 等基础协议
 - `TianjiConfig` 及相关 Zod schema
 - `${env:VAR_NAME}` 形式的环境变量占位符解析
 - 默认 runtime / observer / llm 配置
 - 通用工具函数，例如重试和深拷贝
 
-该包不依赖其他内部 `@tianji/*` 包，用于承载跨包复用的基础能力。
-
-### `@tianji/llm`
-
-LLM 接入层，提供统一的 provider-agnostic gateway 抽象，当前公开能力包括：
-
-- `LlmGateway` / `LlmStream` 等模型调用接口
-- OpenAI、Anthropic、Google 的 gateway 工厂
-- 消息转换、工具 schema 桥接、usage/cost 收集
-
-该包用于隔离上层 runtime 与具体 provider SDK，实现统一的模型访问边界。
+该包不依赖其他内部 `@tianji/*` 包，用于承载跨包复用的基础能力。基础协议与配置 schema 统一由 `@tianji/shared` 提供。
 
 ### `@tianji/runtime`
 
-会话运行时包，负责管理 session 与执行过程。v2 公共 API 已收敛到 deepagents-native 配置面，运行时执行引擎为 deepagents-only，历史 legacy snapshot 仅通过 metadata helper 提供只读兼容。当前公开能力包括：
+会话运行时包，负责管理 session 与执行过程。v2 公共 API 已收敛到 deepagents-native 配置面，运行时执行引擎为 deepagents-only，历史 legacy snapshot 仅通过 metadata helper 提供只读兼容。LLM provider 适配已内聚到 runtime 内部 `src/llm/`。当前公开能力包括：
 
 - 运行时入口与类型：`createSessionRuntime`、`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`
 - Metadata 读取：`readSessionRuntimeMetadata`、`readRunRuntimeMetadata`、`readDeepagentsRunWorkflowState`
@@ -78,9 +57,19 @@ LLM 接入层，提供统一的 provider-agnostic gateway 抽象，当前公开�
 
 该包是编排层与运行时状态的核心承载位置。`SessionRuntimeOptions` 默认围绕 `deepagents` 配置块组织，支持 model、middleware、subagents、skills、interruptOn 等字段；`snapshotStore` 与 `toolCatalog` 继续作为稳定公共 API 暴露。
 
+### `@tianji/agent`
+
+agent 装配层，负责把配置解析结果、默认 agent、`SOUL.md`、provider 凭据注入和 runtime/session 启动原语组合成应用入口可直接消费的 API。当前公开能力包括：
+
+- 上下文装配：`loadAgentContext`、`ensureDefaultUserConfig`
+- 路径与配置桥接：`getAgentAppPaths`、`injectProviderEnv`
+- 启动原语：`createAgentRuntime`、`createAgentSession`
+
+该包位于 CLI 与 runtime 之间，承接应用层初始化逻辑，避免 CLI 直接依赖 runtime 创建细节。
+
 ### `@tianji/cli`
 
-命令行应用，提供 `tianji run "<prompt>"` 和 `tianji log -f` 两个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。`run` 命令会通过 `default < user < workspace` 三层配置合并加载默认 agent、启动 runtime、执行 LLM 请求并输出响应文本；`log -f` 命令会实时查看 JSONL 日志流。
+命令行应用，提供 `tianji run "<prompt>"` 和 `tianji log -f` 两个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。`run` 命令会通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；`log -f` 命令会实时查看 JSONL 日志流。
 
 ## 开发命令
 
@@ -140,7 +129,7 @@ pnpm tianji log -f
 
 ## 当前状态说明
 
-- 仓库包含四个核心 package（`contracts`、`shared`、`llm`、`runtime`）和一个 CLI 应用（`apps/cli`）。
+- 仓库包含三个核心 package（`shared`、`runtime`、`agent`）和一个 CLI 应用（`apps/cli`）。
 - CLI 已支持 `tianji run "<prompt>"` 和 `tianji log -f` 完整流程。
 - 配置系统支持 `providers`、`agents`、`runtime`、`observer` 四个顶层配置块。
 - 日志系统通过 JSONL 落盘到 `~/.config/tianji-ai/logs/tianji.log`。

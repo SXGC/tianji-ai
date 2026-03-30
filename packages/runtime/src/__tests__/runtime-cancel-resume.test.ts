@@ -12,7 +12,7 @@
 import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { MemorySaver } from '@langchain/langgraph'
-import { DEFAULT_EXECUTION_POLICY, createSessionId } from '@tianji/contracts'
+import { DEFAULT_EXECUTION_POLICY, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import {

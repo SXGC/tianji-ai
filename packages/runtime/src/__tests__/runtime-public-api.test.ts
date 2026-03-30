@@ -12,7 +12,7 @@
 import { readFile } from 'node:fs/promises'
 
 import { MemorySaver } from '@langchain/langgraph'
-import { TianjiError } from '@tianji/contracts'
+import { TianjiError } from '@tianji/shared'
 import { describe, expect, expectTypeOf, it } from 'vitest'
 
 import {

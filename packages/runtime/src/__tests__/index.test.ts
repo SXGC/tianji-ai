@@ -10,7 +10,7 @@
  * - 读取 ../../package.json 验证 exports 与 dependencies 边界。
  */
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import { createRunId, createSessionId } from '@tianji/contracts'
+import { createRunId, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -147,20 +147,19 @@ describe('@tianji/runtime', () => {
       types: './dist/index.d.ts',
       import: './dist/index.js',
     })
-    expect(dependencies['@tianji/contracts']).toBe('workspace:*')
-    expect(dependencies['@tianji/llm']).toBe('workspace:*')
     expect(dependencies['@tianji/shared']).toBe('workspace:*')
     expect(dependencyNames).toEqual([
+      '@ai-sdk/anthropic',
+      '@ai-sdk/google',
+      '@ai-sdk/openai',
       '@langchain/core',
       '@langchain/langgraph',
       '@langchain/openai',
-      '@tianji/contracts',
-      '@tianji/llm',
       '@tianji/shared',
+      'ai',
       'deepagents',
       'langchain',
     ])
-    expect(dependencyNames).not.toContain('ai')
   })
 
   it('should expose both in-memory and file snapshot store implementations', async () => {

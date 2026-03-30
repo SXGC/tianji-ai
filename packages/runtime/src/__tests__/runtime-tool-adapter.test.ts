@@ -11,7 +11,7 @@
  */
 import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
-import { DEFAULT_EXECUTION_POLICY, type RuntimeEvent, createSessionId } from '@tianji/contracts'
+import { DEFAULT_EXECUTION_POLICY, type RuntimeEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { createSessionRuntime } from '../runtime.js'

@@ -10,7 +10,7 @@
  * - 使用 helpers/runtime-test-utils 聚合事件与轮询运行状态。
  */
 import { fakeModel } from '@langchain/core/testing'
-import { createSessionId } from '@tianji/contracts'
+import { createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { createSessionRuntime } from '../runtime.js'

@@ -171,7 +171,7 @@ pnpm --filter @tianji/cli clean
 
 - `@tianji/shared`：配置 schema、agent helper、占位符解析、通用工具
 - `@tianji/runtime`：session runtime 创建、runTurn、事件流
-- `@tianji/contracts`：运行时协议类型
+- `@tianji/shared`：运行时协议类型与配置 schema
 
 #### 12. 许可证
 

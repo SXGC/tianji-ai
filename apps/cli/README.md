@@ -24,7 +24,7 @@ pnpm tianji log -f
 ### `tianji run "<prompt>"`
 
 - 发送一条 prompt 给默认 agent。
-- CLI 会加载配置、解析默认 agent、读取对应 `SOUL.md`、创建 runtime，并把 assistant 文本流式输出到 stdout。
+- CLI 会通过 `@tianji/agent` 加载配置、解析默认 agent、读取对应 `SOUL.md`、创建会话，并把 assistant 文本流式输出到 stdout。
 - 首次运行时，如果 `~/.config/tianji-ai/` 下缺少配置目录，会自动创建基础目录、空的用户层 `tianji.json`、默认 agent 的 `SOUL.md`，以及日志目录。
 - 用法错误返回退出码 `2`，运行时错误返回退出码 `1`。
 
@@ -91,7 +91,7 @@ pnpm tianji log -f
 
 - agent 名称必须匹配 `^[a-z0-9][a-z0-9-_]*$`。
 - 每个 agent 的 `SOUL.md` 固定在 `~/.config/tianji-ai/agents/<agent-name>/SOUL.md`。
-- `SOUL.md` 定义 agent 的价值观、边界与协作方式，CLI 会把文件内容作为 `systemPrompt` 传给 runtime。
+- `SOUL.md` 定义 agent 的价值观、边界与协作方式，agent 包会把文件内容作为 `systemPrompt` 传给 runtime。
 - `SOUL.md` 必须存在且非空；缺失、不可读或空文件都会直接报错。
 - 首次运行时，CLI 会为默认 agent 自动创建一个基础 `SOUL.md`。
 
@@ -173,9 +173,9 @@ pnpm --filter @tianji/cli clean
 
 ## 依赖关系
 
-- `@tianji/shared`：配置 schema、默认配置、agent helper、占位符解析、通用工具。
-- `@tianji/runtime`：配置加载、session runtime 创建、runTurn 与事件流。
-- `@tianji/contracts`：运行时协议类型。
+- `@tianji/agent`：配置装配、默认 agent 解析、runtime/session 启动封装。
+- `@tianji/runtime`：会话执行、事件流、快照与工具目录。
+- `@tianji/shared`：运行时协议类型与配置 schema。
 
 ## 许可证
 

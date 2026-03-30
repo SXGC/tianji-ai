@@ -5,7 +5,7 @@ import {
   ToolError,
   type ToolInvocation,
   type ToolSpec,
-} from '@tianji/contracts'
+} from '@tianji/shared'
 
 export type RuntimeToolSideEffect = 'none' | 'idempotent' | 'destructive'
 

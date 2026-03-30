@@ -15,7 +15,7 @@ import {
   TianjiError,
   createRunId,
   createSessionId,
-} from '@tianji/contracts'
+} from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import {

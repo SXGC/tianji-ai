@@ -16,7 +16,7 @@ import {
   type RunSnapshot,
   type RuntimeEvent,
   applyMessageDelta,
-} from '@tianji/contracts'
+} from '@tianji/shared'
 
 import {
   type SessionRuntime,

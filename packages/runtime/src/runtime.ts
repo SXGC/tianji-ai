@@ -9,7 +9,7 @@
  * 对外触点：
  * - 通过 createSessionRuntime 暴露给 packages/runtime 公共入口。
  * - 调用 ./engines/deepagents-engine.ts 执行实际推理与工具调用。
- * - 依赖 @tianji/contracts 提供快照、事件、错误与策略类型。
+ * - 依赖 @tianji/shared 提供快照、事件、错误与策略类型。
  */
 import { randomUUID } from 'node:crypto'
 
@@ -29,12 +29,12 @@ import {
   TianjiError,
   createRunId,
   createSessionId,
-} from '@tianji/contracts'
-import type { LlmGenerationConfig } from '@tianji/llm'
+} from '@tianji/shared'
 import type { InterruptOnConfig } from 'langchain'
 
 import { executeDeepagentsRun } from './engines/deepagents-engine.js'
 import { ReplayableEventStream } from './event-stream.js'
+import type { LlmGenerationConfig } from './llm/index.js'
 import type { SnapshotStore } from './snapshot-store.js'
 import { InMemorySnapshotStore } from './snapshot-store.js'
 import { type RuntimeToolDefinition, type ToolCatalog, ToolRegistry } from './tool-catalog.js'

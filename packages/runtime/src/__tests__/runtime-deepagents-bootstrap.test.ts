@@ -12,7 +12,7 @@
 import type { SessionRuntimeDeepagentsConfig } from '../runtime.js'
 
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import { TianjiError, createSessionId } from '@tianji/contracts'
+import { TianjiError, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { createSessionRuntime, readRunRuntimeMetadata } from '../runtime.js'

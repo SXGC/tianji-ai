@@ -7,7 +7,7 @@ import {
   type SessionSnapshot,
   createRunId,
   createSessionId,
-} from '@tianji/contracts'
+} from '@tianji/shared'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { FileSnapshotStore, InMemorySnapshotStore } from '../snapshot-store.js'

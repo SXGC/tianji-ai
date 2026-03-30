@@ -82,12 +82,12 @@ CLI 需要在创建 runtime 前完成此映射。映射规则为：从 `resolveC
 
 ## 详细 TODO
 
-### 1. 添加 `@tianji/runtime` 和 `@tianji/contracts` 依赖
+### 1. 添加 `@tianji/runtime` 和 `@tianji/shared` 依赖
 
 在 `apps/cli/package.json` 的 `dependencies` 中新增：
 
 ```json
-"@tianji/contracts": "workspace:*",
+"@tianji/shared": "workspace:*",
 "@tianji/runtime": "workspace:*"
 ```
 
@@ -351,7 +351,7 @@ import {
   createSessionRuntime,
   type SessionRuntime,
 } from '@tianji/runtime'
-import type { AppMessage, RuntimeEvent } from '@tianji/contracts'
+import type { AppMessage, RuntimeEvent } from '@tianji/shared'
 
 /**
  * 根据用户配置上下文创建 deepagents session runtime。
@@ -398,7 +398,7 @@ async function executeRunTurn(
 
 ### 结构级校验
 
-- `@tianji/runtime` 和 `@tianji/contracts` 已正确声明为 `apps/cli` 的依赖。
+- `@tianji/runtime` 和 `@tianji/shared` 已正确声明为 `apps/cli` 的依赖。
 - `pnpm check` 通过。
 - 没有 `any` 类型。
 - 所有 import 使用顶层路径。

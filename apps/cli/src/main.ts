@@ -1,13 +1,7 @@
-import type { AppMessage, RuntimeEvent, SessionId } from '@tianji/contracts'
-import { type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
+import { type AgentSession, type LoadedAgentContext, createAgentSession } from '@tianji/agent'
+import type { RunId, RuntimeEvent } from '@tianji/shared'
 
-import type { LoadedUserConfigContext } from './config.js'
-import {
-  type UserConfigPaths,
-  getUserConfigPaths,
-  injectProviderEnv,
-  loadUserConfigContext,
-} from './config.js'
+import { type UserConfigPaths, getUserConfigPaths, loadUserConfigContext } from './config.js'
 import { loadDevelopmentEnv } from './dev-env.js'
 import { type FollowCliLogOptions, followCliLog } from './log-follow.js'
 import type { CliLogScope, CliLogger } from './logger.js'
@@ -33,8 +27,8 @@ export interface LogFollowCommand {
 export type TianjiCliCommand = RunCommand | LogFollowCommand
 
 export interface RunCommandDependencies {
-  readonly loadContext?: () => Promise<LoadedUserConfigContext>
-  readonly createRuntime?: (context: LoadedUserConfigContext) => SessionRuntime
+  readonly loadContext?: () => Promise<LoadedAgentContext>
+  readonly createSession?: (context: LoadedAgentContext) => AgentSession
   readonly getUserConfigPaths?: () => UserConfigPaths
   readonly followCliLog?: (logFilePath: string, options?: FollowCliLogOptions) => Promise<void>
 }
@@ -111,107 +105,33 @@ export async function runCli(
 }
 
 /**
- * 根据用户配置上下文创建 deepagents session runtime。
- *
- * @param context - 已加载的用户配置上下文
- * @returns 已初始化的 SessionRuntime 实例
- */
-export function createCliRuntime(context: LoadedUserConfigContext): SessionRuntime {
-  const providerBaseUrl = readProviderBaseUrl(context.agent.providerConfig)
-  const providerHeaders = readProviderHeaders(context.agent.providerConfig)
-
-  return createSessionRuntime({
-    deepagents: {
-      model: createCliModel(context),
-      providerConfig: {
-        provider: context.agent.provider,
-        model: context.agent.modelName,
-        apiKey: context.agent.providerConfig?.apiKey,
-        baseUrl: providerBaseUrl,
-        headers: providerHeaders,
-      },
-    },
-    snapshotStore: context.snapshotStore,
-  })
-}
-
-function readProviderBaseUrl(
-  providerConfig: LoadedUserConfigContext['agent']['providerConfig']
-): string | undefined {
-  return typeof providerConfig?.baseUrl === 'string' ? providerConfig.baseUrl : undefined
-}
-
-function readProviderHeaders(
-  providerConfig: LoadedUserConfigContext['agent']['providerConfig']
-): Record<string, string> | undefined {
-  if (
-    providerConfig?.headers === undefined ||
-    providerConfig.headers === null ||
-    typeof providerConfig.headers !== 'object'
-  ) {
-    return undefined
-  }
-
-  const headerEntries = Object.entries(providerConfig.headers).filter(
-    (entry): entry is [string, string] => typeof entry[1] === 'string'
-  )
-
-  return headerEntries.length > 0 ? Object.fromEntries(headerEntries) : undefined
-}
-
-/**
- * 为 CLI 构造 deepagents 可消费的模型标识。
- *
- * @param context - 已加载的用户配置上下文
- * @returns `provider:modelName` 形式的模型标识
- */
-function createCliModel(context: LoadedUserConfigContext): string {
-  return `${context.agent.provider}:${context.agent.modelName}`
-}
-
-/**
  * 运行一次完整的 LLM 对话轮次，流式输出 assistant 响应文本。
  *
- * @param runtime - 已创建的 session runtime
- * @param sessionId - 目标 session ID
+ * @param session - agent 封装后的会话对象
  * @param prompt - 用户输入的 prompt 文本
- * @param systemPrompt - 从 SOUL.md 加载的 system prompt
  * @param logger - CLI 日志记录器
  * @returns 最终退出码
  */
 async function executeRunTurn(
-  runtime: SessionRuntime,
-  sessionId: SessionId,
+  session: AgentSession,
   prompt: string,
-  systemPrompt: string | undefined,
   logger: CliLogger
 ): Promise<number> {
-  const userMessage: AppMessage = {
-    id: `msg_user_${Date.now()}`,
-    role: 'user',
-    content: [{ type: 'text', text: prompt }],
-    createdAt: Date.now(),
-  }
-
-  const runId = await runtime.runTurn({
-    sessionId,
-    message: userMessage,
-    systemPrompt,
-  })
-
   await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Run started', {
-    runId: String(runId),
-    sessionId: String(sessionId),
+    sessionId: String(session.sessionId),
   })
 
-  for await (const event of runtime.streamEvents(runId)) {
+  let currentRunId: RunId | undefined
+
+  for await (const event of session.chat(prompt)) {
+    currentRunId = event.runId
     await handleRuntimeEvent(event, logger)
   }
 
   process.stdout.write('\n')
   await logger.logInfo(CLI_RUN_SCOPE, 'Run command completed', {
-    runId: String(runId),
-    sessionId: String(sessionId),
+    runId: currentRunId === undefined ? undefined : String(currentRunId),
+    sessionId: String(session.sessionId),
   })
 
   return 0
@@ -264,6 +184,7 @@ export async function handleRunCommand(
   })
 
   const loadContext = deps?.loadContext ?? loadUserConfigContext
+  const createSession = deps?.createSession ?? createAgentSession
   await logger.logInfo(CLI_RUN_CONFIG_SCOPE, 'Loading user config context')
   const context = await loadContext()
   await logger.logInfo(CLI_RUN_CONFIG_SCOPE, 'Loaded user config context', {
@@ -275,41 +196,28 @@ export async function handleRunCommand(
     resolvedEnvVars: context.resolvedEnvVars,
   })
 
-  injectProviderEnv(context)
-  await logger.logInfo(CLI_RUN_CONFIG_SCOPE, 'Injected provider env vars', {
-    provider: context.agent.provider,
-  })
-
-  const createRuntime = deps?.createRuntime ?? createCliRuntime
   await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Creating session runtime', {
     agentName: context.agent.agentName,
     provider: context.agent.provider,
     modelName: context.agent.modelName,
   })
-  const runtime = createRuntime(context)
   await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Session runtime created', {
     agentName: context.agent.agentName,
     provider: context.agent.provider,
     modelName: context.agent.modelName,
   })
 
-  const sessionSnapshot = await runtime.createSession()
+  const session = createSession(context)
   await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Session created', {
-    sessionId: String(sessionSnapshot.sessionId),
+    sessionId: String(session.sessionId),
   })
 
   await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Starting run turn', {
-    sessionId: String(sessionSnapshot.sessionId),
+    sessionId: String(session.sessionId),
     promptLength: command.prompt.length,
   })
 
-  return executeRunTurn(
-    runtime,
-    sessionSnapshot.sessionId,
-    command.prompt,
-    context.agent.soul,
-    logger
-  )
+  return executeRunTurn(session, command.prompt, logger)
 }
 
 async function handleLogFollowCommand(

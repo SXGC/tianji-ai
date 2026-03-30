@@ -77,7 +77,7 @@ tianji-ai/
 
 ### 3.1 `@tianji/shared` — L0 基础层
 
-**来源**：合并原 `@tianji/contracts` + `@tianji/shared`
+**来源**：将原 `contracts` 协议层合并入 `@tianji/shared`
 
 **职责**：
 
@@ -322,7 +322,7 @@ cli (命令解析, 日志, 终端输出)
 | `packages/contracts/src/index.ts` | 合并入 `packages/shared/src/index.ts` | 合并导出 |
 | `packages/contracts/package.json` | — | 删除包 |
 
-shared 的 `index.ts` 需要重新导出所有原 contracts 的公共符号。全局替换 `from '@tianji/contracts'` 为 `from '@tianji/shared'`。同时迁移 `packages/contracts/src/__tests__/*`，并同步更新所有依赖 contracts 的 README、入口测试和 `package.json` 断言。
+shared 的 `index.ts` 需要重新导出所有原协议层的公共符号。全局替换 `from '@tianji/contracts'` 为 `from '@tianji/shared'`。同时迁移原 `packages/contracts/src/__tests__/*`，并同步更新所有相关 README、入口测试和 `package.json` 断言。
 
 ### 6.2 llm → runtime
 
@@ -376,7 +376,7 @@ CLI 中保留的内容：
 
 ### 6.5 测试与文档同步迁移
 
-- `packages/runtime/src/__tests__/index.test.ts` 中对 `@tianji/contracts`、`@tianji/llm` 依赖的断言，需要在对应 phase 同步更新
+- `packages/runtime/src/__tests__/index.test.ts` 中对旧协议包和 `@tianji/llm` 依赖的断言，需要在对应 phase 同步更新
 - `apps/cli/src/__tests__/config.test.ts`、`inject-provider-env.test.ts` 中与配置装配相关的测试，应迁移到 `packages/agent` 或改为针对 agent API 的断言
 - `apps/cli/src/__tests__/run-e2e.test.ts` 中对 `createCliRuntime` 的直接测试，需要改写为 `createAgentRuntime` 或更高层 agent session API
 - 根目录 `README.md`、`packages/runtime/README.md`、`apps/cli/README.md` 需要按 phase 更新，不能推迟到最后统一修补
@@ -385,12 +385,12 @@ CLI 中保留的内容：
 
 ## 7. 关键设计决策与权衡
 
-### 7.1 合并 contracts 入 shared：放弃零依赖约束
+### 7.1 合并协议层入 shared：放弃零依赖约束
 
-V1 中 contracts 的零依赖约束旨在让协议包可以被任何环境（包括浏览器、Worker）无负担使用。但实践证明：
+V1 中原协议包的零依赖约束旨在让协议定义可以被任何环境（包括浏览器、Worker）无负担使用。但实践证明：
 
-- contracts 导出的纯类型在编译后不产生运行时代码，zod 依赖不影响类型消费者
-- contracts 和 shared 总是被一起使用，分离增加了 import 声明和版本管理的复杂度
+- 原协议层导出的纯类型在编译后不产生运行时代码，zod 依赖不影响类型消费者
+- 原协议层和 shared 总是被一起使用，分离增加了 import 声明和版本管理的复杂度
 - 如果未来确实需要零依赖的类型包，可以通过 subpath exports（`@tianji/shared/types`）实现，而不必维护独立包
 
 **权衡**：shared 包体积略增，但 tree-shaking 可以消除未使用的 zod 代码。与此同时，配置文件读取、路径推导、错误包装仍留在 runtime，可避免 shared 演变成既管 schema 又管 I/O 的混合层。

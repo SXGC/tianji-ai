@@ -40,7 +40,7 @@
 
 新增 `apps/cli`，作为最小应用入口，只依赖：
 
-- `@tianji/contracts`
+- `@tianji/shared`
 - `@tianji/runtime`
 - `@tianji/shared`
 

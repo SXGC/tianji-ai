@@ -36,8 +36,8 @@
 4. **Schema 位于 `packages/shared`**  
    类型定义、Zod 校验 schema、迁移辅助工具以及占位符语法规则都定义在 `packages/shared` 中。
 
-5. **CLI 负责 agent 文件资源**
-   `SOUL.md` 等 agent 文件资源不属于 runtime 配置中心职责；runtime 只负责 JSON 配置，CLI 或应用层负责补充 agent 文件读取。
+5. **Agent 层负责 agent 文件资源**
+   `SOUL.md` 等 agent 文件资源不属于 runtime 配置中心职责；runtime 只负责 JSON 配置，`@tianji/agent` 或应用层负责补充 agent 文件读取。
 
 6. **后置层覆盖前置层**  
    覆盖行为是确定性的，并且基于字段路径进行处理。
@@ -187,13 +187,14 @@ v1 **不需要**完整的模板语言。一个明确的环境变量占位符语�
 5. 使用 Zod schema 校验合并后的原始结构（当前实现使用 `safeValidateTianjiConfig`）
 6. 解析 `${env:VAR_NAME}` 占位符（`resolveConfigPlaceholders`）
 7. 构建 `ResolvedConfig`
-8. 将 `ResolvedConfig` 分发给 `llm`、`tools-node`、`observer` 和应用
-9. CLI 或应用层基于最终配置解析默认 agent 定义与 `SOUL.md`
+8. 将 `ResolvedConfig` 分发给运行时与应用装配层
+9. `@tianji/agent` 或应用层基于最终配置解析默认 agent 定义与 `SOUL.md`
 
 重要说明：
 
 - 合并和环境变量解析必须在一个中心化加载器中完成
 - 内部包不得各自独立读取配置文件或环境变量
+- schema 校验、placeholder 解析与 merge 纯函数继续由 `@tianji/shared` 提供；文件系统级加载与错误包装仍由 `@tianji/runtime` 负责；默认 agent 与 `SOUL.md` 装配由 `@tianji/agent` 负责
 - 运行时当前暴露的是层级快照元数据（`layers`）、解析后的路径集合（`paths`）、工作区信息（`workspace`）以及最终配置快照；字段级来源映射尚未实现
 
 ---

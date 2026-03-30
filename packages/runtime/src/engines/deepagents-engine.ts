@@ -4,7 +4,7 @@
  * 业务职责：
  * - 将 SessionRuntime 的消息、工具、取消与事件协议转换为 deepagents 所需格式。
  * - 统一处理流式文本、工具调用观测、checkpoint 状态回读与超时控制。
- * - 保持 @tianji/contracts 定义的 RuntimeEvent / ToolResult / 错误语义稳定。
+ * - 保持 @tianji/shared 定义的 RuntimeEvent / ToolResult / 错误语义稳定。
  *
  * 对外触点：
  * - 由 ../runtime.ts 在每次 runTurn/resumeRun 时调用 executeDeepagentsRun。
@@ -27,10 +27,10 @@ import {
   ToolError,
   type ToolInvocation,
   type ToolResult,
-} from '@tianji/contracts'
-import type { LlmGenerationConfig } from '@tianji/llm'
+} from '@tianji/shared'
 import { createDeepAgent } from 'deepagents'
 
+import type { LlmGenerationConfig } from '../llm/index.js'
 import type { SessionRuntimeDeepagentsConfig } from '../runtime.js'
 import type { ToolCatalog } from '../tool-catalog.js'
 import { ensureToolAllowed } from '../tool-catalog.js'

@@ -1,4 +1,4 @@
-import { ToolError, createRunId, createSessionId } from '@tianji/contracts'
+import { ToolError, createRunId, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { ToolRegistry, ensureToolAllowed } from '../tool-catalog.js'

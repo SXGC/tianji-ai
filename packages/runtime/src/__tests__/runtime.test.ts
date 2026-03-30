@@ -13,7 +13,7 @@ import { AIMessage, AIMessageChunk } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { FakeStreamingChatModel } from '@langchain/core/utils/testing'
 import { ChatOpenAI } from '@langchain/openai'
-import { type RuntimeEvent, createSessionId } from '@tianji/contracts'
+import { type RuntimeEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { createSessionRuntime } from '../runtime.js'

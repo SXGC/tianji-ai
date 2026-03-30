@@ -82,8 +82,8 @@ console.log(resolved.config.agents?.defaultAgent)
 
 - `deepagents` — 运行时执行引擎
 - `@langchain/langgraph` / `@langchain/core` / `langchain` — LangGraph 状态机与 checkpoint 基础设施
-- `@tianji/contracts` — 公共领域协议（快照、事件、错误、策略类型）
-- `@tianji/llm` — LLM 接入层（generation config 类型）
+- 基础协议与配置 schema 统一由 `@tianji/shared` 提供。
+- `src/llm/` — runtime 内部 LLM 适配层（generation config 类型）
 - `@tianji/shared` — 共享配置模型与工具函数
 
 ## 开发命令

@@ -1,8 +1,7 @@
-import { FileSnapshotStore } from '@tianji/runtime'
+import { injectProviderEnv } from '@tianji/agent'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { LoadedUserConfigContext } from '../config.js'
-import { injectProviderEnv } from '../config.js'
 
 const KNOWN_ENV_KEYS = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY']
 
@@ -26,7 +25,7 @@ function createTestContext(provider: string, apiKey?: string): LoadedUserConfigC
       soul: 'test',
     },
     resolvedEnvVars: [],
-    snapshotStore: new FileSnapshotStore('/tmp/test/runtime-snapshots'),
+    snapshotStore: {} as LoadedUserConfigContext['snapshotStore'],
   }
 }
 

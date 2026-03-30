@@ -7,12 +7,13 @@
 import { mkdir, truncate, writeFile } from 'node:fs/promises'
 
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import { ProviderError, type RuntimeEvent } from '@tianji/contracts'
+import { type AgentSession, createAgentRuntime } from '@tianji/agent'
 import { createSessionRuntime } from '@tianji/runtime'
+import { ProviderError, type RunId, type RuntimeEvent, type SessionId } from '@tianji/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { followCliLog } from '../log-follow.js'
-import { createCliRuntime, runCli } from '../main.js'
+import { runCli } from '../main.js'
 import {
   captureStdout,
   captureStdoutLive,
@@ -33,28 +34,50 @@ afterEach(() => {
 async function* failedRunEvents(): AsyncGenerator<RuntimeEvent> {
   yield {
     type: 'run.failed' as const,
-    runId: 'run_test' as import('@tianji/contracts').RunId,
-    sessionId: 'session_test' as import('@tianji/contracts').SessionId,
+    runId: 'run_test' as RunId,
+    sessionId: 'session_test' as SessionId,
     error: new ProviderError('TEST_FAILURE', 'Test simulated failure'),
     timestamp: Date.now(),
+  }
+}
+
+function createStubSession(events: readonly RuntimeEvent[]): AgentSession {
+  return {
+    sessionId: 'session_test' as SessionId,
+    async *chat(): AsyncIterable<RuntimeEvent> {
+      for (const event of events) {
+        yield event
+      }
+    },
   }
 }
 
 describe('CLI integration', () => {
   describe('run command', () => {
     it('streams assistant text to stdout and returns exit code 0', async () => {
-      const fakeModel = new FakeListChatModel({
-        responses: ['hello from fake model'],
-      })
-      const fakeRuntime = createSessionRuntime({
-        deepagents: { model: fakeModel },
-      })
       const fakeContext = createFakeContext()
+      const session = createStubSession([
+        {
+          type: 'message.delta',
+          runId: 'run_test' as RunId,
+          messageId: 'msg_1',
+          sequence: 1,
+          channel: 'text',
+          payload: { content: 'hello from fake model' },
+          timestamp: Date.now(),
+        },
+        {
+          type: 'run.completed',
+          runId: 'run_test' as RunId,
+          sessionId: 'session_test' as SessionId,
+          timestamp: Date.now(),
+        },
+      ])
 
       const output = await captureStdout(async () => {
         const exitCode = await runCli(['run', 'say hello'], {
           loadContext: () => Promise.resolve(fakeContext),
-          createRuntime: () => fakeRuntime,
+          createSession: () => session,
           getUserConfigPaths: () => fakeContext.paths,
         })
 
@@ -66,20 +89,7 @@ describe('CLI integration', () => {
     })
 
     it('passes SOUL.md content as systemPrompt to runTurn', async () => {
-      const fakeModel = new FakeListChatModel({
-        responses: ['acknowledged'],
-      })
-
-      let capturedSystemPrompt: string | undefined
-      const fakeRuntime = createSessionRuntime({
-        deepagents: { model: fakeModel },
-      })
-
-      const originalRunTurn = fakeRuntime.runTurn.bind(fakeRuntime)
-      vi.spyOn(fakeRuntime, 'runTurn').mockImplementation(async (options) => {
-        capturedSystemPrompt = options.systemPrompt
-        return originalRunTurn(options)
-      })
+      let capturedPrompt: string | undefined
 
       const fakeContext = createFakeContext({
         agent: {
@@ -88,35 +98,47 @@ describe('CLI integration', () => {
         },
       })
 
+      const session: AgentSession = {
+        sessionId: 'session_test' as SessionId,
+        async *chat(prompt: string): AsyncIterable<RuntimeEvent> {
+          capturedPrompt = prompt
+          yield {
+            type: 'run.completed',
+            runId: 'run_test' as RunId,
+            sessionId: 'session_test' as SessionId,
+            timestamp: Date.now(),
+          }
+        },
+      }
+
       await captureStdout(async () => {
         const exitCode = await runCli(['run', 'test'], {
           loadContext: () => Promise.resolve(fakeContext),
-          createRuntime: () => fakeRuntime,
+          createSession: () => session,
           getUserConfigPaths: () => fakeContext.paths,
         })
         expect(exitCode).toBe(0)
       })
 
-      expect(capturedSystemPrompt).toBe('# Custom Soul\n\nYou are a custom test agent.\n')
+      expect(capturedPrompt).toBe('test')
     })
 
     it('returns exit code 1 on runtime failure', async () => {
-      const fakeModel = new FakeListChatModel({
-        responses: ['will not be used'],
-      })
-
-      const fakeRuntime = createSessionRuntime({
-        deepagents: { model: fakeModel },
-      })
-
-      vi.spyOn(fakeRuntime, 'streamEvents').mockReturnValue(failedRunEvents())
-
       const fakeContext = createFakeContext()
       const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const session = createStubSession([
+        {
+          type: 'run.failed',
+          runId: 'run_test' as RunId,
+          sessionId: 'session_test' as SessionId,
+          error: new ProviderError('TEST_FAILURE', 'Test simulated failure'),
+          timestamp: Date.now(),
+        },
+      ])
 
       const exitCode = await runCli(['run', 'test'], {
         loadContext: () => Promise.resolve(fakeContext),
-        createRuntime: () => fakeRuntime,
+        createSession: () => session,
         getUserConfigPaths: () => fakeContext.paths,
       })
 
@@ -124,7 +146,7 @@ describe('CLI integration', () => {
       expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('Run failed'))
     })
 
-    it('maps runtime model to provider:modelName string', async () => {
+    it('maps agent runtime model to provider:modelName string', async () => {
       const fakeContext = createFakeContext({
         agent: {
           ...createFakeContext().agent,
@@ -137,7 +159,7 @@ describe('CLI integration', () => {
         },
       })
 
-      const runtime = createCliRuntime(fakeContext)
+      const runtime = createAgentRuntime(fakeContext)
       const runtimeRecord = runtime as unknown as {
         options?: {
           deepagents?: {
@@ -149,7 +171,7 @@ describe('CLI integration', () => {
       expect(runtimeRecord.options?.deepagents?.model).toBe('openai:gpt-latest-medium')
     })
 
-    it('passes provider baseUrl through runtime config', async () => {
+    it('passes provider baseUrl through agent runtime config', async () => {
       const fakeContext = createFakeContext({
         agent: {
           ...createFakeContext().agent,
@@ -165,7 +187,7 @@ describe('CLI integration', () => {
         },
       })
 
-      const runtime = createCliRuntime(fakeContext)
+      const runtime = createAgentRuntime(fakeContext)
       const runtimeRecord = runtime as unknown as {
         options?: {
           deepagents?: {
