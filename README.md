@@ -1,8 +1,8 @@
 # tianji-ai
 
-`tianji-ai` 是一个基于 `pnpm` 和 `turbo` 的 TypeScript monorepo，用于构建 AI 会话运行时、公共协议、配置模型和 LLM 接入层。
+`tianji-ai` 是一个基于 `pnpm` 和 `turbo` 的 TypeScript monorepo，用于构建 AI 会话运行时、公共协议、配置模型、LLM 接入层与命令行应用。
 
-当前仓库聚焦基础包建设：已经包含 `contracts`、`shared`、`llm`、`runtime` 四个核心 package；面向最终用户的 `apps/` 入口当前尚未落地。
+当前仓库聚焦基础包与最小应用骨架：已经包含 `contracts`、`shared`、`llm`、`runtime` 四个核心 package，并新增了阶段性的 `apps/cli` 命令行入口。
 
 ## 当前范围
 
@@ -15,6 +15,8 @@
 
 ```text
 tianji-ai/
+├─ apps/
+│  └─ cli/
 ├─ docs/
 │  ├─ ARCHITECTURE_V1.md
 │  └─ CONFIG_DESIGN.md
@@ -91,7 +93,7 @@ pnpm build
 pnpm test
 ```
 
-根目录脚本会在 Biome、`pnpm -r` 和 `turbo` 之间分工：Biome 负责 lint / format，包级递归 `typecheck` 负责轻量类型检查，`turbo` 负责 build / test；如果只关注某个 package，可进一步结合 `pnpm --filter <package>` 在对应包范围内执行。
+根目录脚本会在 Biome、`pnpm -r` 和 `turbo` 之间分工：Biome 负责 lint / format，包级递归 `typecheck` 会覆盖 `packages/*` 与 `apps/*`，`turbo` 负责 build / test；如果只关注某个 package，可进一步结合 `pnpm --filter <package>` 在对应包范围内执行。
 
 ## 环境变量
 
@@ -115,9 +117,10 @@ pnpm test
 
 ## 当前状态说明
 
-- 仓库目前以基础设施 package 为主，尚无 `apps/` 目录。
-- `docs/` 中部分内容会提到后续规划的 `apps/`、`tools-node`、`observer` 等模块，但这些并未在当前仓库中完整落地。
-- 因此，阅读本仓库时应优先以 `packages/` 下现有源码和导出 API 为准。
+- 仓库目前仍以基础设施 package 为主，但已新增阶段性的 `apps/cli` 目录作为最小 CLI 应用骨架。
+- `apps/cli` 当前只固定了 `run` / `log -f` 主流程边界，真实 runtime 执行链路仍会在后续阶段继续补全。
+- `docs/` 中部分内容会提到后续规划的 `tools-node`、`observer` 等模块，这些仍未在仓库中完整落地。
+- 因此，阅读本仓库时应优先以 `packages/` 与 `apps/cli` 下现有源码和导出 API 为准。
 
 ## License
 

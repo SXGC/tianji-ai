@@ -1,0 +1,26 @@
+{
+  "name": "@tianji/cli",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Minimal Tianji CLI application shell",
+  "type": "module",
+  "main": "./dist/main.js",
+  "types": "./dist/main.d.ts",
+  "bin": {
+    "tianji": "./bin/tianji.mjs"
+  },
+  "files": ["bin", "dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@tianji/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0"
+  },
+  "keywords": ["tianji", "cli"],
+  "license": "MIT"
+}
