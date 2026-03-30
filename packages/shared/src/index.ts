@@ -47,6 +47,7 @@ export {
   // Validation functions
   validateTianjiConfig,
   safeValidateTianjiConfig,
+  mergeTianjiConfigLayers,
   // Default configurations
   DEFAULT_RETRY_CONFIG,
   DEFAULT_PATH_POLICY_CONFIG,

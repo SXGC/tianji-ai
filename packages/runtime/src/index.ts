@@ -10,6 +10,20 @@
  * - 与 ./runtime.ts、./snapshot-store.ts、./event-stream.ts、./tool-catalog.ts 的导出边界保持一致。
  */
 export { ReplayableEventStream } from './event-stream.js'
+export {
+  RuntimeConfigError,
+  createWorkspaceId,
+  loadResolvedConfig,
+  resolveConfigPaths,
+  resolveWorkspaceConfig,
+  type ConfigLayerName,
+  type ConfigLayerSnapshot,
+  type LoadResolvedConfigOptions,
+  type ResolvedConfig,
+  type ResolvedConfigPaths,
+  type RuntimeConfigErrorCode,
+  type WorkspaceConfigResolution,
+} from './config.js'
 export { FileSnapshotStore, InMemorySnapshotStore, type SnapshotStore } from './snapshot-store.js'
 export {
   ToolRegistry,

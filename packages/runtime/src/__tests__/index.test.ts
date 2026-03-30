@@ -17,10 +17,15 @@ import {
   FileSnapshotStore,
   InMemorySnapshotStore,
   ReplayableEventStream,
+  RuntimeConfigError,
   ToolRegistry,
   createSessionRuntime,
+  createWorkspaceId,
   ensureToolAllowed,
+  loadResolvedConfig,
   readDeepagentsRunWorkflowState,
+  resolveConfigPaths,
+  resolveWorkspaceConfig,
 } from '../index.js'
 import type {
   CreateSessionOptions,
@@ -49,6 +54,7 @@ describe('@tianji/runtime', () => {
     const runtimeModule = await import('../index.js')
 
     expect(runtimeModule.createSessionRuntime).toBeDefined()
+    expect(runtimeModule.loadResolvedConfig).toBeDefined()
     expect(runtimeModule.InMemorySnapshotStore).toBeDefined()
     expect(runtimeModule.FileSnapshotStore).toBeDefined()
     expect(runtimeModule.ReplayableEventStream).toBeDefined()
@@ -114,6 +120,15 @@ describe('@tianji/runtime', () => {
 
     expect(toolCatalog.hasTool(toolDefinition.spec.name)).toBe(true)
     expect(runtime.createSession).toBeDefined()
+    expect(typeof createWorkspaceId('test-workspace')).toBe('string')
+    expect(
+      resolveWorkspaceConfig({ workspaceRoot: '/tmp/tianji-runtime-exports' }).id
+    ).toBeDefined()
+    expect(
+      resolveConfigPaths({ workspaceRoot: '/tmp/tianji-runtime-exports' }).projectConfigPath
+    ).toBe('/tmp/tianji-runtime-exports/tianji.config.json')
+    expect(RuntimeConfigError).toBeDefined()
+    expect(loadResolvedConfig).toBeDefined()
     expect(createSessionOptions.sessionId).toBe(executionContext.sessionId)
     expect(runTurnOptions.sessionId).toBe(executionContext.sessionId)
     expect(resumeRunOptions.runId).toBe(executionContext.runId)

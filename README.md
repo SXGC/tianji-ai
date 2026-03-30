@@ -113,7 +113,7 @@ pnpm test
 - `docs/ARCHITECTURE_V1.md`：v1 架构设计草案，描述整体分层、核心原则与包边界。
 - `docs/CONFIG_DESIGN.md`：配置系统设计文档，描述多层 JSON 配置、优先级与 `${env:VAR_NAME}` 解析规则。
 
-补充说明：当前仓库中尚未提交根级 `tianji.config.json` 示例文件，因此配置入口应以代码实现和设计文档为准，而不是假定已有默认项目配置文件。
+补充说明：runtime 已实现中心化配置加载，会按 `project < user < workspace` 顺序解析 `tianji.config.json`、`~/.config/tianji-ai/tianji.json` 与工作区配置文件；仓库中仍未提交根级 `tianji.config.json` 示例文件。
 
 ## 当前状态说明
 

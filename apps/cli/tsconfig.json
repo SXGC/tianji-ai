@@ -4,6 +4,7 @@
     "types": ["node"],
     "baseUrl": ".",
     "paths": {
+      "@tianji/runtime": ["../../packages/runtime/src/index.ts"],
       "@tianji/shared": ["../../packages/shared/src/index.ts"]
     }
   },

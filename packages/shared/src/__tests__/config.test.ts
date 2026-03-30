@@ -21,6 +21,7 @@ import {
   getDefaultAgentDefinition,
   isEnvPlaceholder,
   loadAgentSoul,
+  mergeTianjiConfigLayers,
   parseAgentModelRef,
   resolveConfigPlaceholders,
   resolveEnvPlaceholder,
@@ -382,6 +383,128 @@ describe('config', () => {
         },
       })
       expect(result.success).toBe(false)
+    })
+  })
+
+  describe('mergeTianjiConfigLayers', () => {
+    it('should deep merge object fields across layers', () => {
+      const merged = mergeTianjiConfigLayers(
+        {
+          providers: {
+            openai: {
+              apiKey: '${env:OPENAI_API_KEY}',
+              baseUrl: 'https://api.openai.com/v1',
+            },
+          },
+          runtime: {
+            tool: {
+              timeoutMs: 120000,
+            },
+          },
+        },
+        {
+          providers: {
+            openai: {
+              baseUrl: 'https://example.test/v1',
+            },
+            anthropic: {
+              apiKey: '${env:ANTHROPIC_API_KEY}',
+            },
+          },
+          runtime: {
+            tool: {
+              maxConcurrency: 8,
+            },
+          },
+        }
+      )
+
+      expect(merged).toEqual({
+        providers: {
+          openai: {
+            apiKey: '${env:OPENAI_API_KEY}',
+            baseUrl: 'https://example.test/v1',
+          },
+          anthropic: {
+            apiKey: '${env:ANTHROPIC_API_KEY}',
+          },
+        },
+        runtime: {
+          tool: {
+            timeoutMs: 120000,
+            maxConcurrency: 8,
+          },
+        },
+      })
+    })
+
+    it('should replace arrays instead of concatenating them', () => {
+      const merged = mergeTianjiConfigLayers(
+        {
+          runtime: {
+            tool: {
+              pathPolicy: {
+                forbidDirectories: ['.git/', 'node_modules/'],
+              },
+            },
+          },
+        },
+        {
+          runtime: {
+            tool: {
+              pathPolicy: {
+                forbidDirectories: ['dist/'],
+              },
+            },
+          },
+        }
+      )
+
+      expect(merged.runtime?.tool?.pathPolicy?.forbidDirectories).toEqual(['dist/'])
+    })
+
+    it('should replace scalar values from higher-priority layers', () => {
+      const merged = mergeTianjiConfigLayers(
+        {
+          observer: {
+            enabled: true,
+          },
+        },
+        {
+          observer: {
+            enabled: false,
+          },
+        }
+      )
+
+      expect(merged.observer?.enabled).toBe(false)
+    })
+
+    it('should not mutate input layer objects', () => {
+      const base: TianjiConfig = {
+        runtime: {
+          tool: {
+            pathPolicy: {
+              forbidDirectories: ['.git/'],
+            },
+          },
+        },
+      }
+      const override: TianjiConfig = {
+        runtime: {
+          tool: {
+            pathPolicy: {
+              forbidDirectories: ['dist/'],
+            },
+          },
+        },
+      }
+
+      const merged = mergeTianjiConfigLayers(base, override)
+      merged.runtime?.tool?.pathPolicy?.forbidDirectories?.push('coverage/')
+
+      expect(base.runtime?.tool?.pathPolicy?.forbidDirectories).toEqual(['.git/'])
+      expect(override.runtime?.tool?.pathPolicy?.forbidDirectories).toEqual(['dist/'])
     })
   })
 

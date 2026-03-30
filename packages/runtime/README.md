@@ -4,7 +4,7 @@
 
 ## 包职责
 
-`@tianji/runtime` 是会话状态与执行过程的编排层，对外通过统一的运行时 API 组合共享契约、快照持久化、事件流与运行时工具注册能力。
+`@tianji/runtime` 是会话状态与执行过程的编排层，对外通过统一的运行时 API 组合共享契约、快照持久化、事件流、配置中心与运行时工具注册能力。
 
 该包的公开表面刻意保持收敛：应用侧应通过 `createSessionRuntime` 以及导出的持久化、事件流、工具注册原语接入，而不是依赖内部工作流细节。
 
@@ -13,7 +13,9 @@
 ## 当前公开内容
 
 - 运行时入口：`createSessionRuntime`
+- 配置中心：`loadResolvedConfig`、`resolveConfigPaths`、`resolveWorkspaceConfig`、`createWorkspaceId`
 - 运行时接口与配置类型：`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`
+- 配置错误与元数据类型：`RuntimeConfigError`、`ResolvedConfig`、`ResolvedConfigPaths`、`WorkspaceConfigResolution`、`ConfigLayerSnapshot`
 - Metadata 读取：`readSessionRuntimeMetadata`、`readRunRuntimeMetadata`、`readDeepagentsRunWorkflowState`
 - Metadata 类型：`SessionRuntimeMetadata`、`RunRuntimeMetadata`、`DeepagentsRunWorkflowState`、`DeepagentsInterruptRecord`
 - 事件流：`ReplayableEventStream`
@@ -40,6 +42,26 @@ const runtime = createSessionRuntime({
 })
 
 void runtime
+```
+
+## 配置中心
+
+运行时现在负责中心化加载配置。默认会按以下优先级读取并合并 JSON 配置：
+
+- 项目层：`<workspace-root>/tianji.config.json`
+- 用户层：`~/.config/tianji-ai/tianji.json`
+- 工作区层：`~/.config/tianji-ai/workspaces/<workspace-id>.json`
+
+加载顺序为 `project < user < workspace`，对象字段深合并、标量替换、数组整体替换。所有层合并后，runtime 会统一执行 schema 校验与 `${env:VAR_NAME}` 占位符解析。
+
+```ts
+import { loadResolvedConfig } from '@tianji/runtime'
+
+const resolved = await loadResolvedConfig()
+
+console.log(resolved.paths.projectConfigPath)
+console.log(resolved.workspace.id)
+console.log(resolved.config.agents?.defaultAgent)
 ```
 
 ## `SessionRuntimeOptions` v2 说明

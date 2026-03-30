@@ -354,6 +354,82 @@ export function safeValidateTianjiConfig(
   return TianjiConfigSchema.safeParse(config)
 }
 
+/**
+ * Merges multiple Tianji config layers using the v1 semantics described in the
+ * config design document.
+ *
+ * Merge rules:
+ * - Objects are deep merged by field name
+ * - Scalars are replaced by higher-priority layers
+ * - Arrays are replaced as a whole
+ * - `undefined` never overrides an existing value
+ *
+ * @param layers - Config layers ordered from low to high priority
+ * @returns A new merged config object
+ */
+export function mergeTianjiConfigLayers(...layers: readonly TianjiConfig[]): TianjiConfig {
+  let merged: unknown = {}
+
+  for (const layer of layers) {
+    merged = mergeConfigValue(merged, layer)
+  }
+
+  return merged as TianjiConfig
+}
+
+function mergeConfigValue(base: unknown, override: unknown): unknown {
+  if (override === undefined) {
+    return cloneConfigValue(base)
+  }
+
+  if (Array.isArray(override)) {
+    return cloneConfigValue(override)
+  }
+
+  if (isPlainObject(override)) {
+    const baseRecord = isPlainObject(base) ? base : {}
+    const result: Record<string, unknown> = {}
+
+    for (const [key, value] of Object.entries(baseRecord)) {
+      result[key] = cloneConfigValue(value)
+    }
+
+    for (const [key, value] of Object.entries(override)) {
+      if (value === undefined) {
+        continue
+      }
+
+      result[key] = mergeConfigValue(baseRecord[key], value)
+    }
+
+    return result
+  }
+
+  return cloneConfigValue(override)
+}
+
+function cloneConfigValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(cloneConfigValue)
+  }
+
+  if (isPlainObject(value)) {
+    const result: Record<string, unknown> = {}
+
+    for (const [key, entry] of Object.entries(value)) {
+      result[key] = cloneConfigValue(entry)
+    }
+
+    return result
+  }
+
+  return value
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
 // ============================================================================
 // Default Configuration Values
 // ============================================================================
