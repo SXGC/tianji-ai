@@ -1,6 +1,11 @@
+import { ChatOpenAI } from '@langchain/openai'
+import type { AppMessage, RuntimeEvent, SessionId } from '@tianji/contracts'
+import { type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
+
 import type { LoadedUserConfigContext } from './config.js'
-import { getUserConfigPaths, loadUserConfigContext } from './config.js'
+import { getUserConfigPaths, injectProviderEnv, loadUserConfigContext } from './config.js'
 import { followCliLog } from './log-follow.js'
+import type { CliLogger } from './logger.js'
 import { createCliLogger } from './logger.js'
 
 const CLI_USAGE = ['Usage:', '  tianji run "<prompt>"', '  tianji log -f'].join('\n')
@@ -16,19 +21,16 @@ export interface LogFollowCommand {
 
 export type TianjiCliCommand = RunCommand | LogFollowCommand
 
+export interface RunCommandDependencies {
+  readonly loadContext?: () => Promise<LoadedUserConfigContext>
+  readonly createRuntime?: (context: LoadedUserConfigContext) => SessionRuntime
+}
+
 class CliUsageError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'CliUsageError'
   }
-}
-
-interface PreparedCliRuntimeInput {
-  readonly deepagentsModel: string
-  readonly agentName: string
-  readonly provider: string
-  readonly modelName: string
-  readonly soulPath: string
 }
 
 /**
@@ -72,14 +74,18 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
  * Runs the Tianji CLI main dispatch flow and returns the process exit code.
  *
  * @param argv - Raw argv items without the executable and script path
+ * @param deps - Optional dependency overrides for testing
  * @returns The final process exit code
  */
-export async function runCli(argv: readonly string[]): Promise<number> {
+export async function runCli(
+  argv: readonly string[],
+  deps?: RunCommandDependencies
+): Promise<number> {
   try {
     const command = parseCliArgs(argv)
 
     if (command.kind === 'run') {
-      return await handleRunCommand(command)
+      return await handleRunCommand(command, deps)
     }
 
     return await handleLogFollowCommand(command)
@@ -90,7 +96,115 @@ export async function runCli(argv: readonly string[]): Promise<number> {
   }
 }
 
-async function handleRunCommand(command: RunCommand): Promise<number> {
+/**
+ * 根据用户配置上下文创建 deepagents session runtime。
+ *
+ * @param context - 已加载的用户配置上下文
+ * @returns 已初始化的 SessionRuntime 实例
+ */
+export function createCliRuntime(context: LoadedUserConfigContext): SessionRuntime {
+  const model = createCliModel(context)
+
+  return createSessionRuntime({
+    deepagents: { model },
+  })
+}
+
+/**
+ * 为 CLI 构造 deepagents 可消费的模型实例。
+ *
+ * openai provider 需要显式透传 baseUrl，否则 deepagents 仅根据字符串模型名
+ * 走默认 OpenAI 端点，无法命中用户配置的兼容网关。
+ *
+ * @param context - 已加载的用户配置上下文
+ * @returns deepagents 可直接使用的模型实例或模型标识
+ */
+function createCliModel(context: LoadedUserConfigContext): string | ChatOpenAI {
+  if (context.agent.provider !== 'openai') {
+    return `${context.agent.provider}:${context.agent.modelName}`
+  }
+
+  const baseUrl =
+    typeof context.agent.providerConfig?.baseUrl === 'string'
+      ? context.agent.providerConfig.baseUrl
+      : undefined
+
+  return new ChatOpenAI({
+    model: context.agent.modelName,
+    apiKey: context.agent.providerConfig?.apiKey,
+    configuration:
+      baseUrl === undefined
+        ? undefined
+        : {
+            baseURL: baseUrl,
+          },
+  })
+}
+
+/**
+ * 运行一次完整的 LLM 对话轮次，流式输出 assistant 响应文本。
+ *
+ * @param runtime - 已创建的 session runtime
+ * @param sessionId - 目标 session ID
+ * @param prompt - 用户输入的 prompt 文本
+ * @param systemPrompt - 从 SOUL.md 加载的 system prompt
+ * @param logger - CLI 日志记录器
+ * @returns 最终退出码
+ */
+async function executeRunTurn(
+  runtime: SessionRuntime,
+  sessionId: SessionId,
+  prompt: string,
+  systemPrompt: string | undefined,
+  logger: CliLogger
+): Promise<number> {
+  const userMessage: AppMessage = {
+    id: `msg_user_${Date.now()}`,
+    role: 'user',
+    content: [{ type: 'text', text: prompt }],
+    createdAt: Date.now(),
+  }
+
+  const runId = await runtime.runTurn({
+    sessionId,
+    message: userMessage,
+    systemPrompt,
+  })
+
+  await logger.logInfo('cli.run.runtime', 'Run started', { runId: String(runId) })
+
+  for await (const event of runtime.streamEvents(runId)) {
+    await handleRuntimeEvent(event, logger)
+  }
+
+  process.stdout.write('\n')
+  await logger.logInfo('cli.run.event', 'Run completed', { runId: String(runId) })
+
+  return 0
+}
+
+async function handleRuntimeEvent(event: RuntimeEvent, logger: CliLogger): Promise<void> {
+  switch (event.type) {
+    case 'message.delta':
+      if (event.channel === 'text') {
+        process.stdout.write(event.payload.content)
+      }
+      break
+    case 'run.failed':
+      await logger.logError('cli.run.event', 'Run failed', {
+        errorCode: event.error.code,
+        errorMessage: event.error.message,
+      })
+      throw new Error(`Run failed: ${event.error.message}`)
+    case 'run.completed':
+      break
+  }
+}
+
+export async function handleRunCommand(
+  command: RunCommand,
+  deps?: RunCommandDependencies
+): Promise<number> {
   const paths = getUserConfigPaths()
   const logger = createCliLogger(paths)
 
@@ -98,8 +212,9 @@ async function handleRunCommand(command: RunCommand): Promise<number> {
     promptLength: command.prompt.length,
   })
 
-  const context = await loadUserConfigContext()
-  await logger.logInfo('cli.config', 'Loaded user config context', {
+  const loadContext = deps?.loadContext ?? loadUserConfigContext
+  const context = await loadContext()
+  await logger.logInfo('cli.run.config', 'Loaded user config context', {
     configPath: context.paths.configFilePath,
     agentName: context.agent.agentName,
     provider: context.agent.provider,
@@ -108,16 +223,30 @@ async function handleRunCommand(command: RunCommand): Promise<number> {
     resolvedEnvVars: context.resolvedEnvVars,
   })
 
-  const runtimeInput = createCliRuntime(context)
-  await logger.logInfo('cli.runtime', 'Prepared runtime placeholder input', {
-    ...runtimeInput,
-  })
-  await logger.logWarn('cli.run', 'Runtime execution is not implemented in stage 2', {
-    promptLength: command.prompt.length,
+  injectProviderEnv(context)
+  await logger.logInfo('cli.run.config', 'Provider env vars injected', {
+    provider: context.agent.provider,
   })
 
-  console.error('`tianji run` 已进入 CLI 主流程，但真实 runtime 执行会在后续阶段实现。')
-  return 1
+  const createRuntime = deps?.createRuntime ?? createCliRuntime
+  const runtime = createRuntime(context)
+  await logger.logInfo('cli.run.runtime', 'Session runtime created', {
+    agentName: context.agent.agentName,
+    model: `${context.agent.provider}:${context.agent.modelName}`,
+  })
+
+  const sessionSnapshot = await runtime.createSession()
+  await logger.logInfo('cli.run.runtime', 'Session created', {
+    sessionId: String(sessionSnapshot.sessionId),
+  })
+
+  return executeRunTurn(
+    runtime,
+    sessionSnapshot.sessionId,
+    command.prompt,
+    context.agent.soul,
+    logger
+  )
 }
 
 async function handleLogFollowCommand(_command: LogFollowCommand): Promise<number> {
@@ -130,22 +259,6 @@ async function handleLogFollowCommand(_command: LogFollowCommand): Promise<numbe
 
   await followCliLog(paths.cliLogFilePath)
   return 0
-}
-
-/**
- * Prepares the runtime input boundary for later deepagents execution stages.
- *
- * @param context - The loaded user config context
- * @returns The minimal runtime input prepared for later execution wiring
- */
-function createCliRuntime(context: LoadedUserConfigContext): PreparedCliRuntimeInput {
-  return {
-    deepagentsModel: `${context.agent.provider}:${context.agent.modelName}`,
-    agentName: context.agent.agentName,
-    provider: context.agent.provider,
-    modelName: context.agent.modelName,
-    soulPath: context.agent.soulPath,
-  }
 }
 
 async function tryLogCliFailure(error: unknown, argv: readonly string[]): Promise<void> {

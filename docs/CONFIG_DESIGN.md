@@ -34,9 +34,12 @@
    `packages/runtime` 是唯一负责合并配置层并解析占位符的组件。
 
 4. **Schema 位于 `packages/shared`**  
-   类型定义、校验 schema、迁移辅助工具以及占位符语法规则都定义在 `packages/shared` 中。
+   类型定义、Zod 校验 schema、迁移辅助工具以及占位符语法规则都定义在 `packages/shared` 中。
 
-5. **后置层覆盖前置层**  
+5. **CLI 负责 agent 文件资源**
+   `SOUL.md` 等 agent 文件资源不属于 runtime 配置中心职责；runtime 只负责 JSON 配置，CLI 或应用层负责补充 agent 文件读取。
+
+6. **后置层覆盖前置层**  
    覆盖行为是确定性的，并且基于字段路径进行处理。
 
 ---
@@ -57,7 +60,8 @@
 
 - 项目默认值
 - 团队共享行为
-- 默认模型路由
+- 默认 provider 配置
+- 默认 agent 定义与模型路由
 - 默认工具策略
 - 默认 observer 设置
 
@@ -135,19 +139,25 @@ JSON 可以通过占位符引用环境变量值：
 
 ```json
 {
-  "llm": {
-    "providers": {
-      "openai": {
-        "apiKey": "${env:OPENAI_API_KEY}"
-      }
+  "providers": {
+    "openai": {
+      "apiKey": "${env:OPENAI_API_KEY}"
     }
   }
 }
 ```
 
-建议的 v1 语法：
+v1 语法：
 
 - `${env:VAR_NAME}`
+
+占位符必须**完整匹配**整个字符串值。前缀、后缀或嵌入文本中的占位符不会被解析。
+
+正则定义（见 `packages/shared/src/config.ts`）：
+
+```text
+/^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
+```
 
 v1 **不需要**完整的模板语言。一个明确的环境变量占位符语法就足够了。
 
@@ -158,7 +168,7 @@ v1 **不需要**完整的模板语言。一个明确的环境变量占位符语�
 规则：
 
 - 未解析的占位符 => 配置错误
-- 空字符串环境变量值视为显式解析值，而不是“缺失”
+- 空字符串环境变量值视为显式解析值，而不是"缺失"
 - 只在字符串值中解析占位符
 - 解析后的敏感值不得回写到 JSON 文件
 - 日志和诊断信息必须对解析后的敏感值进行脱敏
@@ -172,17 +182,18 @@ v1 **不需要**完整的模板语言。一个明确的环境变量占位符语�
 1. 读取项目配置 JSON
 2. 读取用户配置 JSON
 3. 读取工作区配置 JSON
-4. 按优先级顺序合并
-5. 使用 schema 校验合并后的原始结构
-6. 解析 `${env:VAR_NAME}` 占位符
+4. 按优先级顺序合并（runtime 内部合并逻辑，语义与 `mergeTianjiConfigLayers` 一致）
+5. 使用 Zod schema 校验合并后的原始结构（当前实现使用 `safeValidateTianjiConfig`）
+6. 解析 `${env:VAR_NAME}` 占位符（`resolveConfigPlaceholders`）
 7. 构建 `ResolvedConfig`
 8. 将 `ResolvedConfig` 分发给 `llm`、`tools-node`、`observer` 和应用
+9. CLI 或应用层基于最终配置解析默认 agent 定义与 `SOUL.md`
 
 重要说明：
 
 - 合并和环境变量解析必须在一个中心化加载器中完成
 - 内部包不得各自独立读取配置文件或环境变量
-- 运行时应同时暴露原始来源元数据与解析后的配置快照，供诊断使用
+- 运行时当前暴露的是层级快照元数据（`layers`）、解析后的路径集合（`paths`）、工作区信息（`workspace`）以及最终配置快照；字段级来源映射尚未实现
 
 ---
 
@@ -201,22 +212,33 @@ v1 **不需要**完整的模板语言。一个明确的环境变量占位符语�
 - 归一化后的工作区绝对路径
 - 哈希为一个稳定且简短的标识符
 
-为了便于调试，人类可读的源路径应继续保留在元数据中。
+当前实现使用：
+
+- 归一化后的工作区绝对路径
+- `sha256(path).slice(0, 16)` 作为 `<workspace-id>`
+
+为了便于调试，人类可读的源路径会通过 `workspace.root` 和 `workspace.normalizedRoot` 保留在元数据中。
 
 ---
 
-## 8. 建议的顶层配置结构
+## 8. 顶层配置结构
 
-精确 schema 后续可能演进，但 v1 应收敛到类似如下的结构：
+v1 配置由四个顶层字段组成：`providers`、`agents`、`runtime`、`observer`。
+
+所有字段均为可选，以支持跨层部分配置。
 
 ```json
 {
-  "llm": {
-    "defaultProvider": "openai",
-    "defaultModel": "gpt-4.1",
-    "providers": {
-      "openai": {
-        "apiKey": "${env:OPENAI_API_KEY}"
+  "providers": {
+    "openai": {
+      "apiKey": "${env:OPENAI_API_KEY}"
+    }
+  },
+  "agents": {
+    "defaultAgent": "default",
+    "items": {
+      "default": {
+        "model": "openai/gpt-4.1"
       }
     }
   },
@@ -249,17 +271,118 @@ v1 **不需要**完整的模板语言。一个明确的环境变量占位符语�
 }
 ```
 
-这个示例仅用于说明，并不对每个默认值做强制规定。
+### 8.1 providers
+
+顶层 `providers` 字段是一个 provider 名称到配置的映射。
+
+每个 provider 配置至少支持 `apiKey` 字段（可使用占位符），并允许通过 `passthrough` 传入 provider 特定的额外字段（如 `baseUrl`、`headers` 等）。
+
+Schema 定义（`packages/shared/src/config.ts`）：
+
+```typescript
+TianjiProvidersConfigSchema = z.record(z.string(), TianjiProviderConfigSchema)
+
+TianjiProviderConfigSchema = z.object({
+  apiKey: z.string().optional(),
+}).passthrough()
+```
+
+### 8.2 agents
+
+`agents` 字段定义了 agent 的集合和默认选择。
+
+- `defaultAgent`：默认 agent 的名称，必须是 `items` 中已定义的 key
+- `items`：agent 名称到 agent 配置的映射
+
+每个 agent 配置包含：
+
+- `model`：使用 `provider/modelName` 格式的模型引用（如 `openai/gpt-4.1`）
+
+Agent 名称必须匹配正则 `/^[a-z0-9][a-z0-9-_]*$/`（小写字母、数字开头，可含连字符和下划线）。
+
+模型引用规则：
+
+- 必须包含 `/` 分隔符
+- `/` 前为 provider 名称（非空）
+- `/` 后为模型名称（非空），可包含嵌套路径（仅在第一个 `/` 处分割）
+
+Schema 定义：
+
+```typescript
+TianjiAgentsConfigSchema = z.object({
+  defaultAgent: z.string().refine(...).optional(),
+  items: z.record(z.string(), TianjiAgentConfigSchema).optional(),
+})
+
+TianjiAgentConfigSchema = z.object({
+  model: AgentModelRefSchema,
+})
+```
+
+### 8.3 runtime
+
+运行时配置包含重试策略和工具策略两个子节。
+
+**retry**：
+
+| 字段 | 类型 | 默认值 |
+|------|------|--------|
+| `maxAttempts` | `number` | `2` |
+| `baseDelayMs` | `number` | `300` |
+| `maxDelayMs` | `number` | `3000` |
+
+**tool**：
+
+| 字段 | 类型 | 默认值 |
+|------|------|--------|
+| `timeoutMs` | `number` | `120000` |
+| `maxConcurrency` | `number` | `4` |
+| `allowDestructive` | `boolean` | `false` |
+| `pathPolicy.forbidDirectories` | `string[]` | `[".git/", "node_modules/"]` |
+| `pathPolicy.filenameDenyPatterns` | `string[]` | `["^\\.env($|\\.)", "(^|/)id_rsa$"]` |
+
+### 8.4 observer
+
+| 字段 | 类型 | 默认值 |
+|------|------|--------|
+| `enabled` | `boolean` | `true` |
+| `redactSecrets` | `boolean` | `true` |
 
 ---
 
-## 9. 合并语义
+## 9. Agent Soul 文件
 
-建议的 v1 语义：
+每个 agent 可以拥有一个 `SOUL.md` 文件，定义 agent 的系统提示词或行为描述。
+
+这一能力当前由 CLI 层实现，不属于 runtime 配置中心本身。
+
+路径约定：
+
+```text
+<config-dir>/agents/<agent-name>/SOUL.md
+```
+
+加载规则：
+
+- 文件必须存在且可读
+- 文件内容不得为空或仅含空白字符
+- 加载通过 `loadAgentSoul()` 完成，失败时抛出明确的错误
+
+---
+
+## 10. 合并语义
+
+v1 合并语义当前在两处保持一致：
+
+- `packages/shared/src/config.ts` 的 `mergeTianjiConfigLayers`
+- `packages/runtime/src/config.ts` 的内部合并逻辑
+
+两者语义一致：
 
 - **对象字段**：深度合并
 - **标量字段**：替换
 - **数组**：默认整体替换
+- **`undefined` 值**：不覆盖已有值
 
 数组采用替换而不是合并的原因：
 
@@ -267,21 +390,24 @@ v1 **不需要**完整的模板语言。一个明确的环境变量占位符语�
 - 可避免 deny/allow 列表的意外重复
 - 更容易调试最终生效配置
 
+合并操作不会修改输入层对象（内部通过克隆实现不可变性）。
+
 如果未来用例需要更智能的合并策略，应按字段逐项引入，而不是全局启用。
 
 ---
 
-## 10. 校验与错误处理
+## 11. 校验与错误处理
 
-以下情况必须快速失败：
+### 11.1 校验机制
 
-- JSON 格式非法
-- 未知的必需结构缺失
-- 占位符语法非法
-- 环境变量占位符未解析
-- 更高优先级配置引入了非法数据
+配置校验使用 Zod schema（定义在 `packages/shared/src/config.ts`）：
 
-建议的错误分类：
+- `validateTianjiConfig(config)` — 校验并返回类型化配置，失败时抛出 `ZodError`
+- `safeValidateTianjiConfig(config)` — 返回 `{ success, data?, error? }` 安全结果
+
+### 11.2 runtime 错误模型
+
+runtime 配置中心对外抛出 `RuntimeConfigError`，错误码包括：
 
 - `config.parse_error`
 - `config.schema_error`
@@ -289,16 +415,91 @@ v1 **不需要**完整的模板语言。一个明确的环境变量占位符语�
 - `config.env_missing`
 - `config.workspace_resolution_error`
 
-诊断信息应报告：
+`details` 当前可能包含：
+
+- `layer`
+- `filePath`
+- `fieldPath`
+- `phase`
+- `cause`
+
+### 11.3 占位符错误
+
+`ConfigPlaceholderError` 在环境变量无法解析时抛出，包含：
+
+- `varName`：未定义的环境变量名
+- `message`：人类可读的错误描述
+
+在 runtime 中，这类错误会被包装为 `RuntimeConfigError`，通常对应 `config.env_missing`。
+
+### 11.4 快速失败条件
+
+以下情况必须快速失败：
+
+- JSON 格式非法
+- Zod schema 校验失败（类型错误、格式错误、agent 名称非法等）
+- 占位符语法非法
+- 环境变量占位符未解析
+- 更高优先级配置引入了非法数据
+
+### 11.5 诊断信息
+
+当前实现可报告：
 
 - 哪个文件提供了非法字段
 - 字段路径
-- 期望类型或规则
-- 错误发生在环境变量解析之前还是之后
+- 错误发生在 workspace 解析、JSON 解析、schema 校验或 placeholder 解析阶段
+- 三层配置文件路径、是否存在以及该层原始配置快照
+
+当前尚未实现字段级 source map，因此还不能精确追踪“最终某个字段来自哪一层覆盖”。
 
 ---
 
-## 11. v1 非目标
+## 12. 默认配置
+
+`packages/shared` 导出完整的默认配置常量：
+
+```typescript
+const DEFAULT_TIANJI_CONFIG: TianjiConfig = {
+  providers: {
+    openai: {
+      apiKey: '${env:OPENAI_API_KEY}',
+    },
+  },
+  agents: {
+    defaultAgent: 'default',
+    items: {
+      default: {
+        model: 'openai/gpt-4.1',
+      },
+    },
+  },
+  runtime: {
+    retry: { maxAttempts: 2, baseDelayMs: 300, maxDelayMs: 3000 },
+    tool: {
+      timeoutMs: 120000,
+      maxConcurrency: 4,
+      allowDestructive: false,
+      pathPolicy: {
+        forbidDirectories: ['.git/', 'node_modules/'],
+        filenameDenyPatterns: ['^\\.env($|\\.)', '(^|/)id_rsa$'],
+      },
+    },
+  },
+  observer: {
+    enabled: true,
+    redactSecrets: true,
+  },
+}
+```
+
+`createDefaultUserTianjiConfig()` 提供深拷贝的默认配置，用于首次运行初始化。
+
+当前这个初始化动作由 CLI 在 `apps/cli/src/config.ts` 中执行，用于首次创建 `~/.config/tianji-ai/tianji.json`。
+
+---
+
+## 13. v1 非目标
 
 v1 **不**打算提供：
 
@@ -310,14 +511,16 @@ v1 **不**打算提供：
 
 ---
 
-## 12. 总结
+## 14. 总结
 
 `tianji-ai` v1 使用：
 
 - **三层 JSON 配置**来承载默认值与覆盖项
 - **环境变量占位符**来承载敏感值
 - **由 runtime 持有的解析流程**来生成最终生效配置
+- **Zod schema** 来确保配置结构合法性
+- **Agent 系统**通过 `provider/modelName` 引用模型
 
 一句话概括：
 
-> 项目默认值位于 `tianji.config.json`，用户和工作区 JSON 文件在其之上进行覆盖，最终由 runtime 将环境变量占位符解析为统一的 `ResolvedConfig`。
+> 项目默认值位于 `tianji.config.json`，用户和工作区 JSON 文件在其之上进行覆盖，最终由 runtime 统一完成合并、校验和环境变量占位符解析，并向应用暴露带层级元数据的 `ResolvedConfig`。

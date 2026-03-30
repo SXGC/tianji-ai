@@ -51,6 +51,8 @@
 - 仅在用户明确要求时运行测试。
 - 运行测试时，必须从对应包的根目录执行，而不是仓库根目录。
 - 编写测试后，必须实际运行，并根据测试结果持续迭代，直到测试或实现中的问题被修复。
+- `@tianji/cli` 的冒烟测试命令为 `SMOKE_E2E=1 pnpm --filter @tianji/cli test:smoke`。
+- 该冒烟测试会在 `SMOKE_E2E=1` 时通过 Vitest `setupFiles` 自动加载仓库根目录 `.env.test`，并覆盖当前 shell 中的同名环境变量。
 
 ### 提交规则
 
@@ -125,4 +127,3 @@ git commit --no-verify
 ## 输出要求
 
 * 所有最终回答必须使用中文。
-

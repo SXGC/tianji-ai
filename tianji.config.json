@@ -1,0 +1,36 @@
+{
+  "providers": {
+    "openai": {
+      "baseUrl": "http://100.78.129.21:8317/v1",
+      "apiKey": "sk-t4Mc9APaCKk3zu22eY727AkgwdlSd8nBScjTiYpWWmCBa"
+    }
+  },
+  "agents": {
+    "defaultAgent": "default",
+    "items": {
+      "default": {
+        "model": "openai/gpt-latest-medium"
+      }
+    }
+  },
+  "runtime": {
+    "retry": {
+      "maxAttempts": 2,
+      "baseDelayMs": 300,
+      "maxDelayMs": 3000
+    },
+    "tool": {
+      "timeoutMs": 120000,
+      "maxConcurrency": 4,
+      "allowDestructive": false,
+      "pathPolicy": {
+        "forbidDirectories": [".git/", "node_modules/"],
+        "filenameDenyPatterns": ["^\\.env($|\\.)", "(^|/)id_rsa$"]
+      }
+    }
+  },
+  "observer": {
+    "enabled": true,
+    "redactSecrets": true
+  }
+}

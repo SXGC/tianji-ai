@@ -102,6 +102,13 @@ pnpm test
 - 如果直接在 JSON 配置中提供 provider `apiKey`、`baseUrl` 或 `headers`，则不必依赖上述 env 名称。
 - 配置系统支持任意 `${env:VAR_NAME}` 占位符，因此 `.env.example` 只覆盖当前代码内置识别的环境变量，不是完整白名单。
 
+## 冒烟测试
+
+- `@tianji/cli` 提供命令级 smoke e2e 测试，用于验证真实 CLI 子进程与 LLM 调用链路。
+- 运行命令：`SMOKE_E2E=1 pnpm --filter @tianji/cli test:smoke`
+- 当 `SMOKE_E2E=1` 时，Vitest 会自动加载仓库根目录 `.env.test`，并覆盖当前 shell 中同名环境变量。
+- 目前 `.env.test` 至少需要提供 `OPENAI_API_KEY`，例如：`OPENAI_API_KEY=...`
+
 ## Git Hooks
 
 - 仓库使用 Husky 安装 `pre-commit` hook，`pnpm install` 后会通过 `prepare` 自动安装。

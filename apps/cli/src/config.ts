@@ -5,7 +5,6 @@ import { loadResolvedConfig } from '@tianji/runtime'
 import {
   type TianjiConfig,
   type TianjiProviderConfig,
-  createDefaultUserTianjiConfig,
   getAgentSoulPath,
   getDefaultAgentDefinition,
   loadAgentSoul,
@@ -26,6 +25,8 @@ You are the default Tianji agent.
 - Be direct.
 - Be practical.
 `
+
+const DEFAULT_AGENT_NAME = 'default'
 
 export interface UserConfigPaths {
   readonly configDir: string
@@ -110,7 +111,7 @@ export function getUserConfigPaths(): UserConfigPaths {
 /**
  * Ensures the first-run user config scaffold exists.
  *
- * The initializer creates the config root, `agents/`, `logs/`, a default
+ * The initializer creates the config root, `agents/`, `logs/`, an empty
  * `tianji.json`, and the default agent `SOUL.md` when they are missing.
  * Existing user files are preserved.
  *
@@ -123,12 +124,12 @@ export async function ensureDefaultUserConfig(): Promise<UserConfigPaths> {
   await mkdir(paths.logsDir, { recursive: true })
 
   if (!(await pathExists(paths.configFilePath))) {
-    const defaultConfig = createDefaultUserTianjiConfig()
-    await writeFile(paths.configFilePath, `${JSON.stringify(defaultConfig, null, 2)}\n`, 'utf8')
+    await writeFile(paths.configFilePath, '{}\n', 'utf8')
   }
 
-  const defaultAgentDefinition = getDefaultAgentDefinition(createDefaultUserTianjiConfig())
-  const defaultSoulPath = getAgentSoulPath(paths.configDir, defaultAgentDefinition.agentName)
+  const resolvedConfig = await loadResolvedConfig()
+  const defaultAgentName = readDefaultAgentName(resolvedConfig.config)
+  const defaultSoulPath = getAgentSoulPath(paths.configDir, defaultAgentName)
 
   await mkdir(dirname(defaultSoulPath), { recursive: true })
   if (!(await pathExists(defaultSoulPath))) {
@@ -193,4 +194,8 @@ async function pathExists(filePath: string): Promise<boolean> {
   } catch {
     return false
   }
+}
+
+function readDefaultAgentName(config: TianjiConfig): string {
+  return config.agents?.defaultAgent ?? DEFAULT_AGENT_NAME
 }

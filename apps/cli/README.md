@@ -18,6 +18,13 @@
 | `anthropic` | `ANTHROPIC_API_KEY` |
 | `google` | `GOOGLE_GENERATIVE_AI_API_KEY` |
 
+## 冒烟测试
+
+- 运行命令：`SMOKE_E2E=1 pnpm --filter @tianji/cli test:smoke`
+- 该测试会启动真实的 `tianji` CLI 子进程，验证命令退出码与基础 LLM 调用链路。
+- 当 `SMOKE_E2E=1` 时，Vitest 会自动读取仓库根目录 `.env.test`，并覆盖当前 shell 中同名环境变量。
+- 对 OpenAI 链路，`.env.test` 中至少需要声明 `OPENAI_API_KEY`。
+
 ## SOUL.md 的作用
 
 `SOUL.md` 定义了 agent 的行为描述。CLI 会自动加载默认 agent 的 `SOUL.md` 并将其内容注入为 LLM 的 system prompt。
@@ -44,11 +51,12 @@ apps/cli/
 `src/config.ts` 负责以下边界：
 
 - 定位 `~/.config/tianji-ai`
-- 初始化默认 `tianji.json`
-- 初始化默认 `agents/default/SOUL.md`
+- 初始化空的 `tianji.json`，避免用户层默认值覆盖项目层配置
+- 初始化当前默认 agent 对应的 `agents/<agent>/SOUL.md`
 - 调用 `@tianji/runtime` 配置中心加载三层配置并取得最终生效配置
 - 基于最终生效配置解析默认 agent、模型引用与 `SOUL.md`
 - 将 provider apiKey 注入 `process.env`（`injectProviderEnv`）
+- 在 `openai` provider 下显式把 `baseUrl` 透传到底层模型实例，保证 OpenAI 兼容网关生效
 
 CLI 主流程不会直接拼接配置路径，也不会直接读取 `SOUL.md` 文件。
 
