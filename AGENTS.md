@@ -58,42 +58,6 @@
 
 - 如果需要执行 `git commit`，必须先加载 `git commit` skill。
 
-## Changelog 规则
-
-- Changelog 位于各包目录下：`packages/*/CHANGELOG.md`
-- 仅可修改对应包的 `## [Unreleased]` 部分。
-- 严禁修改任何已发布版本的章节，例如 `## [0.12.2]`。
-
-### `## [Unreleased]` 标准章节
-
-按以下固定标题组织：
-
-```md
-### Breaking Changes - 需要迁移的 API 变更
-
-### Added - 新功能
-
-### Changed - 对现有功能的修改
-
-### Fixed - Bug 修复
-
-### Removed - 已移除的功能
-````
-
-### 写入规则
-
-* 修改前，先完整阅读该文件中整个 `## [Unreleased]` 部分。
-* 若目标小节已存在，直接追加内容，不得创建重复标题。
-* 所有新增条目必须写入 `## [Unreleased]` 下。
-
-### 归属格式
-
-* 内部变更（来自 issue）：
-
-  * `Fixed foo bar ([#123](https://github.com/badlogic/pi-mono/issues/123))`
-* 外部贡献：
-
-  * `Added feature X ([#456](https://github.com/badlogic/pi-mono/pull/456) by [@username](https://github.com/username))`
 
 ## 文件读取与编辑规则
 
@@ -126,3 +90,4 @@ git commit --no-verify
 ## 输出要求
 
 * 所有最终回答必须使用中文。
+* 输出语言要优雅易懂，严禁使用套话、黑话。
