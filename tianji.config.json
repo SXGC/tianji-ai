@@ -9,7 +9,7 @@
     "defaultAgent": "default",
     "items": {
       "default": {
-        "model": "openai/gpt-latest-medium"
+        "model": "openai/glm-latest"
       }
     }
   },

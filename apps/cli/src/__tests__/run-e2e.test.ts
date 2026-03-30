@@ -146,7 +146,7 @@ describe('CLI integration', () => {
       expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('Run failed'))
     })
 
-    it('maps agent runtime model to provider:modelName string', async () => {
+    it('maps agent runtime model to configured model instance', async () => {
       const fakeContext = createFakeContext({
         agent: {
           ...createFakeContext().agent,
@@ -163,12 +163,14 @@ describe('CLI integration', () => {
       const runtimeRecord = runtime as unknown as {
         options?: {
           deepagents?: {
-            model?: string
+            model?: {
+              model?: string
+            }
           }
         }
       }
 
-      expect(runtimeRecord.options?.deepagents?.model).toBe('openai:gpt-latest-medium')
+      expect(runtimeRecord.options?.deepagents?.model?.model).toBe('gpt-latest-medium')
     })
 
     it('passes provider baseUrl through agent runtime config', async () => {

@@ -32,6 +32,9 @@ importers:
       '@tianji/agent':
         specifier: workspace:*
         version: link:../../packages/agent
+      '@tianji/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
       '@tianji/shared':
         specifier: workspace:*
         version: link:../../packages/shared
