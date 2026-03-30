@@ -1,7 +1,7 @@
 import { access, mkdir, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { loadResolvedConfig } from '@tianji/runtime'
+import { FileSnapshotStore, loadResolvedConfig } from '@tianji/runtime'
 import {
   type TianjiConfig,
   type TianjiProviderConfig,
@@ -51,6 +51,7 @@ export interface LoadedUserConfigContext {
   readonly config: TianjiConfig
   readonly agent: LoadedAgentConfig
   readonly resolvedEnvVars: readonly string[]
+  readonly snapshotStore: FileSnapshotStore
 }
 
 /**
@@ -104,7 +105,7 @@ export function getUserConfigPaths(): UserConfigPaths {
     agentsDir,
     logsDir,
     configFilePath: getUserTianjiConfigPath(),
-    cliLogFilePath: join(logsDir, 'cli.jsonl'),
+    cliLogFilePath: join(logsDir, 'tianji.log'),
   }
 }
 
@@ -166,6 +167,7 @@ export async function loadUserConfigContext(): Promise<LoadedUserConfigContext> 
       soul,
     },
     resolvedEnvVars: resolvedConfig.resolvedEnvVars,
+    snapshotStore: new FileSnapshotStore(join(paths.configDir, 'runtime-snapshots')),
   }
 }
 

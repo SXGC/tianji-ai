@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
+import { accessSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { isAbsolute, join, normalize, resolve } from 'node:path'
+import { dirname, isAbsolute, join, normalize, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import {
   ConfigPlaceholderError,
@@ -10,7 +12,7 @@ import {
   safeValidateTianjiConfig,
 } from '@tianji/shared'
 
-export type ConfigLayerName = 'project' | 'user' | 'workspace'
+export type ConfigLayerName = 'default' | 'user' | 'workspace'
 
 export type RuntimeConfigErrorCode =
   | 'config.parse_error'
@@ -21,7 +23,7 @@ export type RuntimeConfigErrorCode =
 
 export interface ResolvedConfigPaths {
   readonly workspaceRoot: string
-  readonly projectConfigPath: string
+  readonly defaultConfigPath: string
   readonly userConfigDir: string
   readonly userConfigPath: string
   readonly workspacesConfigDir: string
@@ -59,6 +61,9 @@ interface ParsedConfigFileResult {
   readonly config?: TianjiConfig
 }
 
+const RUNTIME_MODULE_DIR = dirname(fileURLToPath(import.meta.url))
+const DEFAULT_CONFIG_FILE_NAME = 'tianji.config.json'
+
 /**
  * Runtime-scoped configuration error with stable error codes and source
  * metadata so apps can report precise diagnostics.
@@ -93,7 +98,7 @@ export function resolveConfigPaths(options: LoadResolvedConfigOptions = {}): Res
 
   return {
     workspaceRoot: workspace.root,
-    projectConfigPath: join(workspace.root, 'tianji.config.json'),
+    defaultConfigPath: resolveDefaultConfigPath(),
     userConfigDir,
     userConfigPath: join(userConfigDir, 'tianji.json'),
     workspacesConfigDir,
@@ -133,7 +138,7 @@ export function createWorkspaceId(normalizedWorkspaceRoot: string): string {
 
 /**
  * Loads, merges, validates, and resolves the full runtime configuration across
- * project, user, and workspace layers.
+ * default, user, and workspace layers.
  *
  * @param options - Optional workspace and home directory overrides
  * @returns The final resolved config plus diagnostics metadata
@@ -144,12 +149,12 @@ export async function loadResolvedConfig(
   const workspace = resolveWorkspaceConfig(options)
   const paths = resolveConfigPaths(options)
 
-  const projectLayer = await readConfigLayer('project', paths.projectConfigPath)
+  const defaultLayer = await readConfigLayer('default', paths.defaultConfigPath)
   const userLayer = await readConfigLayer('user', paths.userConfigPath)
   const workspaceLayer = await readConfigLayer('workspace', paths.workspaceConfigPath)
 
   const mergedConfig = mergeTianjiConfigLayers(
-    projectLayer.config ?? {},
+    defaultLayer.config ?? {},
     userLayer.config ?? {},
     workspaceLayer.config ?? {}
   )
@@ -161,11 +166,42 @@ export async function loadResolvedConfig(
     paths,
     workspace,
     layers: [
-      toLayerSnapshot('project', paths.projectConfigPath, projectLayer),
+      toLayerSnapshot('default', paths.defaultConfigPath, defaultLayer),
       toLayerSnapshot('user', paths.userConfigPath, userLayer),
       toLayerSnapshot('workspace', paths.workspaceConfigPath, workspaceLayer),
     ],
   }
+}
+
+/**
+ * Resolves the built-in default config file path for both source and packaged
+ * runtime layouts.
+ *
+ * @returns The absolute path to the bundled default config file
+ */
+export function resolveDefaultConfigPath(): string {
+  return resolveRuntimeRootDir()
+}
+
+function resolveRuntimeRootDir(): string {
+  for (const candidateDir of getDefaultConfigSearchDirs()) {
+    const candidatePath = join(candidateDir, DEFAULT_CONFIG_FILE_NAME)
+    try {
+      accessSync(candidatePath)
+      return candidatePath
+    } catch {
+      // Try the next candidate directory.
+    }
+  }
+
+  return join(normalize(resolve(RUNTIME_MODULE_DIR, '..')), DEFAULT_CONFIG_FILE_NAME)
+}
+
+function getDefaultConfigSearchDirs(): readonly string[] {
+  const packageRootDir = normalize(resolve(RUNTIME_MODULE_DIR, '..'))
+  const workspaceRootDir = normalize(resolve(RUNTIME_MODULE_DIR, '../../..'))
+
+  return [workspaceRootDir, packageRootDir]
 }
 
 function mergeTianjiConfigLayers(...layers: readonly TianjiConfig[]): TianjiConfig {

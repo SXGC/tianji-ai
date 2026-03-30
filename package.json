@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
+    "tianji": "pnpm --filter @tianji/runtime build && pnpm --filter @tianji/cli build && pnpm --filter @tianji/cli exec node bin/tianji.mjs",
     "check": "pnpm exec biome check --files-ignore-unknown=true --error-on-warnings . && pnpm typecheck",
     "build": "turbo build",
     "test": "turbo test",

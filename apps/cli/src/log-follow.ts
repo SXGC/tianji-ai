@@ -1,8 +1,13 @@
-import { readFile } from 'node:fs/promises'
+import { open, stat } from 'node:fs/promises'
 import { sleep } from '@tianji/shared'
-import type { CliLogEntry, CliLogLevel } from './logger.js'
+import type { CliLogEntry, CliLogLevel, CliLogScope } from './logger.js'
 
 const LOG_FOLLOW_POLL_INTERVAL_MS = 500
+const LOG_FOLLOW_CHUNK_SIZE = 64 * 1024
+
+export interface FollowCliLogOptions {
+  readonly signal?: AbortSignal
+}
 
 /**
  * Follows the CLI JSONL log file and renders records as human-readable text.
@@ -11,15 +16,20 @@ const LOG_FOLLOW_POLL_INTERVAL_MS = 500
  * stable before switching to a more efficient incremental reader later.
  *
  * @param logFilePath - The absolute CLI log file path
+ * @param options - Optional follow controls used by tests and callers
  */
-export async function followCliLog(logFilePath: string): Promise<void> {
-  let consumedLength = 0
+export async function followCliLog(
+  logFilePath: string,
+  options: FollowCliLogOptions = {}
+): Promise<void> {
+  let offset = 0
   let remainder = ''
   let hasPrintedWaitingMessage = false
+  let lastReadFingerprint = ''
 
-  while (true) {
-    const logContent = await readCliLogFile(logFilePath)
-    if (logContent === null) {
+  while (!options.signal?.aborted) {
+    const nextStat = await readCliLogStat(logFilePath)
+    if (nextStat === null) {
       if (!hasPrintedWaitingMessage) {
         process.stdout.write(`Waiting for CLI log file: ${logFilePath}\n`)
         hasPrintedWaitingMessage = true
@@ -29,16 +39,26 @@ export async function followCliLog(logFilePath: string): Promise<void> {
       continue
     }
 
-    hasPrintedWaitingMessage = false
-    if (logContent.length < consumedLength) {
-      consumedLength = 0
-      remainder = ''
+    if (hasPrintedWaitingMessage) {
+      process.stdout.write(`Detected CLI log file: ${logFilePath}\n`)
+      hasPrintedWaitingMessage = false
     }
 
-    if (logContent.length > consumedLength) {
-      const nextChunk = logContent.slice(consumedLength)
-      consumedLength = logContent.length
-      remainder = renderCliLogChunk(remainder, nextChunk)
+    const fileWasReplaced =
+      offset > 0 && (await hasCliLogPrefixChanged(logFilePath, offset, lastReadFingerprint))
+
+    if (nextStat.size < offset || fileWasReplaced) {
+      process.stdout.write('CLI log file was truncated or recreated. Restarting from beginning.\n')
+      offset = 0
+      remainder = ''
+      lastReadFingerprint = ''
+    }
+
+    if (nextStat.size > offset) {
+      const chunkResult = await readCliLogChunk(logFilePath, offset, nextStat.size)
+      offset = chunkResult.nextOffset
+      remainder = renderCliLogChunk(remainder, chunkResult.chunk)
+      lastReadFingerprint = createCliLogFingerprint(chunkResult.chunk)
     }
 
     await sleep(LOG_FOLLOW_POLL_INTERVAL_MS)
@@ -52,12 +72,14 @@ export async function followCliLog(logFilePath: string): Promise<void> {
  * @returns A single formatted text line
  */
 export function formatCliLogEntry(entry: CliLogEntry): string {
-  const prefix = `[${entry.timestamp}] ${entry.level.toUpperCase()} ${entry.scope}`
+  const level = entry.level.toUpperCase().padEnd(5, ' ')
+  const scope = formatCliLogScope(entry.scope).padEnd(24, ' ')
+
   if (entry.data === undefined) {
-    return `${prefix}: ${entry.message}`
+    return `${entry.timestamp} ${level} ${scope} ${entry.message}`
   }
 
-  return `${prefix}: ${entry.message} ${JSON.stringify(entry.data)}`
+  return `${entry.timestamp} ${level} ${scope} ${entry.message} ${JSON.stringify(entry.data)}`
 }
 
 /**
@@ -82,7 +104,7 @@ export function parseCliLogLine(line: string): CliLogEntry | null {
       return null
     }
 
-    if (typeof parsed.scope !== 'string') {
+    if (!isCliLogScope(parsed.scope)) {
       return null
     }
 
@@ -109,9 +131,9 @@ export function parseCliLogLine(line: string): CliLogEntry | null {
   }
 }
 
-async function readCliLogFile(logFilePath: string): Promise<string | null> {
+async function readCliLogStat(logFilePath: string): Promise<{ readonly size: number } | null> {
   try {
-    return await readFile(logFilePath, 'utf8')
+    return await stat(logFilePath)
   } catch (error) {
     const errorCode =
       error instanceof Error && 'code' in error && typeof error.code === 'string'
@@ -123,6 +145,46 @@ async function readCliLogFile(logFilePath: string): Promise<string | null> {
     }
 
     throw error
+  }
+}
+
+/**
+ * Reads the newly appended byte range from the CLI log file.
+ *
+ * @param logFilePath - The absolute CLI log file path
+ * @param offset - The byte offset to start reading from
+ * @param fileSize - The current file size from stat
+ * @returns The decoded chunk and next byte offset
+ */
+export async function readCliLogChunk(
+  logFilePath: string,
+  offset: number,
+  fileSize: number
+): Promise<{ chunk: string; nextOffset: number }> {
+  const fileHandle = await open(logFilePath, 'r')
+
+  try {
+    const chunks: Buffer[] = []
+    let nextOffset = offset
+
+    while (nextOffset < fileSize) {
+      const remainingBytes = fileSize - nextOffset
+      const buffer = Buffer.alloc(Math.min(LOG_FOLLOW_CHUNK_SIZE, remainingBytes))
+      const { bytesRead } = await fileHandle.read(buffer, 0, buffer.length, nextOffset)
+      if (bytesRead === 0) {
+        break
+      }
+
+      chunks.push(buffer.subarray(0, bytesRead))
+      nextOffset += bytesRead
+    }
+
+    return {
+      chunk: Buffer.concat(chunks).toString('utf8'),
+      nextOffset,
+    }
+  } finally {
+    await fileHandle.close()
   }
 }
 
@@ -146,6 +208,40 @@ function renderCliLogChunk(remainder: string, chunk: string): string {
   return nextRemainder
 }
 
+async function hasCliLogPrefixChanged(
+  logFilePath: string,
+  offset: number,
+  expectedFingerprint: string
+): Promise<boolean> {
+  if (expectedFingerprint.length === 0) {
+    return false
+  }
+
+  const prefixStart = Math.max(0, offset - LOG_FOLLOW_CHUNK_SIZE)
+  const prefixResult = await readCliLogChunk(logFilePath, prefixStart, offset)
+  return createCliLogFingerprint(prefixResult.chunk) !== expectedFingerprint
+}
+
+function createCliLogFingerprint(chunk: string): string {
+  if (chunk.length <= LOG_FOLLOW_CHUNK_SIZE) {
+    return chunk
+  }
+
+  return chunk.slice(-LOG_FOLLOW_CHUNK_SIZE)
+}
+
 function isCliLogLevel(value: unknown): value is CliLogLevel {
   return value === 'debug' || value === 'info' || value === 'warn' || value === 'error'
+}
+
+function isCliLogScope(value: unknown): value is CliLogScope {
+  return (
+    Array.isArray(value) &&
+    value.length > 0 &&
+    value.every((item) => typeof item === 'string' && item.length > 0)
+  )
+}
+
+function formatCliLogScope(scope: CliLogScope): string {
+  return scope.join(' > ')
 }

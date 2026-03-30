@@ -12,6 +12,7 @@
 import { AIMessage, AIMessageChunk } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { FakeStreamingChatModel } from '@langchain/core/utils/testing'
+import { ChatOpenAI } from '@langchain/openai'
 import { type RuntimeEvent, createSessionId } from '@tianji/contracts'
 import { describe, expect, it } from 'vitest'
 
@@ -176,5 +177,32 @@ describe('SessionRuntime', () => {
     const runSnapshot = await runtime.getRunSnapshot(runId)
     expect(runSnapshot?.status).toBe('completed')
     expect(readTextContent(runSnapshot?.messages[1] ?? userMessage)).toBe('hello world')
+  })
+
+  it('promotes openai provider config with baseUrl into a ChatOpenAI model', () => {
+    const runtime = createSessionRuntime({
+      deepagents: {
+        model: 'openai:gpt-latest-medium',
+        providerConfig: {
+          provider: 'openai',
+          model: 'gpt-latest-medium',
+          apiKey: 'test-key',
+          baseUrl: 'http://example.test/v1',
+          headers: {
+            'x-test-header': 'enabled',
+          },
+        },
+      },
+    })
+
+    const runtimeRecord = runtime as unknown as {
+      options?: {
+        deepagents?: {
+          model?: unknown
+        }
+      }
+    }
+
+    expect(runtimeRecord.options?.deepagents?.model).toBeInstanceOf(ChatOpenAI)
   })
 })

@@ -14,6 +14,7 @@
 import { randomUUID } from 'node:crypto'
 
 import type { BaseLanguageModel } from '@langchain/core/language_models/base'
+import { ChatOpenAI } from '@langchain/openai'
 import {
   type AppMessage,
   CancelledError,
@@ -76,6 +77,7 @@ export interface RunRuntimeMetadata extends SessionRuntimeMetadata {
 
 export interface SessionRuntimeDeepagentsConfig {
   readonly model: string | BaseLanguageModel
+  readonly providerConfig?: RuntimeProviderConfig
   readonly middleware?: readonly unknown[]
   readonly backend?: unknown
   readonly checkpointer?: boolean | unknown
@@ -83,6 +85,14 @@ export interface SessionRuntimeDeepagentsConfig {
   readonly subagents?: readonly { readonly name: string; [key: string]: unknown }[]
   readonly skills?: readonly string[]
   readonly interruptOn?: Record<string, boolean | InterruptOnConfig>
+}
+
+export interface RuntimeProviderConfig {
+  readonly provider: string
+  readonly model: string
+  readonly apiKey?: string
+  readonly baseUrl?: string
+  readonly headers?: Record<string, string>
 }
 
 export interface DeepagentsInterruptRecord {
@@ -152,8 +162,48 @@ interface AbortSignalScope {
 }
 
 export function createSessionRuntime(options: SessionRuntimeOptions): SessionRuntime {
+  const normalizedOptions = normalizeSessionRuntimeOptions(options)
   // 统一隐藏具体实现，确保外部仅依赖稳定的 SessionRuntime 接口。
-  return new SessionRuntimeImpl(options)
+  return new SessionRuntimeImpl(normalizedOptions)
+}
+
+function normalizeSessionRuntimeOptions(options: SessionRuntimeOptions): SessionRuntimeOptions {
+  if (options.deepagents === undefined) {
+    return options
+  }
+
+  return {
+    ...options,
+    deepagents: {
+      ...options.deepagents,
+      model: resolveDeepagentsModel(options.deepagents),
+    },
+  }
+}
+
+function resolveDeepagentsModel(
+  config: SessionRuntimeDeepagentsConfig
+): SessionRuntimeDeepagentsConfig['model'] {
+  if (typeof config.model !== 'string') {
+    return config.model
+  }
+
+  if (config.providerConfig?.provider !== 'openai') {
+    return config.model
+  }
+
+  if (config.providerConfig.baseUrl === undefined && config.providerConfig.headers === undefined) {
+    return config.model
+  }
+
+  return new ChatOpenAI({
+    model: config.providerConfig.model,
+    apiKey: config.providerConfig.apiKey,
+    configuration: {
+      baseURL: config.providerConfig.baseUrl,
+      defaultHeaders: config.providerConfig.headers,
+    },
+  })
 }
 
 export function readSessionRuntimeMetadata(

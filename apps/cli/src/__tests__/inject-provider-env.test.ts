@@ -1,3 +1,4 @@
+import { FileSnapshotStore } from '@tianji/runtime'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import type { LoadedUserConfigContext } from '../config.js'
@@ -12,7 +13,7 @@ function createTestContext(provider: string, apiKey?: string): LoadedUserConfigC
       agentsDir: '/tmp/test/agents',
       logsDir: '/tmp/test/logs',
       configFilePath: '/tmp/test/tianji.json',
-      cliLogFilePath: '/tmp/test/logs/cli.jsonl',
+      cliLogFilePath: '/tmp/test/logs/tianji.log',
     },
     config: {},
     agent: {
@@ -25,6 +26,7 @@ function createTestContext(provider: string, apiKey?: string): LoadedUserConfigC
       soul: 'test',
     },
     resolvedEnvVars: [],
+    snapshotStore: new FileSnapshotStore('/tmp/test/runtime-snapshots'),
   }
 }
 

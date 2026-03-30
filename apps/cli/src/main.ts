@@ -1,14 +1,25 @@
-import { ChatOpenAI } from '@langchain/openai'
 import type { AppMessage, RuntimeEvent, SessionId } from '@tianji/contracts'
 import { type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
 
 import type { LoadedUserConfigContext } from './config.js'
-import { getUserConfigPaths, injectProviderEnv, loadUserConfigContext } from './config.js'
-import { followCliLog } from './log-follow.js'
-import type { CliLogger } from './logger.js'
+import {
+  type UserConfigPaths,
+  getUserConfigPaths,
+  injectProviderEnv,
+  loadUserConfigContext,
+} from './config.js'
+import { loadDevelopmentEnv } from './dev-env.js'
+import { type FollowCliLogOptions, followCliLog } from './log-follow.js'
+import type { CliLogScope, CliLogger } from './logger.js'
 import { createCliLogger } from './logger.js'
 
 const CLI_USAGE = ['Usage:', '  tianji run "<prompt>"', '  tianji log -f'].join('\n')
+const CLI_RUN_SCOPE = ['cli', 'run'] as const satisfies CliLogScope
+const CLI_RUN_CONFIG_SCOPE = ['cli', 'run', 'config'] as const satisfies CliLogScope
+const CLI_RUN_RUNTIME_SCOPE = ['cli', 'run', 'runtime'] as const satisfies CliLogScope
+const CLI_RUN_EVENT_SCOPE = ['cli', 'run', 'event'] as const satisfies CliLogScope
+const CLI_LOG_FOLLOW_SCOPE = ['cli', 'log', 'follow'] as const satisfies CliLogScope
+const CLI_MAIN_SCOPE = ['cli', 'main'] as const satisfies CliLogScope
 
 export interface RunCommand {
   readonly kind: 'run'
@@ -24,6 +35,8 @@ export type TianjiCliCommand = RunCommand | LogFollowCommand
 export interface RunCommandDependencies {
   readonly loadContext?: () => Promise<LoadedUserConfigContext>
   readonly createRuntime?: (context: LoadedUserConfigContext) => SessionRuntime
+  readonly getUserConfigPaths?: () => UserConfigPaths
+  readonly followCliLog?: (logFilePath: string, options?: FollowCliLogOptions) => Promise<void>
 }
 
 class CliUsageError extends Error {
@@ -82,13 +95,14 @@ export async function runCli(
   deps?: RunCommandDependencies
 ): Promise<number> {
   try {
+    loadDevelopmentEnv()
     const command = parseCliArgs(argv)
 
     if (command.kind === 'run') {
       return await handleRunCommand(command, deps)
     }
 
-    return await handleLogFollowCommand(command)
+    return await handleLogFollowCommand(command, deps)
   } catch (error) {
     await tryLogCliFailure(error, argv)
     console.error(formatCliError(error))
@@ -103,42 +117,56 @@ export async function runCli(
  * @returns 已初始化的 SessionRuntime 实例
  */
 export function createCliRuntime(context: LoadedUserConfigContext): SessionRuntime {
-  const model = createCliModel(context)
+  const providerBaseUrl = readProviderBaseUrl(context.agent.providerConfig)
+  const providerHeaders = readProviderHeaders(context.agent.providerConfig)
 
   return createSessionRuntime({
-    deepagents: { model },
+    deepagents: {
+      model: createCliModel(context),
+      providerConfig: {
+        provider: context.agent.provider,
+        model: context.agent.modelName,
+        apiKey: context.agent.providerConfig?.apiKey,
+        baseUrl: providerBaseUrl,
+        headers: providerHeaders,
+      },
+    },
+    snapshotStore: context.snapshotStore,
   })
 }
 
-/**
- * 为 CLI 构造 deepagents 可消费的模型实例。
- *
- * openai provider 需要显式透传 baseUrl，否则 deepagents 仅根据字符串模型名
- * 走默认 OpenAI 端点，无法命中用户配置的兼容网关。
- *
- * @param context - 已加载的用户配置上下文
- * @returns deepagents 可直接使用的模型实例或模型标识
- */
-function createCliModel(context: LoadedUserConfigContext): string | ChatOpenAI {
-  if (context.agent.provider !== 'openai') {
-    return `${context.agent.provider}:${context.agent.modelName}`
+function readProviderBaseUrl(
+  providerConfig: LoadedUserConfigContext['agent']['providerConfig']
+): string | undefined {
+  return typeof providerConfig?.baseUrl === 'string' ? providerConfig.baseUrl : undefined
+}
+
+function readProviderHeaders(
+  providerConfig: LoadedUserConfigContext['agent']['providerConfig']
+): Record<string, string> | undefined {
+  if (
+    providerConfig?.headers === undefined ||
+    providerConfig.headers === null ||
+    typeof providerConfig.headers !== 'object'
+  ) {
+    return undefined
   }
 
-  const baseUrl =
-    typeof context.agent.providerConfig?.baseUrl === 'string'
-      ? context.agent.providerConfig.baseUrl
-      : undefined
+  const headerEntries = Object.entries(providerConfig.headers).filter(
+    (entry): entry is [string, string] => typeof entry[1] === 'string'
+  )
 
-  return new ChatOpenAI({
-    model: context.agent.modelName,
-    apiKey: context.agent.providerConfig?.apiKey,
-    configuration:
-      baseUrl === undefined
-        ? undefined
-        : {
-            baseURL: baseUrl,
-          },
-  })
+  return headerEntries.length > 0 ? Object.fromEntries(headerEntries) : undefined
+}
+
+/**
+ * 为 CLI 构造 deepagents 可消费的模型标识。
+ *
+ * @param context - 已加载的用户配置上下文
+ * @returns `provider:modelName` 形式的模型标识
+ */
+function createCliModel(context: LoadedUserConfigContext): string {
+  return `${context.agent.provider}:${context.agent.modelName}`
 }
 
 /**
@@ -171,14 +199,20 @@ async function executeRunTurn(
     systemPrompt,
   })
 
-  await logger.logInfo('cli.run.runtime', 'Run started', { runId: String(runId) })
+  await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Run started', {
+    runId: String(runId),
+    sessionId: String(sessionId),
+  })
 
   for await (const event of runtime.streamEvents(runId)) {
     await handleRuntimeEvent(event, logger)
   }
 
   process.stdout.write('\n')
-  await logger.logInfo('cli.run.event', 'Run completed', { runId: String(runId) })
+  await logger.logInfo(CLI_RUN_SCOPE, 'Run command completed', {
+    runId: String(runId),
+    sessionId: String(sessionId),
+  })
 
   return 0
 }
@@ -186,17 +220,33 @@ async function executeRunTurn(
 async function handleRuntimeEvent(event: RuntimeEvent, logger: CliLogger): Promise<void> {
   switch (event.type) {
     case 'message.delta':
+      await logger.logDebug(CLI_RUN_EVENT_SCOPE, 'Received runtime event', {
+        eventType: event.type,
+        runId: String(event.runId),
+        messageId: event.messageId,
+        sequence: event.sequence,
+        channel: event.channel,
+        deltaLength: event.channel === 'text' ? event.payload.content.length : undefined,
+      })
       if (event.channel === 'text') {
         process.stdout.write(event.payload.content)
       }
       break
     case 'run.failed':
-      await logger.logError('cli.run.event', 'Run failed', {
+      await logger.logError(CLI_RUN_EVENT_SCOPE, 'Received runtime failure event', {
+        eventType: event.type,
+        sessionId: String(event.sessionId),
+        runId: String(event.runId),
         errorCode: event.error.code,
         errorMessage: event.error.message,
       })
       throw new Error(`Run failed: ${event.error.message}`)
     case 'run.completed':
+      await logger.logInfo(CLI_RUN_EVENT_SCOPE, 'Received runtime completion event', {
+        eventType: event.type,
+        sessionId: String(event.sessionId),
+        runId: String(event.runId),
+      })
       break
   }
 }
@@ -205,16 +255,18 @@ export async function handleRunCommand(
   command: RunCommand,
   deps?: RunCommandDependencies
 ): Promise<number> {
-  const paths = getUserConfigPaths()
+  const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
+  const paths = resolveUserConfigPaths()
   const logger = createCliLogger(paths)
 
-  await logger.logInfo('cli.run', 'Received run command', {
+  await logger.logInfo(CLI_RUN_SCOPE, 'Received run command', {
     promptLength: command.prompt.length,
   })
 
   const loadContext = deps?.loadContext ?? loadUserConfigContext
+  await logger.logInfo(CLI_RUN_CONFIG_SCOPE, 'Loading user config context')
   const context = await loadContext()
-  await logger.logInfo('cli.run.config', 'Loaded user config context', {
+  await logger.logInfo(CLI_RUN_CONFIG_SCOPE, 'Loaded user config context', {
     configPath: context.paths.configFilePath,
     agentName: context.agent.agentName,
     provider: context.agent.provider,
@@ -224,20 +276,31 @@ export async function handleRunCommand(
   })
 
   injectProviderEnv(context)
-  await logger.logInfo('cli.run.config', 'Provider env vars injected', {
+  await logger.logInfo(CLI_RUN_CONFIG_SCOPE, 'Injected provider env vars', {
     provider: context.agent.provider,
   })
 
   const createRuntime = deps?.createRuntime ?? createCliRuntime
-  const runtime = createRuntime(context)
-  await logger.logInfo('cli.run.runtime', 'Session runtime created', {
+  await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Creating session runtime', {
     agentName: context.agent.agentName,
-    model: `${context.agent.provider}:${context.agent.modelName}`,
+    provider: context.agent.provider,
+    modelName: context.agent.modelName,
+  })
+  const runtime = createRuntime(context)
+  await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Session runtime created', {
+    agentName: context.agent.agentName,
+    provider: context.agent.provider,
+    modelName: context.agent.modelName,
   })
 
   const sessionSnapshot = await runtime.createSession()
-  await logger.logInfo('cli.run.runtime', 'Session created', {
+  await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Session created', {
     sessionId: String(sessionSnapshot.sessionId),
+  })
+
+  await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Starting run turn', {
+    sessionId: String(sessionSnapshot.sessionId),
+    promptLength: command.prompt.length,
   })
 
   return executeRunTurn(
@@ -249,22 +312,22 @@ export async function handleRunCommand(
   )
 }
 
-async function handleLogFollowCommand(_command: LogFollowCommand): Promise<number> {
-  const paths = getUserConfigPaths()
-  const logger = createCliLogger(paths)
+async function handleLogFollowCommand(
+  _command: LogFollowCommand,
+  deps?: RunCommandDependencies
+): Promise<number> {
+  const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
+  const followCliLogCommand = deps?.followCliLog ?? followCliLog
+  const paths = resolveUserConfigPaths()
 
-  await logger.logInfo('cli.log', 'Starting CLI log follow loop', {
-    logFilePath: paths.cliLogFilePath,
-  })
-
-  await followCliLog(paths.cliLogFilePath)
+  await followCliLogCommand(paths.cliLogFilePath)
   return 0
 }
 
 async function tryLogCliFailure(error: unknown, argv: readonly string[]): Promise<void> {
   try {
     const logger = createCliLogger(getUserConfigPaths())
-    await logger.logError('cli.main', 'CLI command failed', {
+    await logger.logError(CLI_MAIN_SCOPE, 'CLI command failed', {
       argv: [...argv],
       error: getErrorMessage(error),
     })

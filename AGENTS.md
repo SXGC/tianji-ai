@@ -56,7 +56,6 @@
 
 ### 提交规则
 
-- 除非用户明确要求，否则禁止提交代码。
 - 如果需要执行 `git commit`，必须先加载 `git commit` skill。
 
 ## Changelog 规则

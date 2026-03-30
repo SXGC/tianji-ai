@@ -48,24 +48,25 @@
 
 `tianji-ai` 使用三层 JSON 配置。
 
-### 3.1 项目层
+### 3.1 默认层
 
 路径：
 
 ```text
-<project-root>/tianji.config.json
+开发态: <repo-root>/tianji.config.json
+生产态: <runtime-package-root>/tianji.config.json
 ```
 
 作用：
 
-- 项目默认值
+- Tianji 内置默认值
 - 团队共享行为
 - 默认 provider 配置
 - 默认 agent 定义与模型路由
 - 默认工具策略
 - 默认 observer 设置
 
-这是仓库的**工厂默认**配置。
+这是 Tianji 自带的**工厂默认**配置。
 
 ### 3.2 用户层
 
@@ -81,7 +82,7 @@
 - 跨仓库的个人默认值
 - 偏好的 provider、UI 相关默认值、个人非敏感设置
 
-这一层会覆盖项目层。
+这一层会覆盖默认层。
 
 ### 3.3 工作区层
 
@@ -97,7 +98,7 @@
 - 仓库本地的用户行为
 - 针对工具、模型或运行时设置的本地例外
 
-这一层会同时覆盖项目层和用户层。
+这一层会同时覆盖默认层和用户层。
 
 ---
 
@@ -105,13 +106,13 @@
 
 从低到高的优先级顺序：
 
-1. 项目层
+1. 默认层
 2. 用户层
 3. 工作区层
 
 简写为：
 
-> **project < user < workspace**
+> **default < user < workspace**
 
 规则：
 

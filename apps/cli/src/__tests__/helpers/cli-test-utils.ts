@@ -3,10 +3,14 @@
  *
  * 为 CLI 测试统一提供 fake context 构造、runtime 包装与 stdout 捕获能力。
  */
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import { type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
+import { FileSnapshotStore, type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
 
 import type { LoadedUserConfigContext } from '../../config.js'
+import type { UserConfigPaths } from '../../config.js'
 
 /**
  * 构造最小可用的 LoadedUserConfigContext，用于测试注入。
@@ -23,7 +27,7 @@ export function createFakeContext(
       agentsDir: '/tmp/tianji-test/config/agents',
       logsDir: '/tmp/tianji-test/config/logs',
       configFilePath: '/tmp/tianji-test/config/tianji.json',
-      cliLogFilePath: '/tmp/tianji-test/config/logs/cli.jsonl',
+      cliLogFilePath: '/tmp/tianji-test/config/logs/tianji.log',
     },
     config: {},
     agent: {
@@ -36,6 +40,7 @@ export function createFakeContext(
       soul: '# Test Agent\n\nYou are a test agent.\n',
     },
     resolvedEnvVars: [],
+    snapshotStore: new FileSnapshotStore('/tmp/tianji-test/runtime-snapshots'),
     ...overrides,
   }
 }
@@ -84,4 +89,96 @@ export async function captureStdout(fn: () => Promise<void>): Promise<string> {
   }
 
   return chunks.join('')
+}
+
+/**
+ * 捕获长生命周期任务的 stdout，并暴露实时读取能力。
+ *
+ * @param fn - 在 stdout 被劫持期间执行的异步任务
+ * @returns 实时输出读取与清理方法
+ */
+export async function captureStdoutLive<T>(fn: () => Promise<T>): Promise<{
+  readonly getOutput: () => string
+  readonly done: Promise<T>
+  readonly restore: () => void
+}> {
+  const chunks: string[] = []
+  const originalWrite = process.stdout.write.bind(process.stdout)
+
+  const spy = (chunk: unknown): boolean => {
+    if (typeof chunk === 'string') {
+      chunks.push(chunk)
+    }
+    return true
+  }
+
+  process.stdout.write = spy as typeof process.stdout.write
+
+  let restored = false
+  const restore = (): void => {
+    if (restored) {
+      return
+    }
+
+    restored = true
+    process.stdout.write = originalWrite
+  }
+
+  const done = fn().finally(() => {
+    restore()
+  })
+
+  return {
+    getOutput: () => chunks.join(''),
+    done,
+    restore,
+  }
+}
+
+/**
+ * 轮询等待 stdout 中出现目标文本，适用于 follow 类测试。
+ *
+ * @param readOutput - 返回当前累计输出的函数
+ * @param expectedText - 期望出现的文本片段
+ */
+export async function waitForOutput(
+  readOutput: () => string,
+  expectedText: string,
+  timeoutMs = 4_000
+): Promise<void> {
+  const startedAt = Date.now()
+
+  while (Date.now() - startedAt < timeoutMs) {
+    if (readOutput().includes(expectedText)) {
+      return
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+
+  throw new Error(`Timed out waiting for output: ${expectedText}`)
+}
+
+/**
+ * 创建独立的 CLI 临时配置路径，避免测试之间互相污染。
+ *
+ * @returns 临时路径集合及清理函数
+ */
+export async function createTempCliPaths(): Promise<{
+  readonly paths: UserConfigPaths
+  readonly cleanup: () => Promise<void>
+}> {
+  const configDir = await mkdtemp(join(tmpdir(), 'tianji-cli-test-'))
+  const paths: UserConfigPaths = {
+    configDir,
+    agentsDir: join(configDir, 'agents'),
+    logsDir: join(configDir, 'logs'),
+    configFilePath: join(configDir, 'tianji.json'),
+    cliLogFilePath: join(configDir, 'logs', 'tianji.log'),
+  }
+
+  return {
+    paths,
+    cleanup: () => rm(configDir, { recursive: true, force: true }),
+  }
 }

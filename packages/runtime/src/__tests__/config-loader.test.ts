@@ -15,8 +15,8 @@ const createdDirs: string[] = []
 
 describe('runtime config loader', () => {
   afterEach(async () => {
-    process.env.OPENAI_API_KEY = undefined
-    process.env.ANTHROPIC_API_KEY = undefined
+    Reflect.deleteProperty(process.env, 'OPENAI_API_KEY')
+    Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY')
 
     await Promise.all(createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
@@ -33,47 +33,22 @@ describe('runtime config loader', () => {
 
     expect(workspace.root).toBe(workspaceRoot)
     expect(workspace.id).toBe(createWorkspaceId(workspace.normalizedRoot))
-    expect(paths.projectConfigPath).toBe(join(workspaceRoot, 'tianji.config.json'))
+    expect(paths.defaultConfigPath).toBe('/workspaces/dev_docker/tianji-ai/tianji.config.json')
     expect(paths.userConfigPath).toBe(join(homeDir, '.config', 'tianji-ai', 'tianji.json'))
     expect(paths.workspaceConfigPath).toBe(
       join(homeDir, '.config', 'tianji-ai', 'workspaces', `${workspace.id}.json`)
     )
   })
 
-  it('should merge project, user, and workspace config layers', async () => {
+  it('should merge default, user, and workspace config layers', async () => {
     const sandbox = await createSandbox()
     const workspaceRoot = join(sandbox, 'workspace')
     const homeDir = join(sandbox, 'home')
     await mkdir(workspaceRoot, { recursive: true })
     await mkdir(homeDir, { recursive: true })
 
-    process.env.OPENAI_API_KEY = 'sk-project'
+    process.env.OPENAI_API_KEY = 'sk-default'
     process.env.ANTHROPIC_API_KEY = 'sk-workspace'
-
-    await writeJson(join(workspaceRoot, 'tianji.config.json'), {
-      providers: {
-        openai: {
-          apiKey: '${env:OPENAI_API_KEY}',
-          baseUrl: 'https://project.example/v1',
-        },
-      },
-      agents: {
-        defaultAgent: 'default',
-        items: {
-          default: {
-            model: 'openai/gpt-4.1',
-          },
-        },
-      },
-      runtime: {
-        tool: {
-          timeoutMs: 120000,
-          pathPolicy: {
-            forbidDirectories: ['.git/', 'node_modules/'],
-          },
-        },
-      },
-    })
 
     await writeJson(join(homeDir, '.config', 'tianji-ai', 'tianji.json'), {
       runtime: {
@@ -111,11 +86,11 @@ describe('runtime config loader', () => {
 
     const result = await loadResolvedConfig({ workspaceRoot, userHomeDir: homeDir })
 
-    expect(result.config.providers?.openai?.apiKey).toBe('sk-project')
-    expect(result.config.providers?.openai?.baseUrl).toBe('https://project.example/v1')
+    expect(result.config.providers?.openai?.apiKey).toBe('sk-default')
+    expect(result.config.providers?.openai?.baseUrl).toBe('http://100.78.129.21:8317/v1')
     expect(result.config.providers?.anthropic?.apiKey).toBe('sk-workspace')
     expect(result.config.agents?.defaultAgent).toBe('reviewer')
-    expect(result.config.agents?.items?.default?.model).toBe('openai/gpt-4.1')
+    expect(result.config.agents?.items?.default?.model).toBe('openai/gpt-latest-medium')
     expect(result.config.agents?.items?.reviewer?.model).toBe('anthropic/claude-3-7-sonnet')
     expect(result.config.runtime?.tool?.timeoutMs).toBe(120000)
     expect(result.config.runtime?.tool?.maxConcurrency).toBe(8)
@@ -123,23 +98,28 @@ describe('runtime config loader', () => {
     expect(result.config.observer).toEqual({ enabled: false, redactSecrets: false })
     expect(result.resolvedEnvVars).toEqual(['OPENAI_API_KEY', 'ANTHROPIC_API_KEY'])
     expect(result.layers.map((layer) => [layer.name, layer.exists])).toEqual([
-      ['project', true],
+      ['default', true],
       ['user', true],
       ['workspace', true],
     ])
   })
 
-  it('should skip missing config layers', async () => {
+  it('should fail when default config placeholders cannot be resolved', async () => {
     const sandbox = await createSandbox()
     const workspaceRoot = join(sandbox, 'workspace')
     const homeDir = join(sandbox, 'home')
     await mkdir(workspaceRoot, { recursive: true })
     await mkdir(homeDir, { recursive: true })
 
-    const result = await loadResolvedConfig({ workspaceRoot, userHomeDir: homeDir })
-
-    expect(result.config).toEqual({})
-    expect(result.layers.every((layer) => layer.exists === false)).toBe(true)
+    await expect(loadResolvedConfig({ workspaceRoot, userHomeDir: homeDir })).rejects.toMatchObject(
+      {
+        code: 'config.env_missing',
+        details: {
+          phase: 'placeholder',
+          fieldPath: 'OPENAI_API_KEY',
+        },
+      } satisfies Partial<RuntimeConfigError>
+    )
   })
 
   it('should fail on invalid json in any layer', async () => {
@@ -168,7 +148,7 @@ describe('runtime config loader', () => {
     const homeDir = join(sandbox, 'home')
     await mkdir(workspaceRoot, { recursive: true })
 
-    await writeJson(join(workspaceRoot, 'tianji.config.json'), {
+    await writeJson(join(homeDir, '.config', 'tianji-ai', 'tianji.json'), {
       agents: {
         defaultAgent: 'default',
         items: {
@@ -183,7 +163,7 @@ describe('runtime config loader', () => {
       {
         code: 'config.schema_error',
         details: {
-          layer: 'project',
+          layer: 'user',
           phase: 'schema',
         },
       } satisfies Partial<RuntimeConfigError>
@@ -196,7 +176,7 @@ describe('runtime config loader', () => {
     const homeDir = join(sandbox, 'home')
     await mkdir(workspaceRoot, { recursive: true })
 
-    await writeJson(join(workspaceRoot, 'tianji.config.json'), {
+    await writeJson(join(homeDir, '.config', 'tianji-ai', 'tianji.json'), {
       providers: {
         openai: {
           apiKey: '${env:OPENAI_API_KEY}',
@@ -222,7 +202,7 @@ describe('runtime config loader', () => {
     await mkdir(workspaceRoot, { recursive: true })
     process.env.OPENAI_API_KEY = ''
 
-    await writeJson(join(workspaceRoot, 'tianji.config.json'), {
+    await writeJson(join(homeDir, '.config', 'tianji-ai', 'tianji.json'), {
       providers: {
         openai: {
           apiKey: '${env:OPENAI_API_KEY}',

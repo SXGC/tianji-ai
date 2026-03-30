@@ -106,26 +106,31 @@
 - `model` 解析时只按第一个 `/` 切分，避免模型名自身包含 `/` 时被错误拆分。
 - schema 只负责校验 JSON 结构；`SOUL.md` 的存在性、可读性、非空性由 CLI loader 校验。
 
-### 3. 固定用户层配置路径
+### 3. 三层配置加载与用户层 agent 目录
 
-按本次需求，仅先落地用户层配置：
+CLI 复用 `packages/runtime` 已有的三层 JSON 配置加载能力，按以下优先级合并：
 
-- `~/.config/tianji-ai/tianji.json`
+- 项目层：`<workspace-root>/tianji.config.json`
+- 用户层：`~/.config/tianji-ai/tianji.json`
+- 工作区层：`~/.config/tianji-ai/workspaces/<workspace-id>.json`
+
+其中 agent 文件资源仍固定放在用户配置目录：
+
 - `~/.config/tianji-ai/agents/<agent-name>/SOUL.md`
 
 CLI 行为：
 
-- 配置不存在：自动创建默认配置文件与默认 agent 的 `SOUL.md`
-- 配置存在但没有默认 agent：直接报错
-- 配置合法：解析默认 agent，加载 `SOUL.md`，并启动 runtime
+- 用户层配置目录不存在：自动创建目录、空的用户层 `tianji.json`、默认 agent 的 `SOUL.md`
+- 三层合并后的配置存在但没有默认 agent：直接报错
+- 配置合法：解析三层合并结果中的默认 agent，加载用户层 `SOUL.md`，并启动 runtime
 
 ### 4. 最小运行链路
 
 `tianji run "hi"` 的执行流程：
 
-1. 定位 `~/.config/tianji-ai/tianji.json`
-2. 如果文件不存在，则创建默认配置与 `~/.config/tianji-ai/agents/default/SOUL.md`
-3. 读取 JSON 配置并做 schema 校验
+1. 通过 `loadResolvedConfig()` 加载三层配置：default < user < workspace
+2. 如果用户层配置目录或用户层配置文件不存在，则创建 `~/.config/tianji-ai/tianji.json` 与 `~/.config/tianji-ai/agents/default/SOUL.md`
+3. 对三层合并后的 JSON 配置做 schema 校验
 4. 解析 `${env:...}` 占位符
 5. 读取默认 agent：
    - `model = "provider/modelName"`
@@ -328,11 +333,11 @@ CLI 行为：
 
 ## 错误处理策略
 
-### 配置文件不存在
+### 用户层配置文件不存在
 
 行为：
 
-- 自动创建默认用户配置
+- 自动创建空的用户层配置文件
 - 自动创建默认 agent 的 `SOUL.md`
 - 记录日志
 - 提示用户已创建配置文件
@@ -405,7 +410,7 @@ CLI 行为：
 
 处理方式：
 
-- 在 CLI 层做一次显式映射：
+- 在 CLI 层基于 `loadResolvedConfig()` 的结果做一次显式映射：
   - agent config + `SOUL.md` -> runtime deepagents config
 
 ### 3. agent 目录与 JSON 配置可能失配
@@ -427,7 +432,7 @@ CLI 行为：
 
 满足以下条件即视为完成：
 
-1. `tianji run "hi"` 可在无配置文件时自动生成 `~/.config/tianji-ai/tianji.json`
+1. `tianji run "hi"` 可在缺少用户层配置文件时自动生成 `~/.config/tianji-ai/tianji.json`
 2. 同时自动生成 `~/.config/tianji-ai/agents/default/SOUL.md`
 3. 默认 agent 配置从 `tianji.json` 读取，agent 身份配置从对应 `SOUL.md` 读取
 4. 缺失默认 agent、非法 `model`、缺失 provider 或缺失 `SOUL.md` 时命令报错

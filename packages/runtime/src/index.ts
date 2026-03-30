@@ -40,6 +40,7 @@ export {
   type DeepagentsRunWorkflowState,
   type RunRuntimeMetadata,
   type ResumeRunOptions,
+  type RuntimeProviderConfig,
   type RunTurnOptions,
   type SessionRuntimeDeepagentsConfig,
   type SessionRuntimeEngine,

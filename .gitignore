@@ -21,6 +21,7 @@ packages/*/dist-firefox/
 
 # Environment
 .env
+.env.*
 
 # Editor files
 .vscode/

@@ -15,7 +15,6 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:smoke": "SMOKE_E2E=1 vitest run src/__tests__/smoke-e2e.test.ts",
     "clean": "rm -rf dist"
   },
   "dependencies": {

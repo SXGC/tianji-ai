@@ -125,8 +125,8 @@ describe('@tianji/runtime', () => {
       resolveWorkspaceConfig({ workspaceRoot: '/tmp/tianji-runtime-exports' }).id
     ).toBeDefined()
     expect(
-      resolveConfigPaths({ workspaceRoot: '/tmp/tianji-runtime-exports' }).projectConfigPath
-    ).toBe('/tmp/tianji-runtime-exports/tianji.config.json')
+      resolveConfigPaths({ workspaceRoot: '/tmp/tianji-runtime-exports' }).defaultConfigPath
+    ).toBe('/workspaces/dev_docker/tianji-ai/tianji.config.json')
     expect(RuntimeConfigError).toBeDefined()
     expect(loadResolvedConfig).toBeDefined()
     expect(createSessionOptions.sessionId).toBe(executionContext.sessionId)
@@ -151,8 +151,9 @@ describe('@tianji/runtime', () => {
     expect(dependencies['@tianji/llm']).toBe('workspace:*')
     expect(dependencies['@tianji/shared']).toBe('workspace:*')
     expect(dependencyNames).toEqual([
-      '@langchain/langgraph',
       '@langchain/core',
+      '@langchain/langgraph',
+      '@langchain/openai',
       '@tianji/contracts',
       '@tianji/llm',
       '@tianji/shared',

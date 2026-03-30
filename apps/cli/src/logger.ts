@@ -2,29 +2,37 @@ import { appendFile, mkdir } from 'node:fs/promises'
 import type { UserConfigPaths } from './config.js'
 
 export type CliLogLevel = 'debug' | 'info' | 'warn' | 'error'
+export type CliLogScope = readonly [string, ...string[]]
+
+const SENSITIVE_DATA_KEYS = new Set(['apiKey', 'prompt', 'soul'])
 
 export interface CliLogEntry {
   readonly timestamp: string
   readonly level: CliLogLevel
-  readonly scope: string
+  readonly scope: CliLogScope
   readonly message: string
   readonly data?: Record<string, unknown>
 }
 
 export interface CliLogger {
   readonly appendCliLog: (entry: CliLogEntry) => Promise<void>
+  readonly logDebug: (
+    scope: CliLogScope,
+    message: string,
+    data?: Record<string, unknown>
+  ) => Promise<void>
   readonly logInfo: (
-    scope: string,
+    scope: CliLogScope,
     message: string,
     data?: Record<string, unknown>
   ) => Promise<void>
   readonly logWarn: (
-    scope: string,
+    scope: CliLogScope,
     message: string,
     data?: Record<string, unknown>
   ) => Promise<void>
   readonly logError: (
-    scope: string,
+    scope: CliLogScope,
     message: string,
     data?: Record<string, unknown>
   ) => Promise<void>
@@ -40,6 +48,9 @@ export function createCliLogger(paths: UserConfigPaths): CliLogger {
   return {
     appendCliLog(entry) {
       return appendCliLog(paths, entry)
+    },
+    logDebug(scope, message, data) {
+      return writeCliLog(paths, 'debug', scope, message, data)
     },
     logInfo(scope, message, data) {
       return writeCliLog(paths, 'info', scope, message, data)
@@ -74,11 +85,28 @@ export async function appendCliLog(paths: UserConfigPaths, entry: CliLogEntry): 
  */
 export function logInfo(
   paths: UserConfigPaths,
-  scope: string,
+  scope: CliLogScope,
   message: string,
   data?: Record<string, unknown>
 ): Promise<void> {
   return writeCliLog(paths, 'info', scope, message, data)
+}
+
+/**
+ * Writes a debug-level CLI log entry.
+ *
+ * @param paths - The resolved user config paths
+ * @param scope - The logical module scope
+ * @param message - The user or developer facing log message
+ * @param data - Optional structured metadata
+ */
+export function logDebug(
+  paths: UserConfigPaths,
+  scope: CliLogScope,
+  message: string,
+  data?: Record<string, unknown>
+): Promise<void> {
+  return writeCliLog(paths, 'debug', scope, message, data)
 }
 
 /**
@@ -91,27 +119,99 @@ export function logInfo(
  */
 export function logError(
   paths: UserConfigPaths,
-  scope: string,
+  scope: CliLogScope,
   message: string,
   data?: Record<string, unknown>
 ): Promise<void> {
   return writeCliLog(paths, 'error', scope, message, data)
 }
 
-async function writeCliLog(
+/**
+ * Writes a warn-level CLI log entry.
+ *
+ * @param paths - The resolved user config paths
+ * @param scope - The logical module scope
+ * @param message - The warning message
+ * @param data - Optional structured metadata
+ */
+export function logWarn(
   paths: UserConfigPaths,
-  level: CliLogLevel,
-  scope: string,
+  scope: CliLogScope,
   message: string,
   data?: Record<string, unknown>
 ): Promise<void> {
+  return writeCliLog(paths, 'warn', scope, message, data)
+}
+
+async function writeCliLog(
+  paths: UserConfigPaths,
+  level: CliLogLevel,
+  scope: CliLogScope,
+  message: string,
+  data?: Record<string, unknown>
+): Promise<void> {
+  const sanitizedData = sanitizeCliLogData(data)
   const entry: CliLogEntry = {
     timestamp: new Date().toISOString(),
     level,
     scope,
     message,
-    ...(data === undefined ? {} : { data }),
+    ...(sanitizedData === undefined ? {} : { data: sanitizedData }),
   }
 
   await appendCliLog(paths, entry)
+}
+
+function sanitizeCliLogData(
+  data: Record<string, unknown> | undefined
+): Record<string, unknown> | undefined {
+  if (data === undefined) {
+    return undefined
+  }
+
+  const sanitizedEntries = Object.entries(data).flatMap(([key, value]) => {
+    if (SENSITIVE_DATA_KEYS.has(key)) {
+      return []
+    }
+
+    return [[key, sanitizeCliLogValue(value)] satisfies readonly [string, unknown]]
+  })
+
+  if (sanitizedEntries.length === 0) {
+    return undefined
+  }
+
+  return Object.fromEntries(sanitizedEntries)
+}
+
+function sanitizeCliLogValue(value: unknown): unknown {
+  if (value === null || value === undefined) {
+    return value
+  }
+
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeCliLogValue(item))
+  }
+
+  if (value instanceof Error) {
+    return { message: value.message, name: value.name }
+  }
+
+  if (typeof value === 'object') {
+    const sanitizedEntries = Object.entries(value).flatMap(([key, nestedValue]) => {
+      if (SENSITIVE_DATA_KEYS.has(key)) {
+        return []
+      }
+
+      return [[key, sanitizeCliLogValue(nestedValue)] satisfies readonly [string, unknown]]
+    })
+
+    return Object.fromEntries(sanitizedEntries)
+  }
+
+  return String(value)
 }

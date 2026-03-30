@@ -1,33 +1,149 @@
 # @tianji/cli
 
-`@tianji/cli` 是 `tianji-ai` 的命令行应用。当前阶段已支持完整的 LLM 运行链路：`tianji run "<prompt>"` 会真实调用 LLM 并流式输出 assistant 响应文本。
+`@tianji/cli` 是 `tianji-ai` 的命令行入口，提供 `run` 和 `log` 两个命令。
 
-## 当前命令面
+## 安装与运行
 
-- `tianji run "<prompt>"` — 调用 LLM 执行一次对话轮次，流式输出 assistant 文本到 stdout。
-- `tianji log -f` — 读取并持续 follow CLI JSONL 日志文件。
+在 monorepo 内可先构建 CLI：
 
-## 运行前提
+```bash
+pnpm --filter @tianji/cli build
+```
 
-- 用户需要配置正确的 provider apiKey（通过环境变量或配置文件）。
-- 支持的 provider 及其环境变量映射：
+构建后可通过以下方式运行：
 
-| provider 名称 | 环境变量 |
-|--------------|---------|
-| `openai` | `OPENAI_API_KEY` |
-| `anthropic` | `ANTHROPIC_API_KEY` |
-| `google` | `GOOGLE_GENERATIVE_AI_API_KEY` |
+```bash
+pnpm tianji run "hello"
+pnpm tianji log -f
+```
 
-## 冒烟测试
+`apps/cli/package.json` 中声明了 `bin.tianji -> ./bin/tianji.mjs`。在 monorepo 开发环境里，推荐通过仓库根脚本 `pnpm tianji` 调用；如果将包链接到全局环境，也可以直接执行 `tianji`。
 
-- 运行命令：`SMOKE_E2E=1 pnpm --filter @tianji/cli test:smoke`
-- 该测试会启动真实的 `tianji` CLI 子进程，验证命令退出码与基础 LLM 调用链路。
-- 当 `SMOKE_E2E=1` 时，Vitest 会自动读取仓库根目录 `.env.test`，并覆盖当前 shell 中同名环境变量。
-- 对 OpenAI 链路，`.env.test` 中至少需要声明 `OPENAI_API_KEY`。
+## 命令用法
 
-## SOUL.md 的作用
+### `tianji run "<prompt>"`
 
-`SOUL.md` 定义了 agent 的行为描述。CLI 会自动加载默认 agent 的 `SOUL.md` 并将其内容注入为 LLM 的 system prompt。
+- 发送一条 prompt 给默认 agent。
+- CLI 会加载配置、解析默认 agent、读取对应 `SOUL.md`、创建 runtime，并把 assistant 文本流式输出到 stdout。
+- 首次运行时，如果 `~/.config/tianji-ai/` 下缺少配置目录，会自动创建基础目录、空的用户层 `tianji.json`、默认 agent 的 `SOUL.md`，以及日志目录。
+- 用法错误返回退出码 `2`，运行时错误返回退出码 `1`。
+
+### `tianji log -f`
+
+- 读取并持续 follow CLI JSONL 日志文件。
+- 如果日志文件尚未创建，会先输出等待提示；文件出现后先打印已有内容，再持续输出新增日志。
+- CLI 会把 JSONL 渲染为可读文本，而不是直接输出原始 JSON。
+
+示例输出：
+
+```text
+2026-03-25T10:00:00.000Z INFO  cli > run > config       Loaded user config context {"agentName":"default","provider":"openai","modelName":"gpt-4.1"}
+2026-03-25T10:00:01.200Z INFO  cli > run > runtime      Session runtime created {"agentName":"default","provider":"openai","modelName":"gpt-4.1"}
+2026-03-25T10:00:02.100Z DEBUG cli > run > event        Received runtime event {"eventType":"message.delta"}
+```
+
+## 配置文件位置
+
+| 路径 | 说明 |
+|---|---|
+| `~/.config/tianji-ai/tianji.json` | 主配置文件 |
+| `~/.config/tianji-ai/agents/<agent-name>/SOUL.md` | agent 身份定义 |
+| `~/.config/tianji-ai/logs/tianji.log` | CLI JSONL 日志文件 |
+
+## 配置文件结构
+
+`tianji.json` 的核心字段示例：
+
+```json
+{
+  "providers": {
+    "openai": {
+      "apiKey": "${env:OPENAI_API_KEY}"
+    }
+  },
+  "agents": {
+    "defaultAgent": "default",
+    "items": {
+      "default": {
+        "model": "openai/gpt-4.1"
+      }
+    }
+  },
+  "runtime": {
+    "retry": {
+      "maxAttempts": 2
+    }
+  },
+  "observer": {
+    "enabled": true
+  }
+}
+```
+
+- `providers.<name>`：provider 连接信息映射，例如 `apiKey`、`baseUrl` 或其他 provider 自定义字段。值支持 `${env:VAR_NAME}` 占位符。
+- `agents.defaultAgent`：默认 agent 名称，对应 `agents.items` 中的一个 key。
+- `agents.items.<name>.model`：使用 `provider/modelName` 格式引用模型，只按第一个 `/` 切分，因此模型名自身可以包含 `/`。
+- `runtime`：运行时配置，例如重试与工具超时等公共参数。
+- `observer`：观察者配置，例如 `enabled`、`redactSecrets`。
+- 占位符解析：所有字符串值中的 `${env:VAR_NAME}` 会在运行时解析；环境变量不存在时直接报错。
+
+## Agent 目录规则
+
+- agent 名称必须匹配 `^[a-z0-9][a-z0-9-_]*$`。
+- 每个 agent 的 `SOUL.md` 固定在 `~/.config/tianji-ai/agents/<agent-name>/SOUL.md`。
+- `SOUL.md` 定义 agent 的价值观、边界与协作方式，CLI 会把文件内容作为 `systemPrompt` 传给 runtime。
+- `SOUL.md` 必须存在且非空；缺失、不可读或空文件都会直接报错。
+- 首次运行时，CLI 会为默认 agent 自动创建一个基础 `SOUL.md`。
+
+## 日志系统
+
+日志文件使用 JSONL，每行一条 JSON 记录。原始字段结构如下：
+
+```json
+{
+  "timestamp": "2026-03-25T10:00:00.000Z",
+  "level": "info",
+  "scope": ["cli", "run", "config"],
+  "message": "Loaded user config context",
+  "data": { "agentName": "default" }
+}
+```
+
+常见 `scope`：
+
+| scope | 说明 |
+|---|---|
+| `cli > run` | run 命令主流程 |
+| `cli > run > config` | 配置加载与解析 |
+| `cli > run > runtime` | runtime 创建与启动 |
+| `cli > run > event` | runtime 事件消费 |
+| `cli > log > follow` | log follow 主流程 |
+| `cli > main` | CLI 顶层错误记录 |
+
+日志中会保留 `agentName`、`provider`、`modelName`、`soulPath`、`sessionId`、`runId` 等元信息，但会过滤 `apiKey`、`prompt`、`soul` 等敏感字段，不记录 `SOUL.md` 正文或 prompt 正文。
+
+## 错误处理
+
+| 场景 | 行为 |
+|---|---|
+| 未传命令 | 输出 usage，退出码 `2` |
+| `run` 缺少或多传 prompt 参数 | 输出 `Command "run" requires exactly one prompt argument.`，退出码 `2` |
+| `log` 未使用 `-f` 或 `--follow` | 输出 `Command "log" only supports "-f" or "--follow".`，退出码 `2` |
+| 未知命令 | 输出 `Unknown command "<name>".`，退出码 `2` |
+| 配置目录或配置文件不存在 | 自动创建目录、空的用户层 `tianji.json` 与默认 `SOUL.md` |
+| 配置文件 JSON 解析失败 | 直接报错退出 |
+| 配置 schema 不合法 | 直接报错退出 |
+| 缺失 `agents.defaultAgent` | 报错：`Missing agents.defaultAgent in Tianji config` |
+| 缺失 `agents.items` | 报错：`Missing agents.items in Tianji config` |
+| `agents.items` 中无默认 agent 对应项 | 报错：`Default agent "<name>" is not defined in agents.items` |
+| `model` 格式非法 | 报错：`Invalid agent model reference "<value>": ...` |
+| agent 名称不合法 | 报错：`Agent name "<name>" must match /^[a-z0-9][a-z0-9-_]*$/` |
+| `SOUL.md` 缺失 | 报错：`Agent soul file does not exist: <path>` |
+| `SOUL.md` 不可读 | 报错：`Agent soul file is not readable: <path>` |
+| `SOUL.md` 为空 | 报错：`Agent soul file is empty: <path>` |
+| 环境变量未设置 | 占位符解析阶段报错：`Environment variable "<name>" is not defined` |
+| runtime 发出 `run.failed` 事件 | CLI 抛出 `Run failed: <message>`，写入日志并以退出码 `1` 退出 |
+| 其他运行时异常 | 输出错误信息，写入 `cli > main` 错误日志，并以退出码 `1` 退出 |
 
 ## 目录结构
 
@@ -46,30 +162,21 @@ apps/cli/
 └─ tsconfig.json
 ```
 
-## 配置入口职责
+## 开发命令
 
-`src/config.ts` 负责以下边界：
+```bash
+pnpm --filter @tianji/cli build
+pnpm --filter @tianji/cli test
+pnpm --filter @tianji/cli typecheck
+pnpm --filter @tianji/cli clean
+```
 
-- 定位 `~/.config/tianji-ai`
-- 初始化空的 `tianji.json`，避免用户层默认值覆盖项目层配置
-- 初始化当前默认 agent 对应的 `agents/<agent>/SOUL.md`
-- 调用 `@tianji/runtime` 配置中心加载三层配置并取得最终生效配置
-- 基于最终生效配置解析默认 agent、模型引用与 `SOUL.md`
-- 将 provider apiKey 注入 `process.env`（`injectProviderEnv`）
-- 在 `openai` provider 下显式把 `baseUrl` 透传到底层模型实例，保证 OpenAI 兼容网关生效
+## 依赖关系
 
-CLI 主流程不会直接拼接配置路径，也不会直接读取 `SOUL.md` 文件。
+- `@tianji/shared`：配置 schema、默认配置、agent helper、占位符解析、通用工具。
+- `@tianji/runtime`：配置加载、session runtime 创建、runTurn 与事件流。
+- `@tianji/contracts`：运行时协议类型。
 
-## 日志边界
+## 许可证
 
-- `src/logger.ts` 负责将结构化日志追加到 `~/.config/tianji-ai/logs/cli.jsonl`
-- `src/log-follow.ts` 负责把 JSONL 渲染为可读文本并执行 follow 循环
-
-日志仅记录元信息，例如 `agentName`、`provider`、`modelName`、`soulPath`、`sessionId`、`runId`，不会写入 prompt 正文、SOUL.md 正文或 assistant 响应正文。
-
-## 当前能力边界
-
-当前仍处于最小实现阶段，明确未完成能力包括：
-
-- 不支持工具调用。
-- 不支持多轮对话（每次 `run` 命令创建独立的 session）。
+MIT
