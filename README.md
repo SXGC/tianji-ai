@@ -76,12 +76,13 @@ agent 装配层，负责把配置解析结果、默认 agent、`SOUL.md`、provi
 - 上下文装配：`loadAgentContext`、`ensureDefaultUserConfig`
 - 路径与配置桥接：`getAgentAppPaths`、`injectProviderEnv`
 - 启动原语：`createAgentRuntime`、`createAgentSession`
+- Daemon 协议：`DaemonServer`、`DaemonClient`、SSE 编解码类型
 
 该包位于 CLI 与 runtime 之间，承接应用层初始化逻辑，避免 CLI 直接依赖 runtime 创建细节。
 
 ### `@tianji/cli`
 
-命令行应用，提供 `tianji run "<prompt>"` 和 `tianji log -f` 两个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。`run` 命令会通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。
+命令行应用，提供 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon`、`tianji chat`、`tianji status`、`tianji stop` 和 `tianji help` 七个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。`run` 命令会通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；`daemon` 命令启动后台守护进程，`chat` 命令连接守护进程进行多轮对话，`status` 查看守护进程状态，`stop` 停止守护进程；日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。
 
 ## 开发命令
 
@@ -108,6 +109,21 @@ pnpm tianji run "hello"
 
 # 实时查看日志
 pnpm tianji log -f
+
+# 启动后台守护进程
+pnpm tianji daemon
+
+# 以前台模式启动守护进程（调试用）
+pnpm tianji daemon --fg
+
+# 连接守护进程进行多轮对话
+pnpm tianji chat
+
+# 查看守护进程状态
+pnpm tianji status
+
+# 停止守护进程
+pnpm tianji stop
 ```
 
 用户配置文件位于 `~/.config/tianji-ai/tianji.json`，首次运行时会自动生成。默认 agent 的 `SOUL.md` 位于 `~/.config/tianji-ai/agents/default/SOUL.md`。更多细节见 `apps/cli/README.md`。
@@ -142,7 +158,7 @@ pnpm tianji log -f
 ## 当前状态说明
 
 - 仓库包含四个核心 package（`shared`、`runtime`、`observer`、`agent`）和一个 CLI 应用（`apps/cli`）。
-- CLI 已支持 `tianji run "<prompt>"` 和 `tianji log -f` 完整流程。
+- CLI 已支持 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon`、`tianji chat`、`tianji status`、`tianji stop` 完整流程。
 - 配置系统支持 `providers`、`agents`、`runtime`、`observer` 四个顶层配置块。
 - 日志系统当前通过 `@tianji/observer` 的 JSONL sink 落盘到 `~/.config/tianji-ai/logs/tianji.log`。
 - `docs/` 中部分内容会提到后续规划的 `tools-node` 等模块，这些仍未在仓库中完整落地。

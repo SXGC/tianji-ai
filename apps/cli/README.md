@@ -1,6 +1,6 @@
 # @tianji/cli
 
-`@tianji/cli` 是 `tianji-ai` 的命令行入口，提供 `run`、`log` 和 `help` 三个命令。
+`@tianji/cli` 是 `tianji-ai` 的命令行入口，提供 `run`、`log`、`daemon`、`chat`、`status`、`stop` 和 `help` 七个命令。
 
 ## 安装与运行
 
@@ -36,6 +36,36 @@ pnpm tianji help
 - 可通过 `--lines <n>` 或 `-n <n>` 调整首次回放的行数，例如 `tianji log -f --lines 20`。
 - `@tianji/observer` 负责生成 JSONL 记录；CLI 负责 follow 文件并把 JSONL 渲染为可读文本，而不是直接输出原始 JSON。
 
+## Daemon 命令
+
+### `tianji daemon [--fg]`
+
+启动后台守护进程。守护进程内部持有一个 `AgentSession`，通过 `localhost` HTTP 对外提供服务。
+
+- 默认行为：fork 一个后台子进程，将端口号写入 `~/.config/tianji-ai/daemon.port`，PID 写入 `~/.config/tianji-ai/daemon.pid`。
+- `--fg`：以前台模式运行，方便调试。前台模式下进程不会 fork，直接在当前终端中运行。
+- 如果检测到已有守护进程在运行（端口文件存在且可以 ping 通），会直接输出已有进程信息，不会重复启动。
+
+### `tianji chat`
+
+连接到正在运行的后台守护进程，进入 readline REPL 进行多轮对话。所有轮次共享同一个 session 上下文。
+
+- 输入 `.exit` 或按 `Ctrl+C` 退出。
+- 如果守护进程未运行，会提示 `No daemon running. Start with: tianji daemon` 并以退出码 `1` 退出。
+- 交互过程中，assistant 的文本响应会流式输出到 stdout。
+
+### `tianji status`
+
+检查守护进程是否正在运行。输出 pid、port、sessionId 和 uptime 信息。
+
+- 如果守护进程未运行，输出错误信息并以退出码 `1` 退出。
+
+### `tianji stop`
+
+调用守护进程的 `/shutdown` 端点，等待其优雅退出。
+
+- 如果守护进程未运行，输出错误信息并以退出码 `1` 退出。
+
 ### `tianji help`
 
 - 打印当前所有可用命令及其说明。
@@ -56,6 +86,8 @@ pnpm tianji help
 | `~/.config/tianji-ai/tianji.json` | 主配置文件 |
 | `~/.config/tianji-ai/agents/<agent-name>/SOUL.md` | agent 身份定义 |
 | `~/.config/tianji-ai/logs/tianji.log` | observer JSONL 日志文件，供 CLI follow |
+| `~/.config/tianji-ai/daemon.port` | 守护进程监听端口号 |
+| `~/.config/tianji-ai/daemon.pid` | 守护进程 PID |
 
 ## 配置文件结构
 
@@ -168,6 +200,7 @@ apps/cli/
 ├─ src/
 │  ├─ bin.ts
 │  ├─ config.ts
+│  ├─ daemon-entry.ts
 │  ├─ log-follow.ts
 │  ├─ logger.ts
 │  └─ main.ts
@@ -187,7 +220,7 @@ pnpm --filter @tianji/cli clean
 
 ## 依赖关系
 
-- `@tianji/agent`：配置装配、默认 agent 解析、runtime/session 启动封装。
+- `@tianji/agent`：配置装配、默认 agent 解析、runtime/session 启动封装，以及 `DaemonServer` / `DaemonClient` 的 daemon 协议实现。
 - `@tianji/observer`：结构化 logger、JSONL sink 与 tracing 初始化原语。
 - `@tianji/runtime`：会话执行、事件流、快照与工具目录。
 - `@tianji/shared`：运行时协议类型与配置 schema。

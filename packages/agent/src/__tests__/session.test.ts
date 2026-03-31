@@ -23,6 +23,8 @@ function createFakeContext(): LoadedAgentContext {
       logsDir: '/tmp/tianji-test/config/logs',
       configFilePath: '/tmp/tianji-test/config/tianji.json',
       cliLogFilePath: '/tmp/tianji-test/config/logs/tianji.log',
+      daemonPortPath: '/tmp/tianji-test/config/daemon.port',
+      daemonPidPath: '/tmp/tianji-test/config/daemon.pid',
     },
     config: {},
     agent: {

@@ -35,6 +35,8 @@ export interface AgentAppPaths {
   readonly logsDir: string
   readonly configFilePath: string
   readonly cliLogFilePath: string
+  readonly daemonPortPath: string
+  readonly daemonPidPath: string
 }
 
 export interface AgentContext {
@@ -82,6 +84,8 @@ export function getAgentAppPaths(): AgentAppPaths {
     logsDir,
     configFilePath: getUserTianjiConfigPath(),
     cliLogFilePath: join(logsDir, 'tianji.log'),
+    daemonPortPath: join(configDir, 'daemon.port'),
+    daemonPidPath: join(configDir, 'daemon.pid'),
   }
 }
 

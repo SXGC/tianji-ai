@@ -14,6 +14,8 @@ function createTestContext(provider: string, apiKey?: string): LoadedAgentContex
       logsDir: '/tmp/test/logs',
       configFilePath: '/tmp/test/tianji.json',
       cliLogFilePath: '/tmp/test/logs/tianji.log',
+      daemonPortPath: '/tmp/test/daemon.port',
+      daemonPidPath: '/tmp/test/daemon.pid',
     },
     config: {},
     agent: {
@@ -45,6 +47,8 @@ describe('agent context', () => {
     expect(paths.logsDir).toContain('.config/tianji-ai/logs')
     expect(paths.configFilePath).toContain('.config/tianji-ai/tianji.json')
     expect(paths.cliLogFilePath).toContain('.config/tianji-ai/logs/tianji.log')
+    expect(paths.daemonPortPath).toContain('.config/tianji-ai/daemon.port')
+    expect(paths.daemonPidPath).toContain('.config/tianji-ai/daemon.pid')
   })
 
   it('injects OPENAI_API_KEY for openai provider', () => {

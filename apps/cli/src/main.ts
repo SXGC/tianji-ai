@@ -1,8 +1,17 @@
-import { appendFile, mkdir } from 'node:fs/promises'
-import { type AgentSession, type LoadedAgentContext, createAgentSession } from '@tianji/agent'
+import { fork } from 'node:child_process'
+import { appendFile, mkdir, readFile, rm } from 'node:fs/promises'
+import { createInterface } from 'node:readline'
+import {
+  type AgentSession,
+  DaemonClient,
+  type LoadedAgentContext,
+  type PingResponse,
+  createAgentSession,
+} from '@tianji/agent'
 import type { RunId, RuntimeEvent } from '@tianji/shared'
 
 import { type UserConfigPaths, getUserConfigPaths, loadUserConfigContext } from './config.js'
+import { runDaemonEntry } from './daemon-entry.js'
 import { loadDevelopmentEnv } from './dev-env.js'
 import { type FollowCliLogOptions, followCliLog } from './log-follow.js'
 import type { CliLogEntry, CliLogScope, CliLogger } from './logger.js'
@@ -15,6 +24,14 @@ const CLI_HELP_TEXT = [
   '    Run one prompt through the configured agent',
   '  tianji log -f [--lines <n>]',
   '    Follow the CLI log and replay the latest lines first',
+  '  tianji daemon [--fg]',
+  '    Start the background daemon',
+  '  tianji chat',
+  '    Connect to daemon for multi-turn chat',
+  '  tianji status',
+  '    Check daemon status',
+  '  tianji stop',
+  '    Stop the daemon',
   '  tianji help',
   '    Print all available commands and descriptions',
 ].join('\n')
@@ -40,7 +57,31 @@ export interface HelpCommand {
   readonly kind: 'help'
 }
 
-export type TianjiCliCommand = RunCommand | LogFollowCommand | HelpCommand
+export interface DaemonCommand {
+  readonly kind: 'daemon'
+  readonly foreground: boolean
+}
+
+export interface ChatCommand {
+  readonly kind: 'chat'
+}
+
+export interface StatusCommand {
+  readonly kind: 'status'
+}
+
+export interface StopCommand {
+  readonly kind: 'stop'
+}
+
+export type TianjiCliCommand =
+  | RunCommand
+  | LogFollowCommand
+  | HelpCommand
+  | DaemonCommand
+  | ChatCommand
+  | StatusCommand
+  | StopCommand
 
 export interface RunCommandDependencies {
   readonly loadContext?: () => Promise<LoadedAgentContext>
@@ -95,6 +136,37 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
 
   if (commandName === 'log') {
     return parseLogCommandArgs(restArgs)
+  }
+
+  if (commandName === 'daemon') {
+    if (restArgs.length === 0) {
+      return { kind: 'daemon', foreground: false }
+    }
+    if (restArgs.length === 1 && restArgs[0] === '--fg') {
+      return { kind: 'daemon', foreground: true }
+    }
+    throw new CliUsageError(`Command 'daemon' only supports '--fg'.`)
+  }
+
+  if (commandName === 'chat') {
+    if (restArgs.length > 0) {
+      throw new CliUsageError(`Command "chat" does not accept arguments.\n\n${CLI_HELP_TEXT}`)
+    }
+    return { kind: 'chat' }
+  }
+
+  if (commandName === 'status') {
+    if (restArgs.length > 0) {
+      throw new CliUsageError(`Command "status" does not accept arguments.\n\n${CLI_HELP_TEXT}`)
+    }
+    return { kind: 'status' }
+  }
+
+  if (commandName === 'stop') {
+    if (restArgs.length > 0) {
+      throw new CliUsageError(`Command "stop" does not accept arguments.\n\n${CLI_HELP_TEXT}`)
+    }
+    return { kind: 'stop' }
   }
 
   throw new CliUsageError(`Unknown command "${commandName}".\n\n${CLI_HELP_TEXT}`)
@@ -160,6 +232,22 @@ export async function runCli(
 
     if (command.kind === 'help') {
       return handleHelpCommand(deps)
+    }
+
+    if (command.kind === 'daemon') {
+      return handleDaemonCommand(command, deps)
+    }
+
+    if (command.kind === 'chat') {
+      return handleChatCommand(deps)
+    }
+
+    if (command.kind === 'status') {
+      return handleStatusCommand(deps)
+    }
+
+    if (command.kind === 'stop') {
+      return handleStopCommand(deps)
     }
 
     return await handleLogFollowCommand(command, deps)
@@ -311,6 +399,177 @@ function handleHelpCommand(deps?: RunCommandDependencies): number {
   const writeStdout = deps?.writeStdout ?? process.stdout.write.bind(process.stdout)
   writeStdout(`${CLI_HELP_TEXT}\n`)
   return 0
+}
+
+async function readDaemonPort(paths: UserConfigPaths): Promise<number | undefined> {
+  try {
+    const content = await readFile(paths.daemonPortPath, 'utf8')
+    const port = Number.parseInt(content.trim(), 10)
+    return Number.isInteger(port) && port > 0 ? port : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function readDaemonPid(paths: UserConfigPaths): Promise<number | undefined> {
+  try {
+    const content = await readFile(paths.daemonPidPath, 'utf8')
+    const pid = Number.parseInt(content.trim(), 10)
+    return Number.isInteger(pid) && pid > 0 ? pid : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function tryCreateDaemonClient(paths: UserConfigPaths): Promise<DaemonClient | undefined> {
+  const port = await readDaemonPort(paths)
+  if (port === undefined) {
+    return undefined
+  }
+  return new DaemonClient({ host: '127.0.0.1', port })
+}
+
+async function requireDaemonClient(deps?: RunCommandDependencies): Promise<DaemonClient> {
+  const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
+  const paths = resolveUserConfigPaths()
+  const client = await tryCreateDaemonClient(paths)
+  if (client === undefined) {
+    throw new CliUsageError('No daemon running. Start with: tianji daemon')
+  }
+  return client
+}
+
+async function cleanupStaleDaemonFiles(paths: UserConfigPaths): Promise<void> {
+  await rm(paths.daemonPortPath, { force: true })
+  await rm(paths.daemonPidPath, { force: true })
+}
+
+async function waitForDaemonReady(
+  paths: UserConfigPaths,
+  timeoutMs = 10000
+): Promise<{ pid: number; port: number }> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const port = await readDaemonPort(paths)
+    if (port !== undefined) {
+      const client = new DaemonClient({ host: '127.0.0.1', port })
+      try {
+        await client.ping()
+        const pid = await readDaemonPid(paths)
+        return { pid: pid ?? 0, port }
+      } catch {
+        // Daemon not accepting connections yet
+      }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  throw new Error('Timed out waiting for daemon to become ready')
+}
+
+async function handleDaemonCommand(
+  command: DaemonCommand,
+  deps?: RunCommandDependencies
+): Promise<number> {
+  const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
+  const paths = resolveUserConfigPaths()
+
+  const existingClient = await tryCreateDaemonClient(paths)
+  if (existingClient !== undefined) {
+    try {
+      const ping = await existingClient.ping()
+      process.stdout.write(`Daemon already running (pid=${ping.pid})\n`)
+      return 0
+    } catch {
+      await cleanupStaleDaemonFiles(paths)
+    }
+  }
+
+  if (command.foreground) {
+    await runDaemonEntry()
+    return 0
+  }
+
+  const child = fork(new URL('./daemon-entry.js', import.meta.url), [], {
+    detached: true,
+    stdio: 'ignore',
+  })
+  child.unref()
+
+  const { pid, port } = await waitForDaemonReady(paths)
+  process.stdout.write(`Daemon started (pid=${pid}, port=${port})\n`)
+  return 0
+}
+
+async function handleChatCommand(deps?: RunCommandDependencies): Promise<number> {
+  const client = await requireDaemonClient(deps)
+  const ping = await client.ping()
+  process.stdout.write(`Connected to daemon (pid=${ping.pid})\n`)
+
+  const rl = createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    prompt: '> ',
+  })
+  rl.prompt()
+
+  const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
+  const paths = resolveUserConfigPaths()
+  const logger = createCliLoggerFromPaths(paths)
+
+  for await (const line of rl) {
+    const trimmed = line.trim()
+    if (trimmed === '') {
+      rl.prompt()
+      continue
+    }
+    if (trimmed === '.exit') {
+      rl.close()
+      break
+    }
+
+    for await (const event of client.sendChat(trimmed)) {
+      await handleRuntimeEvent(event, logger)
+    }
+    process.stdout.write('\n')
+    rl.prompt()
+  }
+
+  return 0
+}
+
+async function handleStatusCommand(deps?: RunCommandDependencies): Promise<number> {
+  try {
+    const client = await requireDaemonClient(deps)
+    const ping = await client.ping()
+    const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
+    const paths = resolveUserConfigPaths()
+    const port = await readDaemonPort(paths)
+    process.stdout.write(
+      `Daemon running (pid=${ping.pid}, port=${port}, sessionId=${ping.sessionId}, uptime=${ping.uptime}s)\n`
+    )
+    return 0
+  } catch (error) {
+    if (error instanceof CliUsageError) {
+      process.stderr.write(`${error.message}\n`)
+      return 1
+    }
+    throw error
+  }
+}
+
+async function handleStopCommand(deps?: RunCommandDependencies): Promise<number> {
+  try {
+    const client = await requireDaemonClient(deps)
+    await client.shutdown()
+    process.stdout.write('Daemon stopped\n')
+    return 0
+  } catch (error) {
+    if (error instanceof CliUsageError) {
+      process.stderr.write(`${error.message}\n`)
+      return 1
+    }
+    throw error
+  }
 }
 
 async function tryLogCliFailure(error: unknown, argv: readonly string[]): Promise<void> {
