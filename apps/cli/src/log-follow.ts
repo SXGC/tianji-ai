@@ -10,6 +10,7 @@ const LOG_FOLLOW_POLL_INTERVAL_MS = 500
 const LOG_FOLLOW_CHUNK_SIZE = 64 * 1024
 
 export interface FollowCliLogOptions {
+  readonly lines?: number
   readonly signal?: AbortSignal
 }
 
@@ -30,6 +31,7 @@ export async function followCliLog(
   let remainder = ''
   let hasPrintedWaitingMessage = false
   let lastReadFingerprint = ''
+  let hasReplayedInitialLines = false
 
   while (!options.signal?.aborted) {
     const nextStat = await readCliLogStat(logFilePath)
@@ -46,6 +48,18 @@ export async function followCliLog(
     if (hasPrintedWaitingMessage) {
       process.stdout.write(`Detected CLI log file: ${logFilePath}\n`)
       hasPrintedWaitingMessage = false
+    }
+
+    if (!hasReplayedInitialLines) {
+      const initialReadOffset = await replayLatestCliLogLines(
+        logFilePath,
+        nextStat.size,
+        options.lines ?? 100
+      )
+      offset = initialReadOffset
+      hasReplayedInitialLines = true
+      await sleep(LOG_FOLLOW_POLL_INTERVAL_MS)
+      continue
     }
 
     const fileWasReplaced =
@@ -190,6 +204,46 @@ export async function readCliLogChunk(
   } finally {
     await fileHandle.close()
   }
+}
+
+/**
+ * 启动 follow 前回放文件末尾的最近若干行，避免首次进入时输出整个历史文件。
+ *
+ * @param logFilePath - CLI 日志文件路径
+ * @param fileSize - 当前日志文件大小
+ * @param lineCount - 需要回放的尾部行数
+ * @returns 回放结束后的下一次读取偏移量
+ */
+export async function replayLatestCliLogLines(
+  logFilePath: string,
+  fileSize: number,
+  lineCount: number
+): Promise<number> {
+  if (fileSize === 0 || lineCount <= 0) {
+    return fileSize
+  }
+
+  const chunkResult = await readCliLogChunk(logFilePath, 0, fileSize)
+  const lines = chunkResult.chunk.split('\n')
+
+  if (lines.at(-1) === '') {
+    lines.pop()
+  }
+
+  const visibleLines = lines.slice(Math.max(0, lines.length - lineCount))
+  for (const line of visibleLines) {
+    const parsedEntry = parseCliLogLine(line)
+    if (parsedEntry === null) {
+      if (line.trim().length > 0) {
+        process.stdout.write(`[invalid-cli-log] ${line}\n`)
+      }
+      continue
+    }
+
+    process.stdout.write(`${formatCliLogEntry(parsedEntry)}\n`)
+  }
+
+  return chunkResult.nextOffset
 }
 
 function renderCliLogChunk(remainder: string, chunk: string): string {

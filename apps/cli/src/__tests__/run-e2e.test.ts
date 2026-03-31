@@ -13,7 +13,7 @@ import { ProviderError, type RunId, type RuntimeEvent, type SessionId } from '@t
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { followCliLog } from '../log-follow.js'
-import { runCli } from '../main.js'
+import { parseCliArgs, runCli } from '../main.js'
 import {
   captureStdout,
   captureStdoutLive,
@@ -36,6 +36,7 @@ async function* failedRunEvents(): AsyncGenerator<RuntimeEvent> {
     type: 'run.failed' as const,
     runId: 'run_test' as RunId,
     sessionId: 'session_test' as SessionId,
+    triggerType: 'new',
     error: new ProviderError('TEST_FAILURE', 'Test simulated failure'),
     timestamp: Date.now(),
   }
@@ -70,6 +71,7 @@ describe('CLI integration', () => {
           type: 'run.completed',
           runId: 'run_test' as RunId,
           sessionId: 'session_test' as SessionId,
+          triggerType: 'new',
           timestamp: Date.now(),
         },
       ])
@@ -106,6 +108,7 @@ describe('CLI integration', () => {
             type: 'run.completed',
             runId: 'run_test' as RunId,
             sessionId: 'session_test' as SessionId,
+            triggerType: 'new',
             timestamp: Date.now(),
           }
         },
@@ -131,6 +134,7 @@ describe('CLI integration', () => {
           type: 'run.failed',
           runId: 'run_test' as RunId,
           sessionId: 'session_test' as SessionId,
+          triggerType: 'new',
           error: new ProviderError('TEST_FAILURE', 'Test simulated failure'),
           timestamp: Date.now(),
         },
@@ -162,6 +166,7 @@ describe('CLI integration', () => {
           type: 'run.completed',
           runId: 'run_test' as RunId,
           sessionId: 'session_test' as SessionId,
+          triggerType: 'new',
           timestamp: Date.now(),
         },
       ])
@@ -266,6 +271,62 @@ describe('CLI integration', () => {
   })
 
   describe('log command', () => {
+    it('replays only the configured number of latest lines before following', async () => {
+      const { paths, cleanup } = await createTempCliPaths()
+      const abortController = new AbortController()
+
+      try {
+        await mkdir(paths.logsDir, { recursive: true })
+        await writeFile(
+          paths.cliLogFilePath,
+          [
+            {
+              timestamp: '2026-03-25T10:00:00.000Z',
+              level: 'info',
+              scope: ['cli', 'run'],
+              message: 'entry-1',
+            },
+            {
+              timestamp: '2026-03-25T10:00:01.000Z',
+              level: 'info',
+              scope: ['cli', 'run'],
+              message: 'entry-2',
+            },
+            {
+              timestamp: '2026-03-25T10:00:02.000Z',
+              level: 'info',
+              scope: ['cli', 'run'],
+              message: 'entry-3',
+            },
+          ]
+            .map((entry) => JSON.stringify(entry))
+            .join('\n')
+            .concat('\n'),
+          'utf8'
+        )
+
+        const captured = await captureStdoutLive(async () => {
+          return runCli(['log', '-f', '--lines', '2'], {
+            getUserConfigPaths: () => paths,
+            followCliLog: (logFilePath, options) =>
+              followCliLog(logFilePath, {
+                ...options,
+                signal: abortController.signal,
+              }),
+          })
+        })
+
+        await waitForOutput(captured.getOutput, 'entry-2')
+        await waitForOutput(captured.getOutput, 'entry-3')
+        expect(captured.getOutput()).not.toContain('entry-1')
+
+        abortController.abort()
+        await expect(captured.done).resolves.toBe(0)
+      } finally {
+        await cleanup()
+      }
+    })
+
     it('prints waiting message, existing history, appended entries, and invalid lines', async () => {
       const { paths, cleanup } = await createTempCliPaths()
       const abortController = new AbortController()
@@ -376,6 +437,21 @@ describe('CLI integration', () => {
   })
 
   describe('usage errors', () => {
+    it('prints available commands and descriptions for help', async () => {
+      const output = await captureStdout(async () => {
+        const exitCode = await runCli(['help'])
+        expect(exitCode).toBe(0)
+      })
+
+      expect(output).toContain('Usage:')
+      expect(output).toContain('tianji run "<prompt>"')
+      expect(output).toContain('Run one prompt through the configured agent')
+      expect(output).toContain('tianji log -f [--lines <n>]')
+      expect(output).toContain('Follow the CLI log and replay the latest lines first')
+      expect(output).toContain('tianji help')
+      expect(output).toContain('Print all available commands and descriptions')
+    })
+
     it('returns exit code 2 for missing command', async () => {
       const exitCode = await runCli([])
       expect(exitCode).toBe(2)
@@ -398,6 +474,29 @@ describe('CLI integration', () => {
 
     it('returns exit code 2 for log with unsupported flag', async () => {
       const exitCode = await runCli(['log', '--tail'])
+      expect(exitCode).toBe(2)
+    })
+
+    it('parses log follow lines options with defaults and aliases', () => {
+      expect(parseCliArgs(['log', '-f'])).toEqual({
+        kind: 'log-follow',
+        lines: 100,
+      })
+      expect(parseCliArgs(['log', '--follow', '--lines', '25'])).toEqual({
+        kind: 'log-follow',
+        lines: 25,
+      })
+      expect(parseCliArgs(['log', '-f', '-n', '12'])).toEqual({
+        kind: 'log-follow',
+        lines: 12,
+      })
+    })
+
+    it('returns exit code 2 for invalid lines values', async () => {
+      expect(() => parseCliArgs(['log', '-f', '--lines', '0'])).toThrowError(/positive integer/)
+      expect(() => parseCliArgs(['log', '-f', '--lines', 'abc'])).toThrowError(/positive integer/)
+
+      const exitCode = await runCli(['log', '-f', '--lines', '0'])
       expect(exitCode).toBe(2)
     })
   })

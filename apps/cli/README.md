@@ -1,6 +1,6 @@
 # @tianji/cli
 
-`@tianji/cli` 是 `tianji-ai` 的命令行入口，提供 `run` 和 `log` 两个命令。
+`@tianji/cli` 是 `tianji-ai` 的命令行入口，提供 `run`、`log` 和 `help` 三个命令。
 
 ## 安装与运行
 
@@ -15,6 +15,7 @@ pnpm --filter @tianji/cli build
 ```bash
 pnpm tianji run "hello"
 pnpm tianji log -f
+pnpm tianji help
 ```
 
 `apps/cli/package.json` 中声明了 `bin.tianji -> ./bin/tianji.mjs`。在 monorepo 开发环境里，推荐通过仓库根脚本 `pnpm tianji` 调用；如果将包链接到全局环境，也可以直接执行 `tianji`。
@@ -28,11 +29,17 @@ pnpm tianji log -f
 - 首次运行时，如果 `~/.config/tianji-ai/` 下缺少配置目录，会自动创建基础目录、空的用户层 `tianji.json`、默认 agent 的 `SOUL.md`，以及日志目录。
 - 用法错误返回退出码 `2`，运行时错误返回退出码 `1`。
 
-### `tianji log -f`
+### `tianji log -f [--lines <n>]`
 
 - 读取并持续 follow observer 写出的 JSONL 日志文件。
-- 如果日志文件尚未创建，会先输出等待提示；文件出现后先打印已有内容，再持续输出新增日志。
+- 如果日志文件尚未创建，会先输出等待提示；文件出现后默认先回放最近 `100` 行，再持续输出新增日志。
+- 可通过 `--lines <n>` 或 `-n <n>` 调整首次回放的行数，例如 `tianji log -f --lines 20`。
 - `@tianji/observer` 负责生成 JSONL 记录；CLI 负责 follow 文件并把 JSONL 渲染为可读文本，而不是直接输出原始 JSON。
+
+### `tianji help`
+
+- 打印当前所有可用命令及其说明。
+- 用法错误时，CLI 也会附带同一份帮助文本，便于直接查看正确命令格式。
 
 示例输出：
 
@@ -100,7 +107,7 @@ pnpm tianji log -f
 `@tianji/observer` 统一负责结构化日志协议与 JSONL 生成，CLI 当前只负责两件事：
 
 - 在 `run` 等命令流程中调用 observer logger 写日志。
-- 在 `log -f` 中读取同一个 JSONL 文件并渲染输出。
+- 在 `log -f` 中先回放尾部指定行数，再继续读取同一个 JSONL 文件并渲染输出。
 
 日志文件使用 JSONL，每行一条 JSON 记录。原始字段结构如下：
 
@@ -134,6 +141,8 @@ pnpm tianji log -f
 | 未传命令 | 输出 usage，退出码 `2` |
 | `run` 缺少或多传 prompt 参数 | 输出 `Command "run" requires exactly one prompt argument.`，退出码 `2` |
 | `log` 未使用 `-f` 或 `--follow` | 输出 `Command "log" only supports "-f" or "--follow".`，退出码 `2` |
+| `log` 的 `--lines`/`-n` 非正整数 | 输出 `Command "log" requires a positive integer for lines.`，退出码 `2` |
+| `help` 额外传参 | 输出 `Command "help" does not accept arguments.`，退出码 `2` |
 | 未知命令 | 输出 `Unknown command "<name>".`，退出码 `2` |
 | 配置目录或配置文件不存在 | 自动创建目录、空的用户层 `tianji.json` 与默认 `SOUL.md` |
 | 配置文件 JSON 解析失败 | 直接报错退出 |

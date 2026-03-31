@@ -8,12 +8,22 @@ import { type FollowCliLogOptions, followCliLog } from './log-follow.js'
 import type { CliLogEntry, CliLogScope, CliLogger } from './logger.js'
 import { createCliLogger } from './logger.js'
 
-const CLI_USAGE = ['Usage:', '  tianji run "<prompt>"', '  tianji log -f'].join('\n')
+const DEFAULT_LOG_LINES = 100
+const CLI_HELP_TEXT = [
+  'Usage:',
+  '  tianji run "<prompt>"',
+  '    Run one prompt through the configured agent',
+  '  tianji log -f [--lines <n>]',
+  '    Follow the CLI log and replay the latest lines first',
+  '  tianji help',
+  '    Print all available commands and descriptions',
+].join('\n')
 const CLI_RUN_SCOPE = ['cli', 'run'] as const satisfies CliLogScope
 const CLI_RUN_CONFIG_SCOPE = ['cli', 'run', 'config'] as const satisfies CliLogScope
 const CLI_RUN_RUNTIME_SCOPE = ['cli', 'run', 'runtime'] as const satisfies CliLogScope
 const CLI_RUN_EVENT_SCOPE = ['cli', 'run', 'event'] as const satisfies CliLogScope
 const CLI_LOG_FOLLOW_SCOPE = ['cli', 'log', 'follow'] as const satisfies CliLogScope
+const CLI_HELP_SCOPE = ['cli', 'help'] as const satisfies CliLogScope
 const CLI_MAIN_SCOPE = ['cli', 'main'] as const satisfies CliLogScope
 
 export interface RunCommand {
@@ -23,15 +33,21 @@ export interface RunCommand {
 
 export interface LogFollowCommand {
   readonly kind: 'log-follow'
+  readonly lines: number
 }
 
-export type TianjiCliCommand = RunCommand | LogFollowCommand
+export interface HelpCommand {
+  readonly kind: 'help'
+}
+
+export type TianjiCliCommand = RunCommand | LogFollowCommand | HelpCommand
 
 export interface RunCommandDependencies {
   readonly loadContext?: () => Promise<LoadedAgentContext>
   readonly createSession?: (context: LoadedAgentContext) => AgentSession
   readonly getUserConfigPaths?: () => UserConfigPaths
   readonly followCliLog?: (logFilePath: string, options?: FollowCliLogOptions) => Promise<void>
+  readonly writeStdout?: (message: string) => void
 }
 
 class CliUsageError extends Error {
@@ -51,12 +67,14 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
   const [commandName, ...restArgs] = argv
 
   if (commandName === undefined) {
-    throw new CliUsageError(`Missing command.\n\n${CLI_USAGE}`)
+    throw new CliUsageError(`Missing command.\n\n${CLI_HELP_TEXT}`)
   }
 
   if (commandName === 'run') {
     if (restArgs.length !== 1) {
-      throw new CliUsageError(`Command "run" requires exactly one prompt argument.\n\n${CLI_USAGE}`)
+      throw new CliUsageError(
+        `Command "run" requires exactly one prompt argument.\n\n${CLI_HELP_TEXT}`
+      )
     }
 
     return {
@@ -65,17 +83,60 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
     }
   }
 
-  if (commandName === 'log') {
-    if (restArgs.length !== 1 || (restArgs[0] !== '-f' && restArgs[0] !== '--follow')) {
-      throw new CliUsageError(`Command "log" only supports "-f" or "--follow".\n\n${CLI_USAGE}`)
+  if (commandName === 'help') {
+    if (restArgs.length > 0) {
+      throw new CliUsageError(`Command "help" does not accept arguments.\n\n${CLI_HELP_TEXT}`)
     }
 
     return {
-      kind: 'log-follow',
+      kind: 'help',
     }
   }
 
-  throw new CliUsageError(`Unknown command "${commandName}".\n\n${CLI_USAGE}`)
+  if (commandName === 'log') {
+    return parseLogCommandArgs(restArgs)
+  }
+
+  throw new CliUsageError(`Unknown command "${commandName}".\n\n${CLI_HELP_TEXT}`)
+}
+
+/**
+ * 解析 `log` 子命令参数。
+ *
+ * @param args - `log` 后续参数
+ * @returns 结构化的 log follow 命令
+ */
+function parseLogCommandArgs(args: readonly string[]): LogFollowCommand {
+  const [followFlag, ...optionArgs] = args
+
+  if (followFlag !== '-f' && followFlag !== '--follow') {
+    throw new CliUsageError(`Command "log" only supports "-f" or "--follow".\n\n${CLI_HELP_TEXT}`)
+  }
+
+  if (optionArgs.length === 0) {
+    return {
+      kind: 'log-follow',
+      lines: DEFAULT_LOG_LINES,
+    }
+  }
+
+  if (optionArgs.length !== 2 || (optionArgs[0] !== '--lines' && optionArgs[0] !== '-n')) {
+    throw new CliUsageError(
+      `Command "log" only supports "--lines <n>" or "-n <n>" after follow.\n\n${CLI_HELP_TEXT}`
+    )
+  }
+
+  const lines = Number.parseInt(optionArgs[1], 10)
+  if (!Number.isInteger(lines) || lines <= 0) {
+    throw new CliUsageError(
+      `Command "log" requires a positive integer for lines.\n\n${CLI_HELP_TEXT}`
+    )
+  }
+
+  return {
+    kind: 'log-follow',
+    lines,
+  }
 }
 
 /**
@@ -95,6 +156,10 @@ export async function runCli(
 
     if (command.kind === 'run') {
       return await handleRunCommand(command, deps)
+    }
+
+    if (command.kind === 'help') {
+      return handleHelpCommand(deps)
     }
 
     return await handleLogFollowCommand(command, deps)
@@ -223,14 +288,28 @@ export async function handleRunCommand(
 }
 
 async function handleLogFollowCommand(
-  _command: LogFollowCommand,
+  command: LogFollowCommand,
   deps?: RunCommandDependencies
 ): Promise<number> {
   const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
   const followCliLogCommand = deps?.followCliLog ?? followCliLog
   const paths = resolveUserConfigPaths()
 
-  await followCliLogCommand(paths.cliLogFilePath)
+  await followCliLogCommand(paths.cliLogFilePath, {
+    lines: command.lines,
+  })
+  return 0
+}
+
+/**
+ * 输出 CLI 帮助文本。
+ *
+ * @param deps - 可选依赖覆盖，便于测试 stdout
+ * @returns 成功退出码
+ */
+function handleHelpCommand(deps?: RunCommandDependencies): number {
+  const writeStdout = deps?.writeStdout ?? process.stdout.write.bind(process.stdout)
+  writeStdout(`${CLI_HELP_TEXT}\n`)
   return 0
 }
 
