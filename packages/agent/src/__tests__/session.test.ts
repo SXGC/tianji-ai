@@ -1,4 +1,5 @@
 import type { SessionRuntime } from '@tianji/runtime'
+import * as runtimeModule from '@tianji/runtime'
 import { FileSnapshotStore } from '@tianji/runtime'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -43,17 +44,19 @@ describe('agent session', () => {
     expect(runtime.runTurn).toBeDefined()
   })
 
-  it('maps runtime model to provider:modelName string', () => {
+  it('normalizes openai runtime model into a configured model instance', () => {
     const runtime = createAgentRuntime(createFakeContext()) as SessionRuntime & {
       readonly options?: {
         readonly deepagents?: {
-          readonly model?: string
+          readonly model?: unknown
           readonly providerConfig?: Record<string, unknown>
         }
       }
     }
 
-    expect(runtime.options?.deepagents?.model).toBe('openai:gpt-4.1')
+    expect(runtime.options?.deepagents?.model).toMatchObject({
+      model: 'gpt-4.1',
+    })
     expect(runtime.options?.deepagents?.providerConfig).toEqual({
       provider: 'openai',
       model: 'gpt-4.1',
@@ -91,7 +94,9 @@ describe('agent session', () => {
       cancelRun: vi.fn(),
     }
 
-    vi.spyOn(await import('../session.js'), 'createAgentRuntime').mockReturnValue(runtime)
+    const createSessionRuntimeSpy = vi
+      .spyOn(runtimeModule, 'createSessionRuntime')
+      .mockReturnValue(runtime)
 
     const session = createAgentSession(context)
     const events = []
@@ -102,5 +107,27 @@ describe('agent session', () => {
 
     expect(session.sessionId).toBeDefined()
     expect(events.length).toBeGreaterThan(0)
+    expect(createSessionRuntimeSpy).toHaveBeenCalledWith({
+      deepagents: {
+        model: 'openai:gpt-4.1',
+        providerConfig: {
+          provider: 'openai',
+          model: 'gpt-4.1',
+          apiKey: 'test-key',
+          baseUrl: 'http://example.test/v1',
+          headers: {
+            'x-test-header': 'enabled',
+          },
+        },
+      },
+      snapshotStore: context.snapshotStore,
+    })
+    expect(runtime.createSession).toHaveBeenCalledWith({ sessionId: session.sessionId })
+    expect(runtime.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: session.sessionId,
+        systemPrompt: context.agent.soul,
+      })
+    )
   })
 })
