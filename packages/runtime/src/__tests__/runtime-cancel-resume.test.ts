@@ -12,7 +12,8 @@
 import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { MemorySaver } from '@langchain/langgraph'
-import { DEFAULT_EXECUTION_POLICY, createSessionId } from '@tianji/shared'
+import { type ObserverLogEntry, createMemorySink, createObserverLogger } from '@tianji/observer'
+import { DEFAULT_EXECUTION_POLICY, type RuntimeEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -127,6 +128,190 @@ describe('SessionRuntime cancel/resume regressions', () => {
 
     const sessionSnapshot = await resumeRuntime.getSessionSnapshot(session.sessionId)
     expect(readTextContent(sessionSnapshot?.messages[1])).toBe('resumed answer')
+  })
+
+  it('records parentRunId and triggerType when resuming a cancelled run', async () => {
+    const memorySink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [memorySink] })
+    const snapshotStore = new InMemorySnapshotStore()
+    const toolSignalSeen = createDeferred<AbortSignal | undefined>()
+    const toolCatalog = new ToolRegistry().registerTool({
+      spec: {
+        name: 'lookup',
+        description: 'Look up data',
+        parameters: { type: 'object' },
+      },
+      execute: async (_args, context) => {
+        toolSignalSeen.resolve(context.abortSignal)
+
+        await new Promise<never>((_resolve, reject) => {
+          context.abortSignal?.addEventListener(
+            'abort',
+            () => {
+              reject(createAbortError('tool cancelled cleanly'))
+            },
+            { once: true }
+          )
+        })
+
+        throw new Error('Unreachable')
+      },
+      sideEffect: 'idempotent',
+    })
+
+    const cancellationRuntime = createSessionRuntime({
+      deepagents: {
+        model: fakeModel().respondWithTools([
+          { name: 'lookup', args: { city: 'Shanghai' }, id: 'tool-replay' },
+        ]),
+      },
+      snapshotStore,
+      toolCatalog,
+      logger,
+    })
+
+    const resumeRuntime = createSessionRuntime({
+      deepagents: { model: fakeModel().respond(new AIMessage('resumed answer')) },
+      snapshotStore,
+      toolCatalog,
+      logger,
+    })
+
+    const session = await cancellationRuntime.createSession({
+      sessionId: createSessionId('session-runtime-trigger-resume'),
+    })
+    const cancelledRunId = await cancellationRuntime.runTurn({
+      sessionId: session.sessionId,
+      message: createUserMessage('msg-runtime-trigger-resume', 'cancel then resume this run'),
+    })
+    const cancelledEventsPromise = collectRuntimeEvents(cancelledRunId, cancellationRuntime)
+    await toolSignalSeen.promise
+
+    expect(cancellationRuntime.cancelRun(cancelledRunId)).toBe(true)
+
+    await cancelledEventsPromise
+
+    const resumedRunId = await resumeRuntime.resumeRun({ runId: cancelledRunId })
+    const resumedRun = await waitForRunStatus(resumeRuntime, resumedRunId, 'completed')
+    const resumedEvents = await collectRuntimeEvents(resumedRunId, resumeRuntime)
+    const cancelledLifecycleEvents = (
+      await collectRuntimeEvents(cancelledRunId, cancellationRuntime)
+    ).filter(
+      (event): event is Extract<RuntimeEvent, { type: 'run.started' | 'run.cancelled' }> =>
+        event.type === 'run.started' || event.type === 'run.cancelled'
+    )
+    const resumedLifecycleEvents = resumedEvents.filter(
+      (
+        event
+      ): event is Extract<RuntimeEvent, { type: 'run.started' | 'run.completed' | 'run.failed' }> =>
+        event.type === 'run.started' ||
+        event.type === 'run.completed' ||
+        event.type === 'run.failed'
+    )
+    const runtimeRunLogEntries = memorySink.entries.filter(
+      (entry: ObserverLogEntry): entry is ObserverLogEntry & { data: Record<string, unknown> } =>
+        entry.scope.join('.') === 'runtime.run' &&
+        (entry.message === 'run.started' ||
+          entry.message === 'run.completed' ||
+          entry.message === 'run.failed' ||
+          entry.message === 'run.cancelled')
+    )
+
+    expect(resumedRun.triggerType).toBe('resume')
+    expect(resumedRun.parentRunId).toBe(cancelledRunId)
+    expect(cancelledLifecycleEvents).toEqual([
+      expect.objectContaining({
+        type: 'run.started',
+        runId: cancelledRunId,
+        sessionId: session.sessionId,
+        triggerType: 'new',
+        parentRunId: undefined,
+      }),
+      expect.objectContaining({
+        type: 'run.cancelled',
+        runId: cancelledRunId,
+        sessionId: session.sessionId,
+        triggerType: 'new',
+        parentRunId: undefined,
+      }),
+    ])
+    expect(resumedLifecycleEvents).toEqual([
+      expect.objectContaining({
+        type: 'run.started',
+        runId: resumedRunId,
+        sessionId: session.sessionId,
+        triggerType: 'resume',
+        parentRunId: cancelledRunId,
+      }),
+      expect.objectContaining({
+        type: 'run.completed',
+        runId: resumedRunId,
+        sessionId: session.sessionId,
+        triggerType: 'resume',
+        parentRunId: cancelledRunId,
+      }),
+    ])
+
+    expect(runtimeRunLogEntries).toHaveLength(
+      cancelledLifecycleEvents.length + resumedLifecycleEvents.length
+    )
+    expect(runtimeRunLogEntries).toEqual([
+      expect.objectContaining({
+        level: 'info',
+        message: 'run.started',
+        data: expect.objectContaining({
+          sessionId: session.sessionId,
+          runId: cancelledRunId,
+          triggerType: 'new',
+        }),
+      }),
+      expect.objectContaining({
+        level: 'warn',
+        message: 'run.cancelled',
+        data: expect.objectContaining({
+          sessionId: session.sessionId,
+          runId: cancelledRunId,
+          triggerType: 'new',
+        }),
+      }),
+      expect.objectContaining({
+        level: 'info',
+        message: 'run.started',
+        data: expect.objectContaining({
+          sessionId: session.sessionId,
+          runId: resumedRunId,
+          triggerType: 'resume',
+          parentRunId: cancelledRunId,
+        }),
+      }),
+      expect.objectContaining({
+        level: 'info',
+        message: 'run.completed',
+        data: expect.objectContaining({
+          sessionId: session.sessionId,
+          runId: resumedRunId,
+          triggerType: 'resume',
+          parentRunId: cancelledRunId,
+        }),
+      }),
+    ])
+    expect(
+      runtimeRunLogEntries.map((entry: ObserverLogEntry & { data: Record<string, unknown> }) => ({
+        message: entry.message,
+        sessionId: entry.data.sessionId,
+        runId: entry.data.runId,
+        triggerType: entry.data.triggerType,
+        parentRunId: entry.data.parentRunId,
+      }))
+    ).toEqual(
+      [...cancelledLifecycleEvents, ...resumedLifecycleEvents].map((event) => ({
+        message: event.type,
+        sessionId: event.sessionId,
+        runId: event.runId,
+        triggerType: event.triggerType,
+        parentRunId: event.parentRunId,
+      }))
+    )
   })
 
   it('uses require-user-confirmation for destructive side effects in deepagents runs', async () => {

@@ -13,6 +13,7 @@ import { AIMessage, AIMessageChunk } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { FakeStreamingChatModel } from '@langchain/core/utils/testing'
 import { ChatOpenAI } from '@langchain/openai'
+import { type ObserverLogEntry, createMemorySink, createObserverLogger } from '@tianji/observer'
 import { type RuntimeEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
@@ -24,6 +25,7 @@ import {
   collectRuntimeEventsWithAggregation,
   createUserMessage,
   readTextContent,
+  waitForRunStatus,
 } from './helpers/runtime-test-utils.js'
 
 describe('SessionRuntime', () => {
@@ -177,6 +179,135 @@ describe('SessionRuntime', () => {
     const runSnapshot = await runtime.getRunSnapshot(runId)
     expect(runSnapshot?.status).toBe('completed')
     expect(readTextContent(runSnapshot?.messages[1] ?? userMessage)).toBe('hello world')
+  })
+
+  it('marks new runs with triggerType new and no parentRunId', async () => {
+    const memorySink = createMemorySink()
+    const runtime = createSessionRuntime({
+      deepagents: { model: fakeModel().respond(new AIMessage('ok')) },
+      logger: createObserverLogger({ sinks: [memorySink] }),
+    })
+    const session = await runtime.createSession({
+      sessionId: createSessionId('session-runtime-trigger-new'),
+    })
+
+    const runId = await runtime.runTurn({
+      sessionId: session.sessionId,
+      message: createUserMessage('msg-runtime-trigger-new', 'hello'),
+    })
+
+    const events = await collectRuntimeEvents(runId, runtime)
+    const run = await waitForRunStatus(runtime, runId, 'completed')
+    const lifecycleEvents = events.filter(
+      (
+        event
+      ): event is Extract<RuntimeEvent, { type: 'run.started' | 'run.completed' | 'run.failed' }> =>
+        event.type === 'run.started' ||
+        event.type === 'run.completed' ||
+        event.type === 'run.failed'
+    )
+    const runtimeRunLogEntries = memorySink.entries.filter(
+      (entry: ObserverLogEntry): entry is ObserverLogEntry & { data: Record<string, unknown> } =>
+        entry.scope.join('.') === 'runtime.run'
+    )
+
+    expect(run.triggerType).toBe('new')
+    expect(run.parentRunId).toBeUndefined()
+    expect(lifecycleEvents).toEqual([
+      expect.objectContaining({
+        type: 'run.started',
+        runId,
+        sessionId: session.sessionId,
+        triggerType: 'new',
+        parentRunId: undefined,
+      }),
+      expect.objectContaining({
+        type: 'run.completed',
+        runId,
+        sessionId: session.sessionId,
+        triggerType: 'new',
+        parentRunId: undefined,
+      }),
+    ])
+    expect(runtimeRunLogEntries).toHaveLength(lifecycleEvents.length)
+    expect(
+      runtimeRunLogEntries.map((entry: ObserverLogEntry & { data: Record<string, unknown> }) => ({
+        message: entry.message,
+        sessionId: entry.data.sessionId,
+        runId: entry.data.runId,
+        triggerType: entry.data.triggerType,
+        parentRunId: entry.data.parentRunId,
+      }))
+    ).toEqual(
+      lifecycleEvents.map((event) => ({
+        message: event.type,
+        sessionId: event.sessionId,
+        runId: event.runId,
+        triggerType: event.triggerType,
+        parentRunId: event.parentRunId,
+      }))
+    )
+  })
+
+  it('keeps failed lifecycle events and observer logs in the same lineage order', async () => {
+    const memorySink = createMemorySink()
+    const runtime = createSessionRuntime({
+      deepagents: {
+        model: fakeModel().respondWithTools([{ name: 'explode', args: {}, id: 'tool-fail' }]),
+      },
+      toolCatalog: new ToolRegistry().registerTool({
+        spec: {
+          name: 'explode',
+          description: 'Always fail',
+          parameters: { type: 'object' },
+        },
+        execute: async () => {
+          throw new Error('boom')
+        },
+        sideEffect: 'idempotent',
+      }),
+      logger: createObserverLogger({ sinks: [memorySink] }),
+    })
+    const session = await runtime.createSession({
+      sessionId: createSessionId('session-runtime-trigger-failed'),
+    })
+
+    const runId = await runtime.runTurn({
+      sessionId: session.sessionId,
+      message: createUserMessage('msg-runtime-trigger-failed', 'fail this run'),
+    })
+
+    await expect(collectRuntimeEvents(runId, runtime)).rejects.toThrow('boom')
+
+    const failedRun = await waitForRunStatus(runtime, runId, 'failed')
+    const runtimeRunLogEntries = memorySink.entries.filter(
+      (entry: ObserverLogEntry): entry is ObserverLogEntry & { data: Record<string, unknown> } =>
+        entry.scope.join('.') === 'runtime.run'
+    )
+
+    expect(failedRun.triggerType).toBe('new')
+    expect(failedRun.parentRunId).toBeUndefined()
+    expect(runtimeRunLogEntries).toEqual([
+      expect.objectContaining({
+        level: 'info',
+        message: 'run.started',
+        data: expect.objectContaining({
+          sessionId: session.sessionId,
+          runId,
+          triggerType: 'new',
+        }),
+      }),
+      expect.objectContaining({
+        level: 'error',
+        message: 'run.failed',
+        data: expect.objectContaining({
+          sessionId: session.sessionId,
+          runId,
+          triggerType: 'new',
+          errorCode: 'RUNTIME_EXECUTION_FAILED',
+        }),
+      }),
+    ])
   })
 
   it('promotes openai provider config with baseUrl into a ChatOpenAI model', () => {

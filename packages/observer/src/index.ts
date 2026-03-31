@@ -8,6 +8,7 @@ export type {
 
 export {
   createObserverLogger,
+  createMemorySink,
   getDefaultObserverSensitiveKeys,
   sanitizeObserverLogData,
 } from './logger/index.js'

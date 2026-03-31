@@ -77,6 +77,8 @@ export * from './policy.js'
 export * from './snapshot.js'
 export * from './tool.js'
 
+export type { RunSnapshot, RunStatus, RunTriggerType } from './snapshot.js'
+
 // General-purpose utilities
 export {
   deepClone,

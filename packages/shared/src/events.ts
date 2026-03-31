@@ -11,6 +11,7 @@
 import type { TianjiError, ToolError } from './errors.js'
 import type { RunId, SessionId } from './identifiers.js'
 import type { AppMessage } from './message.js'
+import type { RunTriggerType } from './snapshot.js'
 import type { ToolInvocation, ToolResult } from './tool.js'
 
 export type RuntimeEventType =
@@ -25,33 +26,35 @@ export type RuntimeEventType =
   | 'tool.completed'
   | 'tool.failed'
 
-export interface RunStartedEvent {
+interface RunLifecycleEventFields {
+  readonly runId: RunId
+  readonly sessionId: SessionId
+  /**
+   * Identifies whether this run started fresh or was derived from a prior run.
+   */
+  readonly triggerType: RunTriggerType
+  /**
+   * Records the source run when a resume/retry/replay flow creates a new run.
+   */
+  readonly parentRunId?: RunId
+  readonly timestamp: number
+}
+
+export interface RunStartedEvent extends RunLifecycleEventFields {
   readonly type: 'run.started'
-  readonly runId: RunId
-  readonly sessionId: SessionId
-  readonly timestamp: number
 }
 
-export interface RunCompletedEvent {
+export interface RunCompletedEvent extends RunLifecycleEventFields {
   readonly type: 'run.completed'
-  readonly runId: RunId
-  readonly sessionId: SessionId
-  readonly timestamp: number
 }
 
-export interface RunFailedEvent {
+export interface RunFailedEvent extends RunLifecycleEventFields {
   readonly type: 'run.failed'
-  readonly runId: RunId
-  readonly sessionId: SessionId
   readonly error: TianjiError
-  readonly timestamp: number
 }
 
-export interface RunCancelledEvent {
+export interface RunCancelledEvent extends RunLifecycleEventFields {
   readonly type: 'run.cancelled'
-  readonly runId: RunId
-  readonly sessionId: SessionId
-  readonly timestamp: number
 }
 
 export interface MessageStartedEvent {
