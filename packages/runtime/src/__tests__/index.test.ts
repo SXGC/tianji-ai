@@ -155,6 +155,7 @@ describe('@tianji/runtime', () => {
       '@langchain/core',
       '@langchain/langgraph',
       '@langchain/openai',
+      '@tianji/observer',
       '@tianji/shared',
       'ai',
       'deepagents',

@@ -1,8 +1,8 @@
 # tianji-ai
 
-`tianji-ai` 是一个基于 `pnpm` 和 `turbo` 的 TypeScript monorepo，用于构建 AI 会话运行时、共享协议与配置模型，以及命令行应用。
+`tianji-ai` 是一个基于 `pnpm` 和 `turbo` 的 TypeScript monorepo，用于构建 AI 会话运行时、observer 能力、共享协议与配置模型，以及命令行应用。
 
-当前仓库包含 `shared`、`runtime`、`agent` 三个核心 package，以及 `apps/cli` 命令行应用。
+当前仓库包含 `shared`、`runtime`、`observer`、`agent` 四个核心 package，以及 `apps/cli` 命令行应用。
 
 ## 当前范围
 
@@ -22,6 +22,7 @@ tianji-ai/
 │  └─ CONFIG_DESIGN.md
 ├─ packages/
 │  ├─ agent/
+│  ├─ observer/
 │  ├─ runtime/
 │  └─ shared/
 ├─ biome.json
@@ -57,6 +58,17 @@ tianji-ai/
 
 该包是编排层与运行时状态的核心承载位置。`SessionRuntimeOptions` 默认围绕 `deepagents` 配置块组织，支持 model、middleware、subagents、skills、interruptOn 等字段；`snapshotStore` 与 `toolCatalog` 继续作为稳定公共 API 暴露。
 
+### `@tianji/observer`
+
+observer 包，负责统一提供结构化日志和 tracing 初始化原语。当前公开能力包括：
+
+- logger 类型与入口：`ObserverLogger`、`ObserverLogEntry`、`ObserverLogSink`、`createObserverLogger`
+- 日志 sink：`createJsonlFileSink`、`createMemorySink`、`createStdoutSink`
+- 数据脱敏：`sanitizeObserverLogData`、`getDefaultObserverSensitiveKeys`
+- tracing：`initTracing`、`shutdownTracing`、`getTracer`、`startSessionSpan`、`startRunSpan`、`startToolSpan`、`startLlmCallSpan`
+
+该包负责 observer 侧公共边界；CLI 与 runtime 只消费这些能力，不再各自定义独立日志协议。
+
 ### `@tianji/agent`
 
 agent 装配层，负责把配置解析结果、默认 agent、`SOUL.md`、provider 凭据注入和 runtime/session 启动原语组合成应用入口可直接消费的 API。当前公开能力包括：
@@ -69,7 +81,7 @@ agent 装配层，负责把配置解析结果、默认 agent、`SOUL.md`、provi
 
 ### `@tianji/cli`
 
-命令行应用，提供 `tianji run "<prompt>"` 和 `tianji log -f` 两个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。`run` 命令会通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；`log -f` 命令会实时查看 JSONL 日志流。
+命令行应用，提供 `tianji run "<prompt>"` 和 `tianji log -f` 两个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。`run` 命令会通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。
 
 ## 开发命令
 
@@ -109,9 +121,9 @@ pnpm tianji log -f
 
 ## CLI 日志
 
-- `tianji run "<prompt>"` 运行期间会将结构化日志写入 `~/.config/tianji-ai/logs/tianji.log`。
-- 日志文件采用 JSONL，每行字段固定为 `timestamp`、`level`、`scope`、`message`、`data`，其中 `scope` 是字符串数组。
-- `tianji log -f` 会先输出已有日志，再持续 follow 新增日志，并渲染为人类可读文本。
+- `@tianji/observer` 统一提供结构化日志 API 和 JSONL sink；CLI 当前默认把日志写到 `~/.config/tianji-ai/logs/tianji.log`。
+- JSONL 记录字段为 `timestamp`、`level`、`scope`、`message`、`data`，其中 `scope` 是字符串数组。
+- `tianji log -f` 由 CLI 负责读取已有日志、持续 follow 新增内容，并渲染为人类可读文本。
 - 日志不会记录 prompt 原文、`SOUL.md` 正文或 provider `apiKey`。
 
 ## Git Hooks
@@ -129,11 +141,11 @@ pnpm tianji log -f
 
 ## 当前状态说明
 
-- 仓库包含三个核心 package（`shared`、`runtime`、`agent`）和一个 CLI 应用（`apps/cli`）。
+- 仓库包含四个核心 package（`shared`、`runtime`、`observer`、`agent`）和一个 CLI 应用（`apps/cli`）。
 - CLI 已支持 `tianji run "<prompt>"` 和 `tianji log -f` 完整流程。
 - 配置系统支持 `providers`、`agents`、`runtime`、`observer` 四个顶层配置块。
-- 日志系统通过 JSONL 落盘到 `~/.config/tianji-ai/logs/tianji.log`。
-- `docs/` 中部分内容会提到后续规划的 `tools-node`、`observer` 等模块，这些仍未在仓库中完整落地。
+- 日志系统当前通过 `@tianji/observer` 的 JSONL sink 落盘到 `~/.config/tianji-ai/logs/tianji.log`。
+- `docs/` 中部分内容会提到后续规划的 `tools-node` 等模块，这些仍未在仓库中完整落地。
 - 因此，阅读本仓库时应优先以 `packages/` 与 `apps/cli` 下现有源码和导出 API 为准。
 
 ## License

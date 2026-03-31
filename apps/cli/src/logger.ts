@@ -1,18 +1,16 @@
 import { appendFile, mkdir } from 'node:fs/promises'
+import type {
+  ObserverLogEntry,
+  ObserverLogLevel,
+  ObserverLogScope,
+  ObserverLogSink,
+} from '@tianji/observer'
+import { createObserverLogger } from '@tianji/observer'
 import type { UserConfigPaths } from './config.js'
 
-export type CliLogLevel = 'debug' | 'info' | 'warn' | 'error'
-export type CliLogScope = readonly [string, ...string[]]
-
-const SENSITIVE_DATA_KEYS = new Set(['apiKey', 'prompt', 'soul'])
-
-export interface CliLogEntry {
-  readonly timestamp: string
-  readonly level: CliLogLevel
-  readonly scope: CliLogScope
-  readonly message: string
-  readonly data?: Record<string, unknown>
-}
+export type CliLogLevel = Extract<ObserverLogLevel, 'debug' | 'info' | 'warn' | 'error'>
+export type CliLogScope = ObserverLogScope
+export type CliLogEntry = ObserverLogEntry
 
 export interface CliLogger {
   readonly appendCliLog: (entry: CliLogEntry) => Promise<void>
@@ -38,28 +36,37 @@ export interface CliLogger {
   ) => Promise<void>
 }
 
+export interface CreateCliLoggerOptions {
+  readonly sink: ObserverLogSink
+}
+
 /**
- * Creates a CLI logger bound to the user log file path.
+ * Creates a CLI logger adapter backed by the observer logger.
  *
- * @param paths - The resolved user config paths
- * @returns Logger helpers that append JSONL records into the CLI log file
+ * @param options - The observer sink used for JSONL persistence
+ * @returns Logger helpers with the existing CLI-facing method names
  */
-export function createCliLogger(paths: UserConfigPaths): CliLogger {
+export function createCliLogger(options: CreateCliLoggerOptions): CliLogger {
+  const observerLogger = createObserverLogger({
+    sinks: [options.sink],
+    sensitiveKeys: ['prompt', 'soul'],
+  })
+
   return {
     appendCliLog(entry) {
-      return appendCliLog(paths, entry)
+      return options.sink.write(entry)
     },
     logDebug(scope, message, data) {
-      return writeCliLog(paths, 'debug', scope, message, data)
+      return observerLogger.debug(scope, message, data)
     },
     logInfo(scope, message, data) {
-      return writeCliLog(paths, 'info', scope, message, data)
+      return observerLogger.info(scope, message, data)
     },
     logWarn(scope, message, data) {
-      return writeCliLog(paths, 'warn', scope, message, data)
+      return observerLogger.warn(scope, message, data)
     },
     logError(scope, message, data) {
-      return writeCliLog(paths, 'error', scope, message, data)
+      return observerLogger.error(scope, message, data)
     },
   }
 }
@@ -71,8 +78,7 @@ export function createCliLogger(paths: UserConfigPaths): CliLogger {
  * @param entry - The fully structured log entry to persist
  */
 export async function appendCliLog(paths: UserConfigPaths, entry: CliLogEntry): Promise<void> {
-  await mkdir(paths.logsDir, { recursive: true })
-  await appendFile(paths.cliLogFilePath, `${JSON.stringify(entry)}\n`, 'utf8')
+  await createCliLoggerFromPaths(paths).appendCliLog(entry)
 }
 
 /**
@@ -89,7 +95,7 @@ export function logInfo(
   message: string,
   data?: Record<string, unknown>
 ): Promise<void> {
-  return writeCliLog(paths, 'info', scope, message, data)
+  return createCliLoggerFromPaths(paths).logInfo(scope, message, data)
 }
 
 /**
@@ -106,7 +112,7 @@ export function logDebug(
   message: string,
   data?: Record<string, unknown>
 ): Promise<void> {
-  return writeCliLog(paths, 'debug', scope, message, data)
+  return createCliLoggerFromPaths(paths).logDebug(scope, message, data)
 }
 
 /**
@@ -123,7 +129,7 @@ export function logError(
   message: string,
   data?: Record<string, unknown>
 ): Promise<void> {
-  return writeCliLog(paths, 'error', scope, message, data)
+  return createCliLoggerFromPaths(paths).logError(scope, message, data)
 }
 
 /**
@@ -140,78 +146,16 @@ export function logWarn(
   message: string,
   data?: Record<string, unknown>
 ): Promise<void> {
-  return writeCliLog(paths, 'warn', scope, message, data)
+  return createCliLoggerFromPaths(paths).logWarn(scope, message, data)
 }
 
-async function writeCliLog(
-  paths: UserConfigPaths,
-  level: CliLogLevel,
-  scope: CliLogScope,
-  message: string,
-  data?: Record<string, unknown>
-): Promise<void> {
-  const sanitizedData = sanitizeCliLogData(data)
-  const entry: CliLogEntry = {
-    timestamp: new Date().toISOString(),
-    level,
-    scope,
-    message,
-    ...(sanitizedData === undefined ? {} : { data: sanitizedData }),
-  }
-
-  await appendCliLog(paths, entry)
-}
-
-function sanitizeCliLogData(
-  data: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (data === undefined) {
-    return undefined
-  }
-
-  const sanitizedEntries = Object.entries(data).flatMap(([key, value]) => {
-    if (SENSITIVE_DATA_KEYS.has(key)) {
-      return []
-    }
-
-    return [[key, sanitizeCliLogValue(value)] satisfies readonly [string, unknown]]
+function createCliLoggerFromPaths(paths: UserConfigPaths): CliLogger {
+  return createCliLogger({
+    sink: {
+      async write(entry: CliLogEntry) {
+        await mkdir(paths.logsDir, { recursive: true })
+        await appendFile(paths.cliLogFilePath, `${JSON.stringify(entry)}\n`, 'utf8')
+      },
+    },
   })
-
-  if (sanitizedEntries.length === 0) {
-    return undefined
-  }
-
-  return Object.fromEntries(sanitizedEntries)
-}
-
-function sanitizeCliLogValue(value: unknown): unknown {
-  if (value === null || value === undefined) {
-    return value
-  }
-
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return value
-  }
-
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeCliLogValue(item))
-  }
-
-  if (value instanceof Error) {
-    return { message: value.message, name: value.name }
-  }
-
-  if (typeof value === 'object') {
-    const sanitizedEntries = Object.entries(value).flatMap(([key, nestedValue]) => {
-      if (SENSITIVE_DATA_KEYS.has(key)) {
-        return []
-      }
-
-      return [[key, sanitizeCliLogValue(nestedValue)] satisfies readonly [string, unknown]]
-    })
-
-    return Object.fromEntries(sanitizedEntries)
-  }
-
-  return String(value)
 }

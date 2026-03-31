@@ -15,6 +15,7 @@ import { randomUUID } from 'node:crypto'
 
 import type { BaseLanguageModel } from '@langchain/core/language_models/base'
 import { ChatOpenAI } from '@langchain/openai'
+import type { ObserverLogger } from '@tianji/observer'
 import {
   type AppMessage,
   CancelledError,
@@ -107,9 +108,12 @@ export interface DeepagentsRunWorkflowState {
   readonly interrupts: readonly DeepagentsInterruptRecord[]
 }
 
+export type { ObserverLogger }
+
 export interface SessionRuntimeOptions {
   readonly engine?: Extract<SessionRuntimeEngine, 'deepagents'>
   readonly deepagents?: SessionRuntimeDeepagentsConfig
+  readonly logger?: ObserverLogger
   readonly snapshotStore?: SnapshotStore
   readonly toolCatalog?: ToolCatalog | ToolRegistry | readonly RuntimeToolDefinition[]
 }

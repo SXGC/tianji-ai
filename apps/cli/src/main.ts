@@ -1,10 +1,11 @@
+import { appendFile, mkdir } from 'node:fs/promises'
 import { type AgentSession, type LoadedAgentContext, createAgentSession } from '@tianji/agent'
 import type { RunId, RuntimeEvent } from '@tianji/shared'
 
 import { type UserConfigPaths, getUserConfigPaths, loadUserConfigContext } from './config.js'
 import { loadDevelopmentEnv } from './dev-env.js'
 import { type FollowCliLogOptions, followCliLog } from './log-follow.js'
-import type { CliLogScope, CliLogger } from './logger.js'
+import type { CliLogEntry, CliLogScope, CliLogger } from './logger.js'
 import { createCliLogger } from './logger.js'
 
 const CLI_USAGE = ['Usage:', '  tianji run "<prompt>"', '  tianji log -f'].join('\n')
@@ -177,7 +178,7 @@ export async function handleRunCommand(
 ): Promise<number> {
   const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
   const paths = resolveUserConfigPaths()
-  const logger = createCliLogger(paths)
+  const logger = createCliLoggerFromPaths(paths)
 
   await logger.logInfo(CLI_RUN_SCOPE, 'Received run command', {
     promptLength: command.prompt.length,
@@ -234,7 +235,8 @@ async function handleLogFollowCommand(
 
 async function tryLogCliFailure(error: unknown, argv: readonly string[]): Promise<void> {
   try {
-    const logger = createCliLogger(getUserConfigPaths())
+    const paths = getUserConfigPaths()
+    const logger = createCliLoggerFromPaths(paths)
     await logger.logError(CLI_MAIN_SCOPE, 'CLI command failed', {
       argv: [...argv],
       error: getErrorMessage(error),
@@ -258,4 +260,19 @@ function getErrorMessage(error: unknown): string {
   }
 
   return String(error)
+}
+
+function createCliLoggerFromPaths(paths: UserConfigPaths): CliLogger {
+  return createCliLogger({
+    sink: {
+      write(entry: CliLogEntry) {
+        return appendCliLogEntry(paths, entry)
+      },
+    },
+  })
+}
+
+async function appendCliLogEntry(paths: UserConfigPaths, entry: CliLogEntry): Promise<void> {
+  await mkdir(paths.logsDir, { recursive: true })
+  await appendFile(paths.cliLogFilePath, `${JSON.stringify(entry)}\n`, 'utf8')
 }

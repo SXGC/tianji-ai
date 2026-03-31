@@ -90,7 +90,7 @@ describe('runtime config loader', () => {
     expect(result.config.providers?.openai?.baseUrl).toBe('http://100.78.129.21:8317/v1')
     expect(result.config.providers?.anthropic?.apiKey).toBe('sk-workspace')
     expect(result.config.agents?.defaultAgent).toBe('reviewer')
-    expect(result.config.agents?.items?.default?.model).toBe('openai/gpt-latest-medium')
+    expect(result.config.agents?.items?.default?.model).toBe('openai/glm-latest')
     expect(result.config.agents?.items?.reviewer?.model).toBe('anthropic/claude-3-7-sonnet')
     expect(result.config.runtime?.tool?.timeoutMs).toBe(120000)
     expect(result.config.runtime?.tool?.maxConcurrency).toBe(8)

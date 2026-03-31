@@ -15,6 +15,7 @@
 - 运行时入口：`createSessionRuntime`
 - 配置中心：`loadResolvedConfig`、`resolveConfigPaths`、`resolveWorkspaceConfig`、`createWorkspaceId`
 - 运行时接口与配置类型：`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`
+- observer 边界：`ObserverLogger`
 - 配置错误与元数据类型：`RuntimeConfigError`、`ResolvedConfig`、`ResolvedConfigPaths`、`WorkspaceConfigResolution`、`ConfigLayerSnapshot`
 - Metadata 读取：`readSessionRuntimeMetadata`、`readRunRuntimeMetadata`、`readDeepagentsRunWorkflowState`
 - Metadata 类型：`SessionRuntimeMetadata`、`RunRuntimeMetadata`、`DeepagentsRunWorkflowState`、`DeepagentsInterruptRecord`
@@ -68,7 +69,31 @@ console.log(resolved.config.agents?.defaultAgent)
 
 - `engine?: 'deepagents'`：未显式指定时默认使用 `deepagents`；历史 legacy 标记仅通过 metadata helper 暴露，不再作为可执行 runtime 选项。
 - `deepagents`：v2 主配置块，当前公开字段为 `model`、`middleware`、`backend`、`checkpointer`、`store`、`subagents`、`skills`、`interruptOn`。
+- `logger?: ObserverLogger`：可选注入 observer logger，作为 runtime 向外部日志系统写入记录的公共边界；runtime 本身不定义 sink、文件路径或渲染策略。
 - `snapshotStore` / `toolCatalog`：继续作为稳定公共 API 暴露。
+
+如果应用侧需要把 runtime 日志接到文件、stdout 或内存中，应在外部先通过 `@tianji/observer` 创建 `ObserverLogger`，再注入给 `createSessionRuntime`。
+
+```ts
+import { createObserverLogger, createStdoutSink } from '@tianji/observer'
+import { createSessionRuntime, InMemorySnapshotStore, ToolRegistry } from '@tianji/runtime'
+
+const logger = createObserverLogger({
+  sinks: [createStdoutSink({ pretty: true })],
+  scope: ['runtime'],
+})
+
+const runtime = createSessionRuntime({
+  deepagents: {
+    model: 'openai:gpt-5.1',
+  },
+  logger,
+  snapshotStore: new InMemorySnapshotStore(),
+  toolCatalog: new ToolRegistry(),
+})
+
+void runtime
+```
 
 注意事项：
 

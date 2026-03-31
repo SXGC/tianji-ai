@@ -5,6 +5,7 @@
     "baseUrl": ".",
     "paths": {
       "@tianji/agent": ["../../packages/agent/src/index.ts"],
+      "@tianji/observer": ["../../packages/observer/src/index.ts"],
       "@tianji/runtime": ["../../packages/runtime/src/index.ts"],
       "@tianji/shared": ["../../packages/shared/src/index.ts"]
     }

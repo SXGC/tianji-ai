@@ -2,7 +2,7 @@
  * foundation wave 6 依赖边界验证测试。
  *
  * 业务职责：
- * - 校验 contracts、shared、llm、runtime 四个内部包之间的依赖约束。
+ * - 校验 shared、observer、runtime 三个内部包之间的依赖约束。
  * - 防止内部包图出现循环依赖，保证分层稳定。
  *
  * 对外触点：
@@ -71,43 +71,40 @@ function findCycle(nodes: readonly PackageNode[]): readonly string[] | undefined
 }
 
 describe('foundation wave 6 verification', () => {
-  it('preserves dependency constraints across contracts, llm, shared, and runtime', async () => {
-    const [contractsPkg, sharedPkg, llmPkg, runtimePkg] = await Promise.all([
-      loadPackageJson('../../../contracts/package.json'),
+  it('preserves dependency constraints across shared, observer, and runtime', async () => {
+    const [sharedPkg, observerPkg, runtimePkg] = await Promise.all([
       loadPackageJson('../../../shared/package.json'),
-      loadPackageJson('../../../llm/package.json'),
+      loadPackageJson('../../../observer/package.json'),
       loadPackageJson('../../package.json'),
     ])
 
-    const contractDependencies = Object.keys(contractsPkg.dependencies ?? {})
     const sharedDependencies = Object.keys(sharedPkg.dependencies ?? {})
-    const llmDependencies = Object.keys(llmPkg.dependencies ?? {})
+    const observerDependencies = Object.keys(observerPkg.dependencies ?? {})
     const runtimeDependencies = Object.keys(runtimePkg.dependencies ?? {})
 
-    expect(contractDependencies).toHaveLength(0)
     expect(sharedDependencies.filter((dependency) => dependency.startsWith('@tianji/'))).toEqual([])
-    expect(llmDependencies.filter((dependency) => dependency.startsWith('@langchain/'))).toEqual([])
+    expect(observerDependencies.filter((dependency) => dependency.startsWith('@tianji/'))).toEqual(
+      []
+    )
     expect(runtimeDependencies).toContain('@langchain/core')
     expect(runtimeDependencies).toContain('deepagents')
-    expect(runtimeDependencies).not.toContain('ai')
+    expect(runtimeDependencies).toContain('@tianji/shared')
+    expect(runtimeDependencies).toContain('@tianji/observer')
   })
 
   it('keeps the internal package dependency graph acyclic', async () => {
-    const [contractsPkg, sharedPkg, llmPkg, runtimePkg] = await Promise.all([
-      loadPackageJson('../../../contracts/package.json'),
+    const [sharedPkg, observerPkg, runtimePkg] = await Promise.all([
       loadPackageJson('../../../shared/package.json'),
-      loadPackageJson('../../../llm/package.json'),
+      loadPackageJson('../../../observer/package.json'),
       loadPackageJson('../../package.json'),
     ])
 
-    const packageNodes: PackageNode[] = [contractsPkg, sharedPkg, llmPkg, runtimePkg].map(
-      (pkg) => ({
-        name: pkg.name ?? 'unknown-package',
-        dependencies: Object.keys(pkg.dependencies ?? {}).filter((dependency) =>
-          dependency.startsWith('@tianji/')
-        ),
-      })
-    )
+    const packageNodes: PackageNode[] = [sharedPkg, observerPkg, runtimePkg].map((pkg) => ({
+      name: pkg.name ?? 'unknown-package',
+      dependencies: Object.keys(pkg.dependencies ?? {}).filter((dependency) =>
+        dependency.startsWith('@tianji/')
+      ),
+    }))
 
     expect(findCycle(packageNodes)).toBeUndefined()
   })

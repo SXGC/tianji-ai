@@ -37,6 +37,7 @@ export {
   createSessionRuntime,
   type CreateSessionOptions,
   type DeepagentsInterruptRecord,
+  type ObserverLogger,
   type DeepagentsRunWorkflowState,
   type RunRuntimeMetadata,
   type ResumeRunOptions,

@@ -4,7 +4,7 @@
  * 使用依赖注入与临时文件验证 `runCli()` 的主命令分发、run 编排和 log follow
  * 行为，避免依赖真实子进程和外部 LLM 服务。
  */
-import { mkdir, truncate, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, truncate, writeFile } from 'node:fs/promises'
 
 import { FakeListChatModel } from '@langchain/core/utils/testing'
 import { type AgentSession, createAgentRuntime } from '@tianji/agent'
@@ -144,6 +144,44 @@ describe('CLI integration', () => {
 
       expect(exitCode).toBe(1)
       expect(stderrSpy).toHaveBeenCalledWith(expect.stringContaining('Run failed'))
+    })
+
+    it('writes observer JSONL entries compatible with log follow output', async () => {
+      const fakeContext = createFakeContext()
+      const session = createStubSession([
+        {
+          type: 'run.completed',
+          runId: 'run_test' as RunId,
+          sessionId: 'session_test' as SessionId,
+          timestamp: Date.now(),
+        },
+      ])
+
+      await captureStdout(async () => {
+        const exitCode = await runCli(['run', 'test observer logger'], {
+          loadContext: () => Promise.resolve(fakeContext),
+          createSession: () => session,
+          getUserConfigPaths: () => fakeContext.paths,
+        })
+
+        expect(exitCode).toBe(0)
+      })
+
+      const captured = await captureStdout(async () => {
+        await followCliLog(fakeContext.paths.cliLogFilePath, {
+          signal: AbortSignal.timeout(5),
+        })
+      })
+
+      expect(captured).toContain('Received run command {"promptLength":20}')
+      expect(captured).toContain('Loaded user config context')
+      expect(captured).toContain(
+        'Run command completed {"runId":"run_test","sessionId":"session_test"}'
+      )
+
+      const logFileContent = await readFile(fakeContext.paths.cliLogFilePath, 'utf8')
+      expect(logFileContent).not.toContain('test observer logger')
+      expect(logFileContent).not.toContain(fakeContext.agent.soul)
     })
 
     it('maps agent runtime model to configured model instance', async () => {

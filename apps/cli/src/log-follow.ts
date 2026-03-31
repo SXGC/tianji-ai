@@ -1,6 +1,10 @@
 import { open, stat } from 'node:fs/promises'
+import type { ObserverLogEntry, ObserverLogScope } from '@tianji/observer'
 import { sleep } from '@tianji/shared'
-import type { CliLogEntry, CliLogLevel, CliLogScope } from './logger.js'
+
+type CliLogEntry = ObserverLogEntry
+type CliLogScope = ObserverLogScope
+type CliLogLevel = CliLogEntry['level']
 
 const LOG_FOLLOW_POLL_INTERVAL_MS = 500
 const LOG_FOLLOW_CHUNK_SIZE = 64 * 1024

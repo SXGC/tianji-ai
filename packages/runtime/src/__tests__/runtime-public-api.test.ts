@@ -12,6 +12,7 @@
 import { readFile } from 'node:fs/promises'
 
 import { MemorySaver } from '@langchain/langgraph'
+import type { ObserverLogger } from '@tianji/observer'
 import { TianjiError } from '@tianji/shared'
 import { describe, expect, expectTypeOf, it } from 'vitest'
 
@@ -60,6 +61,7 @@ describe('runtime public API v2 boundary', () => {
     expectTypeOf<SessionRuntimeOptions['deepagents']>().toEqualTypeOf<
       SessionRuntimeDeepagentsConfig | undefined
     >()
+    expectTypeOf<SessionRuntimeOptions['logger']>().toEqualTypeOf<ObserverLogger | undefined>()
     expect(runtime.createSession).toBeDefined()
     expect(runtime.closeSession).toBeDefined()
     expect(runtime.getSessionSnapshot).toBeDefined()
@@ -68,6 +70,12 @@ describe('runtime public API v2 boundary', () => {
     expect(runtime.resumeRun).toBeDefined()
     expect(runtime.streamEvents).toBeDefined()
     expect(runtime.cancelRun).toBeDefined()
+  })
+
+  it('keeps logger as an optional observer boundary only', () => {
+    expectTypeOf<Pick<SessionRuntimeOptions, 'logger'>>().toMatchTypeOf<{
+      logger?: ObserverLogger
+    }>({})
   })
 
   it('requires a checkpointer when interruptOn is configured', () => {

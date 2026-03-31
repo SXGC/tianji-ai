@@ -30,9 +30,9 @@ pnpm tianji log -f
 
 ### `tianji log -f`
 
-- 读取并持续 follow CLI JSONL 日志文件。
+- 读取并持续 follow observer 写出的 JSONL 日志文件。
 - 如果日志文件尚未创建，会先输出等待提示；文件出现后先打印已有内容，再持续输出新增日志。
-- CLI 会把 JSONL 渲染为可读文本，而不是直接输出原始 JSON。
+- `@tianji/observer` 负责生成 JSONL 记录；CLI 负责 follow 文件并把 JSONL 渲染为可读文本，而不是直接输出原始 JSON。
 
 示例输出：
 
@@ -48,7 +48,7 @@ pnpm tianji log -f
 |---|---|
 | `~/.config/tianji-ai/tianji.json` | 主配置文件 |
 | `~/.config/tianji-ai/agents/<agent-name>/SOUL.md` | agent 身份定义 |
-| `~/.config/tianji-ai/logs/tianji.log` | CLI JSONL 日志文件 |
+| `~/.config/tianji-ai/logs/tianji.log` | observer JSONL 日志文件，供 CLI follow |
 
 ## 配置文件结构
 
@@ -97,6 +97,11 @@ pnpm tianji log -f
 
 ## 日志系统
 
+`@tianji/observer` 统一负责结构化日志协议与 JSONL 生成，CLI 当前只负责两件事：
+
+- 在 `run` 等命令流程中调用 observer logger 写日志。
+- 在 `log -f` 中读取同一个 JSONL 文件并渲染输出。
+
 日志文件使用 JSONL，每行一条 JSON 记录。原始字段结构如下：
 
 ```json
@@ -120,7 +125,7 @@ pnpm tianji log -f
 | `cli > log > follow` | log follow 主流程 |
 | `cli > main` | CLI 顶层错误记录 |
 
-日志中会保留 `agentName`、`provider`、`modelName`、`soulPath`、`sessionId`、`runId` 等元信息，但会过滤 `apiKey`、`prompt`、`soul` 等敏感字段，不记录 `SOUL.md` 正文或 prompt 正文。
+日志中会保留 `agentName`、`provider`、`modelName`、`soulPath`、`sessionId`、`runId` 等元信息，但会过滤 `apiKey`、`prompt`、`soul` 等敏感字段，不记录 `SOUL.md` 正文或 prompt 正文。JSONL 的写入格式与脱敏行为都由 `@tianji/observer` 提供。
 
 ## 错误处理
 
@@ -174,6 +179,7 @@ pnpm --filter @tianji/cli clean
 ## 依赖关系
 
 - `@tianji/agent`：配置装配、默认 agent 解析、runtime/session 启动封装。
+- `@tianji/observer`：结构化 logger、JSONL sink 与 tracing 初始化原语。
 - `@tianji/runtime`：会话执行、事件流、快照与工具目录。
 - `@tianji/shared`：运行时协议类型与配置 schema。
 
