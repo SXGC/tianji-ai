@@ -39,7 +39,7 @@ pnpm tianji log -f
 ```text
 2026-03-25T10:00:00.000Z INFO  cli > run > config       Loaded user config context {"agentName":"default","provider":"openai","modelName":"gpt-4.1"}
 2026-03-25T10:00:01.200Z INFO  cli > run > runtime      Session runtime created {"agentName":"default","provider":"openai","modelName":"gpt-4.1"}
-2026-03-25T10:00:02.100Z DEBUG cli > run > event        Received runtime event {"eventType":"message.delta"}
+2026-03-25T10:00:02.100Z DEBUG cli > run > event        Received runtime event {"eventType":"message.delta","channel":"text","delta":"hello","deltaLength":5}
 ```
 
 ## 配置文件位置
@@ -125,7 +125,7 @@ pnpm tianji log -f
 | `cli > log > follow` | log follow 主流程 |
 | `cli > main` | CLI 顶层错误记录 |
 
-日志中会保留 `agentName`、`provider`、`modelName`、`soulPath`、`sessionId`、`runId` 等元信息，但会过滤 `apiKey`、`prompt`、`soul` 等敏感字段，不记录 `SOUL.md` 正文或 prompt 正文。JSONL 的写入格式与脱敏行为都由 `@tianji/observer` 提供。
+日志中会保留 `agentName`、`provider`、`modelName`、`soulPath`、`sessionId`、`runId` 等元信息；对于 `message.delta` 事件，还会记录 `channel`、`delta` 和 `deltaLength` 以便排查流式输出问题。但会过滤 `apiKey`、`prompt`、`soul` 等敏感字段，不记录 `SOUL.md` 正文或 prompt 正文。JSONL 的写入格式与脱敏行为都由 `@tianji/observer` 提供。
 
 ## 错误处理
 

@@ -150,6 +150,15 @@ describe('CLI integration', () => {
       const fakeContext = createFakeContext()
       const session = createStubSession([
         {
+          type: 'message.delta',
+          runId: 'run_test' as RunId,
+          messageId: 'msg_1',
+          sequence: 1,
+          channel: 'text',
+          payload: { content: 'observer delta text' },
+          timestamp: Date.now(),
+        },
+        {
           type: 'run.completed',
           runId: 'run_test' as RunId,
           sessionId: 'session_test' as SessionId,
@@ -175,6 +184,9 @@ describe('CLI integration', () => {
 
       expect(captured).toContain('Received run command {"promptLength":20}')
       expect(captured).toContain('Loaded user config context')
+      expect(captured).toContain(
+        'Received runtime event {"eventType":"message.delta","runId":"run_test","messageId":"msg_1","sequence":1,"channel":"text","delta":"observer delta text","deltaLength":19}'
+      )
       expect(captured).toContain(
         'Run command completed {"runId":"run_test","sessionId":"session_test"}'
       )

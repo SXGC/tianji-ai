@@ -147,6 +147,7 @@ async function handleRuntimeEvent(event: RuntimeEvent, logger: CliLogger): Promi
         messageId: event.messageId,
         sequence: event.sequence,
         channel: event.channel,
+        delta: event.channel === 'text' ? event.payload.content : undefined,
         deltaLength: event.channel === 'text' ? event.payload.content.length : undefined,
       })
       if (event.channel === 'text') {
