@@ -14,6 +14,11 @@ import type { ToolInvocation } from './tool.js'
 
 export type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled'
 
+/**
+ * Describes how a run was created within an execution lineage.
+ */
+export type RunTriggerType = 'new' | 'resume' | 'retry' | 'replay'
+
 export type PendingOperationStatus =
   | 'running'
   | 'completed'
@@ -42,6 +47,14 @@ export interface RunSnapshot {
   readonly runId: RunId
   readonly sessionId: SessionId
   readonly status: RunStatus
+  /**
+   * Identifies whether this run started fresh or was derived from a prior run.
+   */
+  readonly triggerType: RunTriggerType
+  /**
+   * Records the source run when a resume/retry/replay flow creates a new run.
+   */
+  readonly parentRunId?: RunId
   readonly messages: AppMessage[]
   readonly createdAt: number
   readonly updatedAt: number

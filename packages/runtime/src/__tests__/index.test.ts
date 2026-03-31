@@ -9,6 +9,8 @@
  * - 直接校验 ../index.js 公共入口。
  * - 读取 ../../package.json 验证 exports 与 dependencies 边界。
  */
+import { fileURLToPath } from 'node:url'
+
 import { FakeListChatModel } from '@langchain/core/utils/testing'
 import { createRunId, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
@@ -48,6 +50,8 @@ interface PackageJson {
     }
   }
 }
+
+const defaultConfigPath = fileURLToPath(new URL('../../../../tianji.config.json', import.meta.url))
 
 describe('@tianji/runtime', () => {
   it('should be importable and expose the public runtime surface', async () => {
@@ -126,7 +130,7 @@ describe('@tianji/runtime', () => {
     ).toBeDefined()
     expect(
       resolveConfigPaths({ workspaceRoot: '/tmp/tianji-runtime-exports' }).defaultConfigPath
-    ).toBe('/workspaces/dev_docker/tianji-ai/tianji.config.json')
+    ).toBe(defaultConfigPath)
     expect(RuntimeConfigError).toBeDefined()
     expect(loadResolvedConfig).toBeDefined()
     expect(createSessionOptions.sessionId).toBe(executionContext.sessionId)

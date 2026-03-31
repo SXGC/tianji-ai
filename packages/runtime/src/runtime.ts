@@ -141,6 +141,8 @@ interface ExecuteRunInput {
   readonly sessionSnapshot: SessionSnapshot
   readonly messages: readonly AppMessage[]
   readonly policy: ExecutionPolicy
+  readonly triggerType: RunSnapshot['triggerType']
+  readonly parentRunId?: RunId
   readonly abortSignal?: AbortSignal
   readonly systemPrompt?: string
   readonly config?: LlmGenerationConfig
@@ -163,6 +165,13 @@ interface RunExecutionContext {
 interface AbortSignalScope {
   readonly signal: AbortSignal | undefined
   readonly cleanup: () => void
+}
+
+interface RunLineageFields {
+  readonly sessionId: SessionId
+  readonly runId: RunId
+  readonly triggerType: RunSnapshot['triggerType']
+  readonly parentRunId?: RunId
 }
 
 export function createSessionRuntime(options: SessionRuntimeOptions): SessionRuntime {
@@ -382,6 +391,7 @@ class SessionRuntimeImpl implements SessionRuntime {
       sessionSnapshot: nextSessionSnapshot,
       messages: nextSessionSnapshot.messages,
       policy: nextPolicy,
+      triggerType: 'new',
       abortSignal: options.abortSignal,
       systemPrompt: options.systemPrompt,
       config: options.config,
@@ -447,6 +457,8 @@ class SessionRuntimeImpl implements SessionRuntime {
       sessionSnapshot,
       messages: previousRun.messages,
       policy: previousRun.policy ?? sessionSnapshot.policy ?? DEFAULT_EXECUTION_POLICY,
+      triggerType: 'resume',
+      parentRunId: previousRun.runId,
       abortSignal: options.abortSignal,
       systemPrompt: options.systemPrompt ?? readStoredSystemPrompt(previousRun.metadata),
       config: options.config ?? readStoredGenerationConfig(previousRun.metadata),
@@ -486,9 +498,14 @@ class SessionRuntimeImpl implements SessionRuntime {
 
   private async startRun(input: ExecuteRunInput): Promise<void> {
     const timestamp = Date.now()
-    const runSnapshot: RunSnapshot = {
-      runId: input.runId,
+    const lineage = createRunLineageFields({
       sessionId: input.sessionSnapshot.sessionId,
+      runId: input.runId,
+      triggerType: input.triggerType,
+      parentRunId: input.parentRunId,
+    })
+    const runSnapshot: RunSnapshot = {
+      ...lineage,
       status: 'running',
       messages: [...input.messages],
       createdAt: timestamp,
@@ -530,6 +547,7 @@ class SessionRuntimeImpl implements SessionRuntime {
     input: ExecuteRunInput
   ): Promise<void> {
     const abortSignalScope = createAbortSignalScope(input.abortSignal, activeRun.controller.signal)
+    const lineage = createRunLineageFields(runSnapshot)
     const context: RunExecutionContext = {
       signal: abortSignalScope.signal ?? activeRun.controller.signal,
       toolCatalog: this.toolCatalog,
@@ -541,10 +559,10 @@ class SessionRuntimeImpl implements SessionRuntime {
     try {
       activeRun.events.push({
         type: 'run.started',
-        runId: activeRun.runId,
-        sessionId: activeRun.sessionId,
+        ...lineage,
         timestamp: Date.now(),
       })
+      this.logRunLifecycle('info', 'run.started', lineage)
 
       const result = await this.executeDeepagentsTurn(activeRun, input, context)
       const finalMessage = result.finalMessage
@@ -575,10 +593,10 @@ class SessionRuntimeImpl implements SessionRuntime {
 
         activeRun.events.push({
           type: 'run.cancelled',
-          runId: activeRun.runId,
-          sessionId: activeRun.sessionId,
+          ...lineage,
           timestamp: Date.now(),
         })
+        this.logRunLifecycle('warn', 'run.cancelled', lineage)
         activeRun.events.close()
         return
       }
@@ -609,10 +627,10 @@ class SessionRuntimeImpl implements SessionRuntime {
 
       activeRun.events.push({
         type: 'run.completed',
-        runId: activeRun.runId,
-        sessionId: activeRun.sessionId,
+        ...lineage,
         timestamp: Date.now(),
       })
+      this.logRunLifecycle('info', 'run.completed', lineage)
       activeRun.events.close()
     } catch (error) {
       if (isCancellationError(error, context.signal)) {
@@ -631,10 +649,10 @@ class SessionRuntimeImpl implements SessionRuntime {
 
         activeRun.events.push({
           type: 'run.cancelled',
-          runId: activeRun.runId,
-          sessionId: activeRun.sessionId,
+          ...lineage,
           timestamp: Date.now(),
         })
+        this.logRunLifecycle('warn', 'run.cancelled', lineage)
         activeRun.events.close()
       } else {
         const resolvedError = toTianjiError(error)
@@ -652,10 +670,12 @@ class SessionRuntimeImpl implements SessionRuntime {
 
         activeRun.events.push({
           type: 'run.failed',
-          runId: activeRun.runId,
-          sessionId: activeRun.sessionId,
+          ...lineage,
           error: resolvedError,
           timestamp: Date.now(),
+        })
+        this.logRunLifecycle('error', 'run.failed', lineage, {
+          errorCode: resolvedError.code,
         })
         activeRun.events.fail(resolvedError)
       }
@@ -723,6 +743,41 @@ class SessionRuntimeImpl implements SessionRuntime {
     }
 
     return snapshot
+  }
+
+  /**
+   * 统一输出 run 生命周期 observer 日志，确保链路标识只在一个位置组装。
+   */
+  private logRunLifecycle(
+    level: 'info' | 'warn' | 'error',
+    message: 'run.started' | 'run.completed' | 'run.failed' | 'run.cancelled',
+    fields: RunLineageFields,
+    extraData?: Record<string, unknown>
+  ): void {
+    const logger = this.options.logger
+
+    if (logger === undefined) {
+      return
+    }
+
+    const data: Record<string, unknown> = {
+      sessionId: fields.sessionId,
+      runId: fields.runId,
+      triggerType: fields.triggerType,
+      ...(fields.parentRunId === undefined ? {} : { parentRunId: fields.parentRunId }),
+      ...(extraData ?? {}),
+    }
+
+    void logger[level](['runtime', 'run'], message, data)
+  }
+}
+
+function createRunLineageFields(fields: RunLineageFields): RunLineageFields {
+  return {
+    sessionId: fields.sessionId,
+    runId: fields.runId,
+    triggerType: fields.triggerType,
+    parentRunId: fields.parentRunId,
   }
 }
 

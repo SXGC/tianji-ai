@@ -1,9 +1,18 @@
 import type { SessionRuntime } from '@tianji/runtime'
-import { FileSnapshotStore } from '@tianji/runtime'
+import { FileSnapshotStore, createSessionRuntime } from '@tianji/runtime'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { LoadedAgentContext } from '../context.js'
 import { createAgentRuntime, createAgentSession } from '../session.js'
+
+vi.mock('@tianji/runtime', async () => {
+  const actual = await vi.importActual<typeof import('@tianji/runtime')>('@tianji/runtime')
+
+  return {
+    ...actual,
+    createSessionRuntime: vi.fn(actual.createSessionRuntime),
+  }
+})
 
 function createFakeContext(): LoadedAgentContext {
   return {
@@ -47,13 +56,15 @@ describe('agent session', () => {
     const runtime = createAgentRuntime(createFakeContext()) as SessionRuntime & {
       readonly options?: {
         readonly deepagents?: {
-          readonly model?: string
+          readonly model?: {
+            readonly model?: string
+          }
           readonly providerConfig?: Record<string, unknown>
         }
       }
     }
 
-    expect(runtime.options?.deepagents?.model).toBe('openai:gpt-4.1')
+    expect(runtime.options?.deepagents?.model?.model).toBe('gpt-4.1')
     expect(runtime.options?.deepagents?.providerConfig).toEqual({
       provider: 'openai',
       model: 'gpt-4.1',
@@ -67,7 +78,6 @@ describe('agent session', () => {
 
   it('creates a chat session that calls runtime with context soul', async () => {
     const context = createFakeContext()
-
     const runtime: SessionRuntime = {
       createSession: vi.fn(async (options) => ({
         sessionId: options?.sessionId ?? ('session_test' as never),
@@ -75,32 +85,50 @@ describe('agent session', () => {
         createdAt: 1,
         updatedAt: 1,
       })),
-      closeSession: vi.fn(),
-      getSessionSnapshot: vi.fn(),
-      getRunSnapshot: vi.fn(),
+      closeSession: vi.fn(async () => ({
+        sessionId: 'session_test' as never,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+      })),
+      getSessionSnapshot: vi.fn(async () => undefined),
+      getRunSnapshot: vi.fn(async () => undefined),
       runTurn: vi.fn(async () => 'run_test' as never),
-      resumeRun: vi.fn(),
+      resumeRun: vi.fn(async () => 'run_test' as never),
       streamEvents: vi.fn(async function* () {
         yield {
           type: 'run.completed' as const,
           runId: 'run_test' as never,
           sessionId: 'session_test' as never,
+          triggerType: 'new' as const,
+          parentRunId: undefined,
           timestamp: Date.now(),
         }
       }),
-      cancelRun: vi.fn(),
+      cancelRun: vi.fn(() => false),
     }
 
-    vi.spyOn(await import('../session.js'), 'createAgentRuntime').mockReturnValue(runtime)
+    vi.mocked(createSessionRuntime).mockReturnValue(runtime)
 
     const session = createAgentSession(context)
     const events = []
 
-    for await (const event of session.chat('hello')) {
+    for await (const event of session.chat('hello', { systemPrompt: context.agent.soul })) {
       events.push(event)
+      if (event.type === 'run.completed') {
+        break
+      }
     }
 
     expect(session.sessionId).toBeDefined()
     expect(events.length).toBeGreaterThan(0)
+    expect(events.some((event) => event.type === 'run.completed')).toBe(true)
+    expect(runtime.createSession).toHaveBeenCalledTimes(1)
+    expect(runtime.runTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: session.sessionId,
+        systemPrompt: context.agent.soul,
+      })
+    )
   })
 })

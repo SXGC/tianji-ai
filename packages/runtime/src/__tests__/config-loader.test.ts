@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import {
@@ -12,6 +13,7 @@ import {
 } from '../config.js'
 
 const createdDirs: string[] = []
+const defaultConfigPath = fileURLToPath(new URL('../../../../tianji.config.json', import.meta.url))
 
 describe('runtime config loader', () => {
   afterEach(async () => {
@@ -33,7 +35,7 @@ describe('runtime config loader', () => {
 
     expect(workspace.root).toBe(workspaceRoot)
     expect(workspace.id).toBe(createWorkspaceId(workspace.normalizedRoot))
-    expect(paths.defaultConfigPath).toBe('/workspaces/dev_docker/tianji-ai/tianji.config.json')
+    expect(paths.defaultConfigPath).toBe(defaultConfigPath)
     expect(paths.userConfigPath).toBe(join(homeDir, '.config', 'tianji-ai', 'tianji.json'))
     expect(paths.workspaceConfigPath).toBe(
       join(homeDir, '.config', 'tianji-ai', 'workspaces', `${workspace.id}.json`)

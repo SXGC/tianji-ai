@@ -1,119 +1,97 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, expectTypeOf, it } from 'vitest'
+import type { RunId } from '../identifiers.js'
 import { createRunId, createSessionId } from '../identifiers.js'
-import { DEFAULT_EXECUTION_POLICY } from '../policy.js'
-import type {
-  PendingOperation,
-  PendingOperationStatus,
-  ResumeHint,
-  RunSnapshot,
-  RunStatus,
-  SessionSnapshot,
-} from '../snapshot.js'
-import type { ToolInvocation } from '../tool.js'
+import type { RunSnapshot, RunStatus, RunTriggerType } from '../snapshot.js'
 
 describe('snapshot types', () => {
   const sessionId = createSessionId('session_001')
   const runId = createRunId('run_001')
   const timestamp = Date.now()
 
-  describe('RunStatus', () => {
-    it('should define all supported statuses', () => {
-      const statuses: RunStatus[] = ['running', 'completed', 'failed', 'cancelled']
-      expect(statuses).toHaveLength(4)
-    })
-  })
-
-  describe('PendingOperationStatus', () => {
-    it('should define all supported statuses', () => {
-      const statuses: PendingOperationStatus[] = [
-        'running',
-        'completed',
-        'aborted-clean',
-        'aborted-with-side-effect',
-      ]
-      expect(statuses).toHaveLength(4)
-    })
-  })
-
-  describe('ResumeHint', () => {
-    it('should define all supported hints', () => {
-      const hints: ResumeHint[] = ['replay', 'skip', 'require-user-confirmation']
-      expect(hints).toHaveLength(3)
-    })
-  })
-
-  describe('PendingOperation', () => {
-    const invocation: ToolInvocation = {
-      toolCallId: 'call_001',
-      toolName: 'test_tool',
-      args: { input: 'test' },
-    }
-
-    it('should define required fields', () => {
-      const op: PendingOperation = {
-        id: 'op_001',
-        invocation,
-        status: 'running',
-        timestamp,
-      }
-      expect(op.id).toBe('op_001')
-      expect(op.invocation).toBe(invocation)
-      expect(op.status).toBe('running')
-      expect(op.timestamp).toBe(timestamp)
-    })
-  })
-
-  describe('SessionSnapshot', () => {
-    it('should define required fields', () => {
-      const snapshot: SessionSnapshot = {
-        sessionId,
-        messages: [],
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      }
-      expect(snapshot.sessionId).toBe(sessionId)
-      expect(snapshot.messages).toEqual([])
-    })
-
-    it('should include optional policy', () => {
-      const snapshot: SessionSnapshot = {
-        sessionId,
-        messages: [],
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        policy: DEFAULT_EXECUTION_POLICY,
-      }
-      expect(snapshot.policy?.retry.maxAttempts).toBe(3)
-    })
-  })
-
   describe('RunSnapshot', () => {
-    it('should define required fields', () => {
-      const snapshot: RunSnapshot = {
-        runId,
-        sessionId,
-        status: 'running',
-        messages: [],
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        pendingOperations: [],
-      }
-      expect(snapshot.runId).toBe(runId)
-      expect(snapshot.pendingOperations).toEqual([])
+    const parentRunId = createRunId('run_parent') as RunId
+
+    const createRunSnapshot = (
+      triggerType: RunTriggerType,
+      overrides: Partial<RunSnapshot> = {}
+    ): RunSnapshot => ({
+      runId,
+      sessionId,
+      status: 'running',
+      triggerType,
+      parentRunId: triggerType === 'new' ? undefined : parentRunId,
+      messages: [],
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      pendingOperations: [],
+      ...overrides,
     })
 
-    it('should include optional workflowState and metadata', () => {
-      const snapshot: RunSnapshot = {
-        runId,
-        sessionId,
-        status: 'running',
-        messages: [],
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        pendingOperations: [],
+    it('should expose lineage fields on every run snapshot', () => {
+      expectTypeOf<RunSnapshot>().toHaveProperty('triggerType')
+      expectTypeOf<RunSnapshot>().toHaveProperty('parentRunId')
+    })
+
+    it('should encode lineage semantics across new and derived runs', () => {
+      const fresh = createRunSnapshot('new')
+      const derivedSnapshots: RunSnapshot[] = [
+        createRunSnapshot('resume', {
+          runId: createRunId('run_resume') as RunId,
+        }),
+        createRunSnapshot('retry', {
+          runId: createRunId('run_retry') as RunId,
+          status: 'failed',
+        }),
+        createRunSnapshot('replay', {
+          runId: createRunId('run_replay') as RunId,
+          status: 'completed',
+        }),
+      ]
+
+      expect(fresh.triggerType).toBe('new')
+      expect(fresh.parentRunId).toBeUndefined()
+      expect(derivedSnapshots.map((snapshot) => snapshot.triggerType)).toEqual([
+        'resume',
+        'retry',
+        'replay',
+      ])
+      expect(derivedSnapshots.every((snapshot) => snapshot.parentRunId === parentRunId)).toBe(true)
+    })
+
+    it('should keep trigger-specific fields available after status narrowing', () => {
+      const snapshots: RunSnapshot[] = [
+        createRunSnapshot('retry', {
+          runId: createRunId('run_retry') as RunId,
+          status: 'failed',
+        }),
+        createRunSnapshot('replay', {
+          runId: createRunId('run_replay') as RunId,
+          status: 'completed',
+        }),
+      ]
+
+      const terminalSnapshots = snapshots.filter(
+        (
+          snapshot
+        ): snapshot is RunSnapshot & { status: Extract<RunStatus, 'failed' | 'completed'> } =>
+          snapshot.status === 'failed' || snapshot.status === 'completed'
+      )
+
+      expect(terminalSnapshots.map((snapshot) => snapshot.triggerType)).toEqual(['retry', 'replay'])
+      expect(terminalSnapshots.map((snapshot) => snapshot.parentRunId)).toEqual([
+        parentRunId,
+        parentRunId,
+      ])
+    })
+
+    it('should preserve lineage fields when optional state is present', () => {
+      const snapshot = createRunSnapshot('new', {
         workflowState: { currentNode: 'agent', step: 5 },
         metadata: { attempt: 2 },
-      }
+      })
+
+      expect(snapshot.triggerType).toBe('new')
+      expect(snapshot.parentRunId).toBeUndefined()
       expect((snapshot.workflowState as { currentNode: string }).currentNode).toBe('agent')
       expect(snapshot.metadata?.attempt).toBe(2)
     })

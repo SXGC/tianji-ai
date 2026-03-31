@@ -72,6 +72,12 @@ console.log(resolved.config.agents?.defaultAgent)
 - `logger?: ObserverLogger`：可选注入 observer logger，作为 runtime 向外部日志系统写入记录的公共边界；runtime 本身不定义 sink、文件路径或渲染策略。
 - `snapshotStore` / `toolCatalog`：继续作为稳定公共 API 暴露。
 
+### Run 快照与事件观测
+
+- `RunSnapshot` 现在会额外持有 `triggerType`，并在恢复链路中通过可选 `parentRunId` 标记来源 run。
+- `run.started`、`run.completed`、`run.failed`、`run.cancelled` 事件都会携带 `sessionId`、`runId`、`triggerType`；如果当前 run 由恢复链路派生，还会额外携带 `parentRunId`。
+- 如果注入了 `logger?: ObserverLogger`，runtime 会在 run 生命周期日志的 `data` 中写入同一组观测字段，保证外部 sink 可以直接按 `sessionId + runId` 检索整条 run 生命周期。
+
 如果应用侧需要把 runtime 日志接到文件、stdout 或内存中，应在外部先通过 `@tianji/observer` 创建 `ObserverLogger`，再注入给 `createSessionRuntime`。
 
 ```ts
