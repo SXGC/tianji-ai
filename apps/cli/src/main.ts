@@ -5,7 +5,6 @@ import {
   type AgentSession,
   DaemonClient,
   type LoadedAgentContext,
-  type PingResponse,
   createAgentSession,
 } from '@tianji/agent'
 import type { RunId, RuntimeEvent } from '@tianji/shared'
@@ -18,20 +17,28 @@ import type { CliLogEntry, CliLogScope, CliLogger } from './logger.js'
 import { createCliLogger } from './logger.js'
 
 const DEFAULT_LOG_LINES = 100
+const DAEMON_HELP_TEXT = [
+  'Usage:',
+  '  tianji daemon start [--fg]',
+  '    Start the background daemon',
+  '  tianji daemon status',
+  '    Check daemon status',
+  '  tianji daemon stop',
+  '    Stop the daemon',
+  '  tianji daemon restart',
+  '    Restart the daemon (stop + start)',
+].join('\n')
+
 const CLI_HELP_TEXT = [
   'Usage:',
   '  tianji run "<prompt>"',
   '    Run one prompt through the configured agent',
   '  tianji log -f [--lines <n>]',
   '    Follow the CLI log and replay the latest lines first',
-  '  tianji daemon [--fg]',
-  '    Start the background daemon',
+  '  tianji daemon <subcommand>',
+  '    Manage the background daemon (start, status, stop, restart)',
   '  tianji chat',
   '    Connect to daemon for multi-turn chat',
-  '  tianji status',
-  '    Check daemon status',
-  '  tianji stop',
-  '    Stop the daemon',
   '  tianji help',
   '    Print all available commands and descriptions',
 ].join('\n')
@@ -57,21 +64,16 @@ export interface HelpCommand {
   readonly kind: 'help'
 }
 
+export type DaemonSubcommand = 'start' | 'status' | 'stop' | 'restart'
+
 export interface DaemonCommand {
   readonly kind: 'daemon'
+  readonly subcommand: DaemonSubcommand
   readonly foreground: boolean
 }
 
 export interface ChatCommand {
   readonly kind: 'chat'
-}
-
-export interface StatusCommand {
-  readonly kind: 'status'
-}
-
-export interface StopCommand {
-  readonly kind: 'stop'
 }
 
 export type TianjiCliCommand =
@@ -80,8 +82,6 @@ export type TianjiCliCommand =
   | HelpCommand
   | DaemonCommand
   | ChatCommand
-  | StatusCommand
-  | StopCommand
 
 export interface RunCommandDependencies {
   readonly loadContext?: () => Promise<LoadedAgentContext>
@@ -89,6 +89,7 @@ export interface RunCommandDependencies {
   readonly getUserConfigPaths?: () => UserConfigPaths
   readonly followCliLog?: (logFilePath: string, options?: FollowCliLogOptions) => Promise<void>
   readonly writeStdout?: (message: string) => void
+  readonly runDaemonEntry?: () => Promise<void>
 }
 
 class CliUsageError extends Error {
@@ -139,13 +140,7 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
   }
 
   if (commandName === 'daemon') {
-    if (restArgs.length === 0) {
-      return { kind: 'daemon', foreground: false }
-    }
-    if (restArgs.length === 1 && restArgs[0] === '--fg') {
-      return { kind: 'daemon', foreground: true }
-    }
-    throw new CliUsageError(`Command 'daemon' only supports '--fg'.`)
+    return parseDaemonCommandArgs(restArgs)
   }
 
   if (commandName === 'chat') {
@@ -155,21 +150,50 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
     return { kind: 'chat' }
   }
 
-  if (commandName === 'status') {
-    if (restArgs.length > 0) {
-      throw new CliUsageError(`Command "status" does not accept arguments.\n\n${CLI_HELP_TEXT}`)
-    }
-    return { kind: 'status' }
-  }
-
-  if (commandName === 'stop') {
-    if (restArgs.length > 0) {
-      throw new CliUsageError(`Command "stop" does not accept arguments.\n\n${CLI_HELP_TEXT}`)
-    }
-    return { kind: 'stop' }
-  }
-
   throw new CliUsageError(`Unknown command "${commandName}".\n\n${CLI_HELP_TEXT}`)
+}
+
+const VALID_DAEMON_SUBCOMMANDS: readonly DaemonSubcommand[] = ['start', 'status', 'stop', 'restart']
+
+/**
+ * 解析 `daemon` 子命令参数。
+ *
+ * @param args - `daemon` 后续参数
+ * @returns 结构化的 daemon 命令
+ */
+function parseDaemonCommandArgs(args: readonly string[]): DaemonCommand {
+  const [subcommand, ...restArgs] = args
+
+  if (subcommand === undefined) {
+    throw new CliUsageError(`Missing daemon subcommand.\n\n${DAEMON_HELP_TEXT}`)
+  }
+
+  if (!VALID_DAEMON_SUBCOMMANDS.includes(subcommand as DaemonSubcommand)) {
+    throw new CliUsageError(`Unknown daemon subcommand "${subcommand}".\n\n${DAEMON_HELP_TEXT}`)
+  }
+
+  if (subcommand !== 'start' && subcommand !== 'restart' && restArgs.length > 0) {
+    throw new CliUsageError(
+      `Daemon subcommand "${subcommand}" does not accept arguments.\n\n${DAEMON_HELP_TEXT}`
+    )
+  }
+
+  let foreground = false
+  if (subcommand === 'start' || subcommand === 'restart') {
+    if (restArgs.length === 1 && restArgs[0] === '--fg') {
+      foreground = true
+    } else if (restArgs.length > 0) {
+      throw new CliUsageError(
+        `Daemon subcommand "${subcommand}" only supports '--fg'.\n\n${DAEMON_HELP_TEXT}`
+      )
+    }
+  }
+
+  return {
+    kind: 'daemon',
+    subcommand: subcommand as DaemonSubcommand,
+    foreground,
+  }
 }
 
 /**
@@ -235,19 +259,24 @@ export async function runCli(
     }
 
     if (command.kind === 'daemon') {
-      return handleDaemonCommand(command, deps)
+      if (command.subcommand === 'start') {
+        return await handleDaemonStartCommand(command, deps)
+      }
+      if (command.subcommand === 'status') {
+        return await handleDaemonStatusCommand(deps)
+      }
+      if (command.subcommand === 'stop') {
+        return await handleDaemonStopCommand(deps)
+      }
+      if (command.subcommand === 'restart') {
+        return await handleDaemonRestartCommand(command, deps)
+      }
+      const _exhaustive: never = command.subcommand
+      throw new Error(`Unhandled daemon subcommand: ${_exhaustive}`)
     }
 
     if (command.kind === 'chat') {
-      return handleChatCommand(deps)
-    }
-
-    if (command.kind === 'status') {
-      return handleStatusCommand(deps)
-    }
-
-    if (command.kind === 'stop') {
-      return handleStopCommand(deps)
+      return await handleChatCommand(deps)
     }
 
     return await handleLogFollowCommand(command, deps)
@@ -434,7 +463,7 @@ async function requireDaemonClient(deps?: RunCommandDependencies): Promise<Daemo
   const paths = resolveUserConfigPaths()
   const client = await tryCreateDaemonClient(paths)
   if (client === undefined) {
-    throw new CliUsageError('No daemon running. Start with: tianji daemon')
+    throw new CliUsageError('No daemon running. Start with: tianji daemon start')
   }
   return client
 }
@@ -466,7 +495,14 @@ async function waitForDaemonReady(
   throw new Error('Timed out waiting for daemon to become ready')
 }
 
-async function handleDaemonCommand(
+/**
+ * 启动 daemon 进程。
+ *
+ * @param command - daemon start 命令
+ * @param deps - 可选依赖覆盖
+ * @returns 退出码
+ */
+async function handleDaemonStartCommand(
   command: DaemonCommand,
   deps?: RunCommandDependencies
 ): Promise<number> {
@@ -485,7 +521,8 @@ async function handleDaemonCommand(
   }
 
   if (command.foreground) {
-    await runDaemonEntry()
+    const runDaemonEntryCommand = deps?.runDaemonEntry ?? runDaemonEntry
+    await runDaemonEntryCommand()
     return 0
   }
 
@@ -500,6 +537,100 @@ async function handleDaemonCommand(
   return 0
 }
 
+/**
+ * 查询 daemon 运行状态。
+ *
+ * @param deps - 可选依赖覆盖
+ * @returns 退出码
+ */
+async function handleDaemonStatusCommand(deps?: RunCommandDependencies): Promise<number> {
+  try {
+    const client = await requireDaemonClient(deps)
+    const ping = await client.ping()
+    const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
+    const paths = resolveUserConfigPaths()
+    const port = await readDaemonPort(paths)
+    process.stdout.write(
+      `Daemon running (pid=${ping.pid}, port=${port}, sessionId=${ping.sessionId}, uptime=${ping.uptime}s)\n`
+    )
+    return 0
+  } catch (error) {
+    if (error instanceof CliUsageError) {
+      process.stderr.write(`${error.message}\n`)
+      return 1
+    }
+    throw error
+  }
+}
+
+/**
+ * 停止 daemon 进程。
+ *
+ * @param deps - 可选依赖覆盖
+ * @returns 退出码
+ */
+async function handleDaemonStopCommand(deps?: RunCommandDependencies): Promise<number> {
+  try {
+    const client = await requireDaemonClient(deps)
+    await client.shutdown()
+    process.stdout.write('Daemon stopped\n')
+    return 0
+  } catch (error) {
+    if (error instanceof CliUsageError) {
+      process.stderr.write(`${error.message}\n`)
+      return 1
+    }
+    throw error
+  }
+}
+
+/**
+ * 重启 daemon 进程（先停止再启动）。
+ *
+ * @param command - daemon restart 命令
+ * @param deps - 可选依赖覆盖
+ * @returns 退出码
+ */
+async function handleDaemonRestartCommand(
+  command: DaemonCommand,
+  deps?: RunCommandDependencies
+): Promise<number> {
+  const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
+  const paths = resolveUserConfigPaths()
+
+  const existingClient = await tryCreateDaemonClient(paths)
+  if (existingClient !== undefined) {
+    try {
+      await existingClient.shutdown()
+      process.stdout.write('Daemon stopped\n')
+    } catch {
+      await cleanupStaleDaemonFiles(paths)
+    }
+  }
+
+  if (command.foreground) {
+    const runDaemonEntryCommand = deps?.runDaemonEntry ?? runDaemonEntry
+    await runDaemonEntryCommand()
+    return 0
+  }
+
+  const child = fork(new URL('./daemon-entry.js', import.meta.url), [], {
+    detached: true,
+    stdio: 'ignore',
+  })
+  child.unref()
+
+  const { pid, port } = await waitForDaemonReady(paths)
+  process.stdout.write(`Daemon started (pid=${pid}, port=${port})\n`)
+  return 0
+}
+
+/**
+ * 连接到运行中的 daemon 进行多轮对话。
+ *
+ * @param deps - 可选依赖覆盖
+ * @returns 退出码
+ */
 async function handleChatCommand(deps?: RunCommandDependencies): Promise<number> {
   const client = await requireDaemonClient(deps)
   const ping = await client.ping()
@@ -535,41 +666,6 @@ async function handleChatCommand(deps?: RunCommandDependencies): Promise<number>
   }
 
   return 0
-}
-
-async function handleStatusCommand(deps?: RunCommandDependencies): Promise<number> {
-  try {
-    const client = await requireDaemonClient(deps)
-    const ping = await client.ping()
-    const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
-    const paths = resolveUserConfigPaths()
-    const port = await readDaemonPort(paths)
-    process.stdout.write(
-      `Daemon running (pid=${ping.pid}, port=${port}, sessionId=${ping.sessionId}, uptime=${ping.uptime}s)\n`
-    )
-    return 0
-  } catch (error) {
-    if (error instanceof CliUsageError) {
-      process.stderr.write(`${error.message}\n`)
-      return 1
-    }
-    throw error
-  }
-}
-
-async function handleStopCommand(deps?: RunCommandDependencies): Promise<number> {
-  try {
-    const client = await requireDaemonClient(deps)
-    await client.shutdown()
-    process.stdout.write('Daemon stopped\n')
-    return 0
-  } catch (error) {
-    if (error instanceof CliUsageError) {
-      process.stderr.write(`${error.message}\n`)
-      return 1
-    }
-    throw error
-  }
 }
 
 async function tryLogCliFailure(error: unknown, argv: readonly string[]): Promise<void> {

@@ -28,6 +28,8 @@ export function createFakeContext(
       logsDir: '/tmp/tianji-test/config/logs',
       configFilePath: '/tmp/tianji-test/config/tianji.json',
       cliLogFilePath: '/tmp/tianji-test/config/logs/tianji.log',
+      daemonPortPath: '/tmp/tianji-test/config/daemon.port',
+      daemonPidPath: '/tmp/tianji-test/config/daemon.pid',
     },
     config: {},
     agent: {
@@ -175,6 +177,8 @@ export async function createTempCliPaths(): Promise<{
     logsDir: join(configDir, 'logs'),
     configFilePath: join(configDir, 'tianji.json'),
     cliLogFilePath: join(configDir, 'logs', 'tianji.log'),
+    daemonPortPath: join(configDir, 'daemon.port'),
+    daemonPidPath: join(configDir, 'daemon.pid'),
   }
 
   return {

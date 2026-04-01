@@ -38,13 +38,32 @@ pnpm tianji help
 
 ## Daemon 命令
 
-### `tianji daemon [--fg]`
+### `tianji daemon start [--fg]`
 
 启动后台守护进程。守护进程内部持有一个 `AgentSession`，通过 `localhost` HTTP 对外提供服务。
 
 - 默认行为：fork 一个后台子进程，将端口号写入 `~/.config/tianji-ai/daemon.port`，PID 写入 `~/.config/tianji-ai/daemon.pid`。
 - `--fg`：以前台模式运行，方便调试。前台模式下进程不会 fork，直接在当前终端中运行。
 - 如果检测到已有守护进程在运行（端口文件存在且可以 ping 通），会直接输出已有进程信息，不会重复启动。
+
+### `tianji daemon status`
+
+检查守护进程是否正在运行。输出 pid、port、sessionId 和 uptime 信息。
+
+- 如果守护进程未运行，输出错误信息并以退出码 `1` 退出。
+
+### `tianji daemon stop`
+
+调用守护进程的 `/shutdown` 端点，等待其优雅退出。
+
+- 如果守护进程未运行，输出错误信息并以退出码 `1` 退出。
+
+### `tianji daemon restart [--fg]`
+
+重启守护进程（先停止再启动）。
+
+- `--fg`：重启后以前台模式运行。
+- 如果当前有守护进程在运行，会先停止它，再启动新实例。
 
 ### `tianji chat`
 

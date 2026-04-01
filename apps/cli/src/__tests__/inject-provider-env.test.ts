@@ -13,6 +13,8 @@ function createTestContext(provider: string, apiKey?: string): LoadedUserConfigC
       logsDir: '/tmp/test/logs',
       configFilePath: '/tmp/test/tianji.json',
       cliLogFilePath: '/tmp/test/logs/tianji.log',
+      daemonPortPath: '/tmp/test/daemon.port',
+      daemonPidPath: '/tmp/test/daemon.pid',
     },
     config: {},
     agent: {
