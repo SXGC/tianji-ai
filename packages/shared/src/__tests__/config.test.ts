@@ -13,6 +13,7 @@ import {
   DEFAULT_TIANJI_CONFIG,
   DEFAULT_TOOL_CONFIG,
   type EnvResolver,
+  SUPPORTED_LOCALES,
   type TianjiConfig,
   TianjiConfigSchema,
   createDefaultUserTianjiConfig,
@@ -280,6 +281,27 @@ describe('config', () => {
 
       const result = TianjiConfigSchema.parse(config)
       expect(result.providers?.openai?.apiKey).toBe('${env:OPENAI_API_KEY}')
+    })
+
+    it('accepts locale at top level of Tianji config', () => {
+      const result = TianjiConfigSchema.safeParse({
+        locale: 'zh-CN',
+        providers: {},
+      })
+
+      expect(result.success).toBe(true)
+    })
+
+    it('rejects unsupported locale values', () => {
+      const result = TianjiConfigSchema.safeParse({
+        locale: 'fr-FR',
+      })
+
+      expect(result.success).toBe(false)
+    })
+
+    it('exports supported locales in shared public API', () => {
+      expect(SUPPORTED_LOCALES).toEqual(['en', 'zh-CN'])
     })
 
     it('should reject invalid types and names', () => {

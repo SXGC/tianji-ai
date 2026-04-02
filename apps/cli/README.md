@@ -1,6 +1,6 @@
 # @tianji/cli
 
-`@tianji/cli` 是 `tianji-ai` 的命令行入口，提供 `run`、`log`、`daemon`、`chat`、`status`、`stop` 和 `help` 七个命令。
+`@tianji/cli` 是 `tianji-ai` 的命令行入口，提供 `run`、`log`、`daemon`、`chat` 和 `help` 能力，并支持全局 `-h` / `--help` 与 `-V` / `--version`。
 
 ## 安装与运行
 
@@ -13,9 +13,10 @@ pnpm --filter @tianji/cli build
 构建后可通过以下方式运行：
 
 ```bash
+pnpm tianji --help
 pnpm tianji run "hello"
-pnpm tianji log -f
-pnpm tianji help
+pnpm tianji log --lines 20
+pnpm tianji daemon --help
 ```
 
 `apps/cli/package.json` 中声明了 `bin.tianji -> ./bin/tianji.mjs`。在 monorepo 开发环境里，推荐通过仓库根脚本 `pnpm tianji` 调用；如果将包链接到全局环境，也可以直接执行 `tianji`。
@@ -29,11 +30,12 @@ pnpm tianji help
 - 首次运行时，如果 `~/.config/tianji-ai/` 下缺少配置目录，会自动创建基础目录、空的用户层 `tianji.json`、默认 agent 的 `SOUL.md`，以及日志目录。
 - 用法错误返回退出码 `2`，运行时错误返回退出码 `1`。
 
-### `tianji log -f [--lines <n>]`
+### `tianji log [--follow] [--lines <n>]`
 
 - 读取并持续 follow observer 写出的 JSONL 日志文件。
 - 如果日志文件尚未创建，会先输出等待提示；文件出现后默认先回放最近 `100` 行，再持续输出新增日志。
-- 可通过 `--lines <n>` 或 `-n <n>` 调整首次回放的行数，例如 `tianji log -f --lines 20`。
+- 当前保持 follow 为默认行为；`--follow` / `-f` 作为语义规范化和后续扩展预留。
+- 可通过 `--lines <n>` 或 `-n <n>` 调整首次回放的行数，例如 `tianji log --lines 20`。
 - `@tianji/observer` 负责生成 JSONL 记录；CLI 负责 follow 文件并把 JSONL 渲染为可读文本，而不是直接输出原始 JSON。
 
 ## Daemon 命令
@@ -73,22 +75,11 @@ pnpm tianji help
 - 如果守护进程未运行，会提示 `No daemon running. Start with: tianji daemon` 并以退出码 `1` 退出。
 - 交互过程中，assistant 的文本响应会流式输出到 stdout。
 
-### `tianji status`
-
-检查守护进程是否正在运行。输出 pid、port、sessionId 和 uptime 信息。
-
-- 如果守护进程未运行，输出错误信息并以退出码 `1` 退出。
-
-### `tianji stop`
-
-调用守护进程的 `/shutdown` 端点，等待其优雅退出。
-
-- 如果守护进程未运行，输出错误信息并以退出码 `1` 退出。
-
 ### `tianji help`
 
-- 打印当前所有可用命令及其说明。
-- 用法错误时，CLI 也会附带同一份帮助文本，便于直接查看正确命令格式。
+- `tianji help` 等价于 `tianji --help`。
+- `tianji <command> --help` 或 `tianji help <command>` 会打印命令级帮助。
+- 用法错误只输出精简错误，不再附带完整帮助文本。
 
 示例输出：
 
@@ -134,6 +125,8 @@ pnpm tianji help
   },
   "observer": {
     "enabled": true
+  },
+  "locale": "zh-CN"
   }
 }
 ```
@@ -143,6 +136,7 @@ pnpm tianji help
 - `agents.items.<name>.model`：使用 `provider/modelName` 格式引用模型，只按第一个 `/` 切分，因此模型名自身可以包含 `/`。
 - `runtime`：运行时配置，例如重试与工具超时等公共参数。
 - `observer`：观察者配置，例如 `enabled`、`redactSecrets`。
+- `locale`：CLI 用户可见文案语言，目前支持 `en` 与 `zh-CN`。
 - 占位符解析：所有字符串值中的 `${env:VAR_NAME}` 会在运行时解析；环境变量不存在时直接报错。
 
 ## Agent 目录规则
@@ -158,7 +152,7 @@ pnpm tianji help
 `@tianji/observer` 统一负责结构化日志协议与 JSONL 生成，CLI 当前只负责两件事：
 
 - 在 `run` 等命令流程中调用 observer logger 写日志。
-- 在 `log -f` 中先回放尾部指定行数，再继续读取同一个 JSONL 文件并渲染输出。
+- 在 `log [--follow]` 中先回放尾部指定行数，再继续读取同一个 JSONL 文件并渲染输出。
 
 日志文件使用 JSONL，每行一条 JSON 记录。原始字段结构如下：
 
@@ -189,12 +183,11 @@ pnpm tianji help
 
 | 场景 | 行为 |
 |---|---|
-| 未传命令 | 输出 usage，退出码 `2` |
-| `run` 缺少或多传 prompt 参数 | 输出 `Command "run" requires exactly one prompt argument.`，退出码 `2` |
-| `log` 未使用 `-f` 或 `--follow` | 输出 `Command "log" only supports "-f" or "--follow".`，退出码 `2` |
-| `log` 的 `--lines`/`-n` 非正整数 | 输出 `Command "log" requires a positive integer for lines.`，退出码 `2` |
-| `help` 额外传参 | 输出 `Command "help" does not accept arguments.`，退出码 `2` |
-| 未知命令 | 输出 `Unknown command "<name>".`，退出码 `2` |
+| 未传命令 | 输出 `Missing command.`，退出码 `2` |
+| `run` 缺少 prompt 参数 | 输出 `Missing required argument <prompt>.`，退出码 `2` |
+| `log` 的 `--lines`/`-n` 非正整数 | 输出 `Option "--lines" requires a valid number.`，退出码 `2` |
+| 未知选项 | 输出 `Unknown option "<name>".`，退出码 `2` |
+| 未知命令 | 输出 `Unknown command "<name>".` + help hint，退出码 `2` |
 | 配置目录或配置文件不存在 | 自动创建目录、空的用户层 `tianji.json` 与默认 `SOUL.md` |
 | 配置文件 JSON 解析失败 | 直接报错退出 |
 | 配置 schema 不合法 | 直接报错退出 |
@@ -208,7 +201,7 @@ pnpm tianji help
 | `SOUL.md` 为空 | 报错：`Agent soul file is empty: <path>` |
 | 环境变量未设置 | 占位符解析阶段报错：`Environment variable "<name>" is not defined` |
 | runtime 发出 `run.failed` 事件 | CLI 抛出 `Run failed: <message>`，写入日志并以退出码 `1` 退出 |
-| 其他运行时异常 | 输出错误信息，写入 `cli > main` 错误日志，并以退出码 `1` 退出 |
+| 其他运行时异常 | 输出错误信息并以退出码 `1` 退出 |
 
 ## 目录结构
 
@@ -218,8 +211,10 @@ apps/cli/
 │  └─ tianji.mjs
 ├─ src/
 │  ├─ bin.ts
+│  ├─ commands/
 │  ├─ config.ts
 │  ├─ daemon-entry.ts
+│  ├─ i18n/
 │  ├─ log-follow.ts
 │  ├─ logger.ts
 │  └─ main.ts

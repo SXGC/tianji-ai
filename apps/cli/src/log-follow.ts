@@ -2,6 +2,8 @@ import { open, stat } from 'node:fs/promises'
 import type { ObserverLogEntry, ObserverLogScope } from '@tianji/observer'
 import { sleep } from '@tianji/shared'
 
+import type { I18n } from './i18n/index.js'
+
 type CliLogEntry = ObserverLogEntry
 type CliLogScope = ObserverLogScope
 type CliLogLevel = CliLogEntry['level']
@@ -10,6 +12,7 @@ const LOG_FOLLOW_POLL_INTERVAL_MS = 500
 const LOG_FOLLOW_CHUNK_SIZE = 64 * 1024
 
 export interface FollowCliLogOptions {
+  readonly follow?: boolean
   readonly lines?: number
   readonly signal?: AbortSignal
 }
@@ -25,6 +28,7 @@ export interface FollowCliLogOptions {
  */
 export async function followCliLog(
   logFilePath: string,
+  i18n: I18n,
   options: FollowCliLogOptions = {}
 ): Promise<void> {
   let offset = 0
@@ -37,7 +41,7 @@ export async function followCliLog(
     const nextStat = await readCliLogStat(logFilePath)
     if (nextStat === null) {
       if (!hasPrintedWaitingMessage) {
-        process.stdout.write(`Waiting for CLI log file: ${logFilePath}\n`)
+        process.stdout.write(`${i18n.t('log.waiting', { path: logFilePath })}\n`)
         hasPrintedWaitingMessage = true
       }
 
@@ -46,7 +50,7 @@ export async function followCliLog(
     }
 
     if (hasPrintedWaitingMessage) {
-      process.stdout.write(`Detected CLI log file: ${logFilePath}\n`)
+      process.stdout.write(`${i18n.t('log.detected', { path: logFilePath })}\n`)
       hasPrintedWaitingMessage = false
     }
 
@@ -54,7 +58,8 @@ export async function followCliLog(
       const initialReadOffset = await replayLatestCliLogLines(
         logFilePath,
         nextStat.size,
-        options.lines ?? 100
+        options.lines ?? 100,
+        i18n
       )
       offset = initialReadOffset
       hasReplayedInitialLines = true
@@ -66,7 +71,7 @@ export async function followCliLog(
       offset > 0 && (await hasCliLogPrefixChanged(logFilePath, offset, lastReadFingerprint))
 
     if (nextStat.size < offset || fileWasReplaced) {
-      process.stdout.write('CLI log file was truncated or recreated. Restarting from beginning.\n')
+      process.stdout.write(`${i18n.t('log.truncated')}\n`)
       offset = 0
       remainder = ''
       lastReadFingerprint = ''
@@ -75,7 +80,7 @@ export async function followCliLog(
     if (nextStat.size > offset) {
       const chunkResult = await readCliLogChunk(logFilePath, offset, nextStat.size)
       offset = chunkResult.nextOffset
-      remainder = renderCliLogChunk(remainder, chunkResult.chunk)
+      remainder = renderCliLogChunk(remainder, chunkResult.chunk, i18n)
       lastReadFingerprint = createCliLogFingerprint(chunkResult.chunk)
     }
 
@@ -217,7 +222,8 @@ export async function readCliLogChunk(
 export async function replayLatestCliLogLines(
   logFilePath: string,
   fileSize: number,
-  lineCount: number
+  lineCount: number,
+  i18n: I18n
 ): Promise<number> {
   if (fileSize === 0 || lineCount <= 0) {
     return fileSize
@@ -235,7 +241,7 @@ export async function replayLatestCliLogLines(
     const parsedEntry = parseCliLogLine(line)
     if (parsedEntry === null) {
       if (line.trim().length > 0) {
-        process.stdout.write(`[invalid-cli-log] ${line}\n`)
+        process.stdout.write(`${i18n.t('log.invalid_entry', { line })}\n`)
       }
       continue
     }
@@ -246,7 +252,7 @@ export async function replayLatestCliLogLines(
   return chunkResult.nextOffset
 }
 
-function renderCliLogChunk(remainder: string, chunk: string): string {
+function renderCliLogChunk(remainder: string, chunk: string, i18n: I18n): string {
   const combinedChunk = `${remainder}${chunk}`
   const lines = combinedChunk.split('\n')
   const nextRemainder = lines.pop() ?? ''
@@ -256,6 +262,7 @@ function renderCliLogChunk(remainder: string, chunk: string): string {
     if (parsedEntry === null) {
       if (line.trim().length > 0) {
         process.stdout.write(`[invalid-cli-log] ${line}\n`)
+        process.stdout.write(`${i18n.t('log.invalid_entry', { line })}\n`)
       }
       continue
     }

@@ -2,7 +2,8 @@
 
 > 状态：Draft v1  
 > 范围：`tianji-ai` 的详细配置机制  
-> 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)
+> 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)  
+> 更新：2026-04-02，补充 CLI locale 配置。设计依据：`docs/superpowers/plans/2026-04-02-cli-i18n-implementation-plan.md`
 
 ---
 
@@ -225,12 +226,13 @@ v1 **不需要**完整的模板语言。一个明确的环境变量占位符语�
 
 ## 8. 顶层配置结构
 
-v1 配置由四个顶层字段组成：`providers`、`agents`、`runtime`、`observer`。
+v1 配置由五个顶层字段组成：`locale`、`providers`、`agents`、`runtime`、`observer`。
 
 所有字段均为可选，以支持跨层部分配置。
 
 ```json
 {
+  "locale": "zh-CN",
   "providers": {
     "openai": {
       "apiKey": "${env:OPENAI_API_KEY}"
@@ -271,6 +273,24 @@ v1 配置由四个顶层字段组成：`providers`、`agents`、`runtime`、`obs
     "redactSecrets": true
   }
 }
+```
+
+### 8.1 providers
+
+### 8.0 locale
+
+顶层 `locale` 字段用于控制 CLI 用户可见文案的语言。
+
+- 当前支持值：`en`、`zh-CN`
+- 当前仅用于 CLI 帮助、错误信息和 daemon/log 等用户可见输出
+- CLI locale 检测顺序为：`config.locale -> Intl.DateTimeFormat().resolvedOptions().locale -> 'en'`
+- v1 不支持命令行级 `--locale` / `--lang` 覆盖
+
+Schema 定义（`packages/shared/src/config.ts`）：
+
+```typescript
+export const SUPPORTED_LOCALES = ['en', 'zh-CN'] as const
+export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
 ```
 
 ### 8.1 providers

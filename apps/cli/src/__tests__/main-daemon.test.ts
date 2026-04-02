@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parseCliArgs, runCli } from '../main.js'
 import { createTempCliPaths } from './helpers/cli-test-utils.js'
+import { captureStdout } from './helpers/cli-test-utils.js'
 
 describe('parseCliArgs daemon commands', () => {
   it('parses daemon start command', () => {
@@ -40,20 +41,20 @@ describe('parseCliArgs daemon commands', () => {
   })
 
   it('rejects daemon without subcommand', () => {
-    expect(() => parseCliArgs(['daemon'])).toThrow(/Missing daemon subcommand/)
+    expect(() => parseCliArgs(['daemon'])).toThrow(/Missing subcommand for "daemon"/)
   })
 
   it('rejects unknown daemon subcommands', () => {
-    expect(() => parseCliArgs(['daemon', 'bad'])).toThrow(/Unknown daemon subcommand/)
+    expect(() => parseCliArgs(['daemon', 'bad'])).toThrow(/Unknown subcommand "bad" for "daemon"/)
   })
 
   it('rejects unknown flags on daemon start', () => {
-    expect(() => parseCliArgs(['daemon', 'start', '--bad'])).toThrow(/only supports '--fg'/)
+    expect(() => parseCliArgs(['daemon', 'start', '--bad'])).toThrow(/Unknown option "--bad"/)
   })
 
   it('rejects extra args on status and stop subcommands', () => {
-    expect(() => parseCliArgs(['daemon', 'status', '--fg'])).toThrow(/does not accept arguments/)
-    expect(() => parseCliArgs(['daemon', 'stop', '--fg'])).toThrow(/does not accept arguments/)
+    expect(() => parseCliArgs(['daemon', 'status', '--fg'])).toThrow(/Unknown option "--fg"/)
+    expect(() => parseCliArgs(['daemon', 'stop', '--fg'])).toThrow(/Unknown option "--fg"/)
   })
 
   it('rejects old top-level status and stop commands', () => {
@@ -76,6 +77,27 @@ describe('createTempCliPaths daemon paths', () => {
 })
 
 describe('runCli daemon commands', () => {
+  it('shows daemon command help through help flag', async () => {
+    const output = await captureStdout(async () => {
+      const exitCode = await runCli(['daemon', '--help'])
+      expect(exitCode).toBe(0)
+    })
+
+    expect(output).toContain('tianji daemon <subcommand>')
+    expect(output).toContain('start')
+    expect(output).toContain('--fg')
+  })
+
+  it('returns translated usage error without embedding full help text', async () => {
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const exitCode = await runCli(['daemon'])
+
+    expect(exitCode).toBe(2)
+    expect(stderr).toHaveBeenCalledWith(expect.stringMatching(/Missing subcommand/))
+    expect(stderr).not.toHaveBeenCalledWith(expect.stringMatching(/tianji run <prompt>/))
+  })
+
   it('returns non-zero when daemon status cannot find daemon', async () => {
     const exitCode = await runCli(['daemon', 'status'], {
       getUserConfigPaths: () => ({

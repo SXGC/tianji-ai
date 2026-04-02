@@ -29,6 +29,8 @@ export {
   type ToolConfigConfig,
   RuntimeConfigSchema,
   type RuntimeConfig,
+  SUPPORTED_LOCALES,
+  type SupportedLocale,
   AGENT_NAME_PATTERN,
   TianjiProviderConfigSchema,
   type TianjiProviderConfig,

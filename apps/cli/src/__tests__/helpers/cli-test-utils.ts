@@ -9,8 +9,11 @@ import { join } from 'node:path'
 import { FakeListChatModel } from '@langchain/core/utils/testing'
 import { FileSnapshotStore, type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
 
+import type { CliDependencies } from '../../commands/types.js'
 import type { LoadedUserConfigContext } from '../../config.js'
 import type { UserConfigPaths } from '../../config.js'
+
+type CliTestLocale = 'en' | 'zh-CN'
 
 /**
  * 构造最小可用的 LoadedUserConfigContext，用于测试注入。
@@ -184,5 +187,41 @@ export async function createTempCliPaths(): Promise<{
   return {
     paths,
     cleanup: () => rm(configDir, { recursive: true, force: true }),
+  }
+}
+
+/**
+ * 创建带 locale 注入的 CLI 依赖。
+ *
+ * @param locale - 测试使用的 locale
+ * @param overrides - 额外依赖覆盖
+ * @returns 带 locale 配置注入的依赖对象
+ */
+export function createDepsWithLocale(
+  locale: CliTestLocale,
+  overrides: Partial<CliDependencies> = {}
+): CliDependencies {
+  const ctx = createFakeContext()
+
+  return {
+    getUserConfigPaths: () => ctx.paths,
+    loadConfig: async () => ({ locale }) as never,
+    ...overrides,
+  }
+}
+
+/**
+ * 创建不显式注入 locale 的 CLI 依赖。
+ *
+ * @param overrides - 额外依赖覆盖
+ * @returns 默认英文回退场景使用的依赖对象
+ */
+export function createDepsWithoutLocale(overrides: Partial<CliDependencies> = {}): CliDependencies {
+  const ctx = createFakeContext()
+
+  return {
+    getUserConfigPaths: () => ctx.paths,
+    loadConfig: async () => ({}),
+    ...overrides,
   }
 }

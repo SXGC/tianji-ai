@@ -2,6 +2,8 @@ import { fileURLToPath } from 'node:url'
 
 import { defineConfig } from 'vitest/config'
 
+const packageRoot = fileURLToPath(new URL('.', import.meta.url))
+
 export default defineConfig({
   resolve: {
     alias: {
@@ -23,6 +25,7 @@ export default defineConfig({
     include: ['src/__tests__/**/*.{test,spec}.ts'],
     exclude: ['node_modules', 'dist'],
     globals: true,
+    root: packageRoot,
     setupFiles: ['./src/__tests__/setup-env.ts'],
   },
 })

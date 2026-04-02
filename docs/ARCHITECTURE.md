@@ -1,9 +1,11 @@
 # Tianji AI 架构设计文档
 
 > 状态：当前
-> 日期：2026-03-30
+> 日期：2026-04-02
 > 相关文档：[`./CONFIG_DESIGN.md`](./CONFIG_DESIGN.md)、[`./RUNTIME_DESIGN.md`](./RUNTIME_DESIGN.md)、[`./OBSERVER_DESIGN.md`](./OBSERVER_DESIGN.md)、[`./AGENT_DESIGN.md`](./AGENT_DESIGN.md)、[`./CLI_GUIDE.md`](./CLI_GUIDE.md)、[`./DEVELOPMENT.md`](./DEVELOPMENT.md)
 > 目标：4 个包 (shared + runtime + agent + cli) 的分层架构，明确职责、减少包间耦合、为多 agent 编排预留扩展空间。
+
+> 更新：2026-04-02，补充 CLI 命令注册与 i18n 架构说明。设计依据：`docs/superpowers/plans/2026-04-02-cli-i18n-implementation-plan.md`
 
 ---
 
@@ -233,7 +235,9 @@ export interface AgentSession {
 **职责**：
 
 - CLI 参数解析（`parseCliArgs`）
-- `tianji run` / `tianji log -f` 命令路由
+- 声明式命令注册与帮助生成（`commands/registry.ts`, `commands/help.ts`）
+- `tianji run` / `tianji log` / `tianji daemon` / `tianji chat` 命令路由
+- CLI i18n 初始化与用户可见文案翻译（`i18n/`）
 - 终端输出格式化（event → stdout）
 - CLI 日志系统（`CliLogger`, JSONL 日志）
 
@@ -249,6 +253,7 @@ export interface AgentSession {
 - 将 `injectProviderEnv` 迁移到 agent 作为过渡桥接，而不是长期 UI 责任
 - 移除 `createCliRuntime`（被 agent 的 `createAgentRuntime` / `createAgentSession` 替代）
 - `main.ts` 中的 `handleRunCommand` 简化为调用 agent 包的上下文装配与启动 API
+- `main.ts` 继续收口为入口调度层，只负责开发环境初始化、全局 flag 拦截、i18n 初始化、帮助/版本输出、命令分发和统一错误出口
 - CLI 是否仍直接 import `RuntimeEvent`、`AppMessage` 等协议类型，不由本文强制规定；可继续从 shared 获取，或由 agent 再导出统一入口
 
 ---

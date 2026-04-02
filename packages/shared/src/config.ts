@@ -214,6 +214,10 @@ export const RuntimeConfigSchema = z.object({
 
 export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>
 
+export const SUPPORTED_LOCALES = ['en', 'zh-CN'] as const
+
+export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number]
+
 /**
  * Safe agent name pattern used by both config schema and file path helpers.
  */
@@ -323,6 +327,7 @@ export type ObserverConfig = z.infer<typeof ObserverConfigSchema>
  * All fields are optional to support partial configurations across layers.
  */
 export const TianjiConfigSchema = z.object({
+  locale: z.enum(SUPPORTED_LOCALES).optional(),
   providers: TianjiProvidersConfigSchema.optional(),
   agents: TianjiAgentsConfigSchema.optional(),
   runtime: RuntimeConfigSchema.optional(),

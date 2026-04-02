@@ -12,6 +12,7 @@ import { createSessionRuntime } from '@tianji/runtime'
 import { ProviderError, type RunId, type RuntimeEvent, type SessionId } from '@tianji/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { createI18n } from '../i18n/index.js'
 import { followCliLog } from '../log-follow.js'
 import { parseCliArgs, runCli } from '../main.js'
 import {
@@ -182,7 +183,7 @@ describe('CLI integration', () => {
       })
 
       const captured = await captureStdout(async () => {
-        await followCliLog(fakeContext.paths.cliLogFilePath, {
+        await followCliLog(fakeContext.paths.cliLogFilePath, createI18n('en'), {
           signal: AbortSignal.timeout(5),
         })
       })
@@ -271,6 +272,36 @@ describe('CLI integration', () => {
   })
 
   describe('log command', () => {
+    it('treats log without explicit follow flag as follow by default', async () => {
+      const followSpy = vi.fn(async () => undefined)
+
+      await runCli(['log'], {
+        followCliLog: followSpy,
+        getUserConfigPaths: () => createFakeContext().paths,
+      })
+
+      expect(followSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Object),
+        expect.objectContaining({ lines: 100 })
+      )
+    })
+
+    it('passes follow=true when log is invoked without explicit flag', async () => {
+      const followSpy = vi.fn(async () => undefined)
+
+      await runCli(['log'], {
+        followCliLog: followSpy,
+        getUserConfigPaths: () => createFakeContext().paths,
+      })
+
+      expect(followSpy).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ locale: 'en', t: expect.any(Function) }),
+        expect.objectContaining({ lines: 100, follow: true })
+      )
+    })
+
     it('replays only the configured number of latest lines before following', async () => {
       const { paths, cleanup } = await createTempCliPaths()
       const abortController = new AbortController()
@@ -306,10 +337,10 @@ describe('CLI integration', () => {
         )
 
         const captured = await captureStdoutLive(async () => {
-          return runCli(['log', '-f', '--lines', '2'], {
+          return runCli(['log', '--lines', '2'], {
             getUserConfigPaths: () => paths,
-            followCliLog: (logFilePath, options) =>
-              followCliLog(logFilePath, {
+            followCliLog: (logFilePath, i18n, options) =>
+              followCliLog(logFilePath, i18n, {
                 ...options,
                 signal: abortController.signal,
               }),
@@ -333,10 +364,10 @@ describe('CLI integration', () => {
 
       try {
         const captured = await captureStdoutLive(async () => {
-          return runCli(['log', '-f'], {
+          return runCli(['log'], {
             getUserConfigPaths: () => paths,
-            followCliLog: (logFilePath) =>
-              followCliLog(logFilePath, {
+            followCliLog: (logFilePath, i18n) =>
+              followCliLog(logFilePath, i18n, {
                 signal: abortController.signal,
               }),
           })
@@ -399,10 +430,10 @@ describe('CLI integration', () => {
         )
 
         const captured = await captureStdoutLive(async () => {
-          return runCli(['log', '-f'], {
+          return runCli(['log'], {
             getUserConfigPaths: () => paths,
-            followCliLog: (logFilePath) =>
-              followCliLog(logFilePath, {
+            followCliLog: (logFilePath, i18n) =>
+              followCliLog(logFilePath, i18n, {
                 signal: abortController.signal,
               }),
           })
@@ -444,12 +475,13 @@ describe('CLI integration', () => {
       })
 
       expect(output).toContain('Usage:')
-      expect(output).toContain('tianji run "<prompt>"')
+      expect(output).toContain('tianji v0.0.1')
+      expect(output).toContain('tianji run <prompt>')
       expect(output).toContain('Run one prompt through the configured agent')
-      expect(output).toContain('tianji log -f [--lines <n>]')
+      expect(output).toContain('tianji log')
       expect(output).toContain('Follow the CLI log and replay the latest lines first')
-      expect(output).toContain('tianji help')
-      expect(output).toContain('Print all available commands and descriptions')
+      expect(output).toContain('-h, --help')
+      expect(output).toContain('-V, --version')
     })
 
     it('returns exit code 2 for missing command', async () => {
@@ -467,18 +499,13 @@ describe('CLI integration', () => {
       expect(exitCode).toBe(2)
     })
 
-    it('returns exit code 2 for log without follow flag', async () => {
-      const exitCode = await runCli(['log'])
-      expect(exitCode).toBe(2)
-    })
-
     it('returns exit code 2 for log with unsupported flag', async () => {
       const exitCode = await runCli(['log', '--tail'])
       expect(exitCode).toBe(2)
     })
 
     it('parses log follow lines options with defaults and aliases', () => {
-      expect(parseCliArgs(['log', '-f'])).toEqual({
+      expect(parseCliArgs(['log'])).toEqual({
         kind: 'log-follow',
         lines: 100,
       })
@@ -493,8 +520,8 @@ describe('CLI integration', () => {
     })
 
     it('returns exit code 2 for invalid lines values', async () => {
-      expect(() => parseCliArgs(['log', '-f', '--lines', '0'])).toThrowError(/positive integer/)
-      expect(() => parseCliArgs(['log', '-f', '--lines', 'abc'])).toThrowError(/positive integer/)
+      expect(() => parseCliArgs(['log', '-f', '--lines', '0'])).toThrowError(/valid number/)
+      expect(() => parseCliArgs(['log', '-f', '--lines', 'abc'])).toThrowError(/valid number/)
 
       const exitCode = await runCli(['log', '-f', '--lines', '0'])
       expect(exitCode).toBe(2)
