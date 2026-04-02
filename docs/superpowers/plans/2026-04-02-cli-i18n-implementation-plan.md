@@ -976,7 +976,7 @@ git commit -m "feat(cli): localize daemon and log command output"
 - Create: `apps/cli/src/__tests__/commands-e2e.test.ts`
 - Modify: `apps/cli/src/__tests__/helpers/cli-test-utils.ts`
 
-- [ ] **Step 1: 在 `cli-test-utils.ts` 中补充 locale 注入工厂**
+- [x] **Step 1: 在 `cli-test-utils.ts` 中补充 locale 注入工厂**
 
 ```ts
 import type { CliDependencies } from '../../commands/types.js'
@@ -1010,7 +1010,7 @@ export function createDepsWithoutLocale(
 }
 ```
 
-- [ ] **Step 2: 写命令调度 e2e 测试——只覆盖全局 help、version、命令级 help、错误路径，不重复断言 run/log/daemon 的业务链路**
+- [x] **Step 2: 写命令调度 e2e 测试——只覆盖全局 help、version、命令级 help、错误路径，不重复断言 run/log/daemon 的业务链路**
 
 ```ts
 import { describe, it, expect, vi } from 'vitest'
@@ -1122,7 +1122,7 @@ describe('command dispatch e2e', () => {
 })
 ```
 
-- [ ] **Step 3: 写 locale 切换 e2e 测试——验证全链路 i18n 输出**
+- [x] **Step 3: 写 locale 切换 e2e 测试——验证全链路 i18n 输出**
 
 ```ts
 describe('locale-aware output e2e', () => {
@@ -1165,7 +1165,7 @@ describe('locale-aware output e2e', () => {
 })
 ```
 
-- [ ] **Step 4: 写命令行为回归测试——仅补顶层调度侧的最小回归，不重复已有 `run-e2e` / `daemon-e2e` 业务断言**
+- [x] **Step 4: 写命令行为回归测试——仅补顶层调度侧的最小回归，不重复已有 `run-e2e` / `daemon-e2e` 业务断言**
 
 ```ts
 describe('command behavior regression', () => {
@@ -1200,7 +1200,7 @@ describe('command behavior regression', () => {
 })
 ```
 
-- [ ] **Step 5: 运行 commands-e2e 测试，确认全部通过**
+- [x] **Step 5: 运行 commands-e2e 测试，确认全部通过**
 
 Run: `pnpm --filter @tianji/cli test -- src/__tests__/commands-e2e.test.ts`
 Expected: PASS
@@ -1326,7 +1326,7 @@ pnpm tianji daemon --help
 > 更新：2026-04-02，补充 CLI locale 配置与命令/i18n 架构。设计依据：[`./superpowers/specs/2026-04-02-cli-i18n-design.md`](./superpowers/specs/2026-04-02-cli-i18n-design.md)
 ```
 
-- [ ] **Step 4: 运行 CLI 全量测试和仓库级检查，修完所有输出后再结束**
+- [x] **Step 4: 运行 CLI 全量测试和仓库级检查，修完所有输出后再结束**
 
 Run: `pnpm --filter @tianji/cli test`
 Expected: PASS
@@ -1334,7 +1334,7 @@ Expected: PASS
 Run: `pnpm check`
 Expected: PASS，且无 error、warning、info 残留需要修复
 
-- [ ] **Step 5: 如 `pnpm check` 或全量测试失败，逐项修复并回到对应任务补充最小改动，直到全部通过**
+- [x] **Step 5: 如 `pnpm check` 或全量测试失败，逐项修复并回到对应任务补充最小改动，直到全部通过**
 
 ```text
 不要跳过失败，不要带着 warning 结束，不要把修复留给“后续任务”。
@@ -1352,7 +1352,7 @@ git commit -m "docs(cli): document declarative commands and locale support"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-04-02-cli-i18n-implementation-plan.md`
 
-- [ ] **Step 1: 执行命令级回归，记录关键场景结果（含 zh-CN 验证）**
+- [x] **Step 1: 执行命令级回归，记录关键场景结果（含 zh-CN 验证）**
 
 Run: `pnpm tianji --help`
 Expected: 输出英文全局帮助，包含 `Usage:`、所有命令和 global flags
@@ -1378,7 +1378,7 @@ Expected: 输出中文 daemon 帮助，包含 `子命令:`
 Run: `pnpm tianji wat`
 Expected: exit 2，输出 `Unknown command "wat"` + help hint（不含完整帮助文本）
 
-- [ ] **Step 2: 在本计划底部追加实际执行结果，作为 handoff 记录**
+- [x] **Step 2: 在本计划底部追加实际执行结果，作为 handoff 记录**
 
 ```md
 ## Execution Notes
@@ -1432,10 +1432,15 @@ git commit -m "docs(plan): record cli i18n implementation verification"
   - 不支持 `--lang`/`--locale` CLI flag 级别的 locale 覆盖。
   - `--follow` flag 暂无 non-follow 模式实现（当前 log 命令只有 follow 模式），flag 保留为未来扩展点。
 
-Plan complete and saved to `docs/superpowers/plans/2026-04-02-cli-i18n-implementation-plan.md`. Two execution options:
+## Execution Notes
 
-**1. Subagent-Driven (recommended)** - I dispatch a fresh subagent per task, review between tasks, fast iteration
-
-**2. Inline Execution** - Execute tasks in this session using executing-plans, batch execution with checkpoints
-
-Which approach?
+- `pnpm --filter @tianji/cli test`: PASS
+- `pnpm --filter @tianji/shared build && pnpm --filter @tianji/cli test && pnpm --filter @tianji/cli build && pnpm check`: PASS
+- `pnpm tianji --help`: PASS
+- `pnpm tianji run --help`: PASS
+- `pnpm tianji --version`: PASS
+- `pnpm tianji log --help`: PASS
+- `pnpm tianji daemon --help`: PASS
+- `LANG=zh_CN.UTF-8 pnpm tianji --help`: PASS（中文输出）
+- `LANG=zh_CN.UTF-8 pnpm tianji daemon --help`: PASS（中文输出）
+- `pnpm tianji wat`: PASS（CLI 保持 exit 2 与简洁错误；根 `pnpm run` 仍追加一行 `ELIFECYCLE`，已去除先前的 `undefined` 和 `ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL` 包装噪音）
