@@ -2,7 +2,7 @@
 
 > 状态：Draft v1  
 > 范围：`tianji-ai` 的详细配置机制  
-> 相关文档：[`./ARCHITECTURE_V1.md`](./ARCHITECTURE_V1.md)
+> 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)
 
 ---
 

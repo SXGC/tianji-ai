@@ -1,9 +1,9 @@
-# Tianji AI 架构设计文档 v2
+# Tianji AI 架构设计文档
 
-> 状态：v2
+> 状态：当前
 > 日期：2026-03-30
-> 前序文档：[`./ARCHITECTURE_V1.md`](./ARCHITECTURE_V1.md)、[`./CONFIG_DESIGN.md`](./CONFIG_DESIGN.md)
-> 目标：将 v1 的 5 个包 (contracts + shared + llm + runtime + cli) 重构为 4 个包 (shared + runtime + agent + cli)，在保持已有运行时语义的前提下，明确分层职责、减少包间耦合、为多 agent 编排预留扩展空间。
+> 相关文档：[`./CONFIG_DESIGN.md`](./CONFIG_DESIGN.md)、[`./RUNTIME_DESIGN.md`](./RUNTIME_DESIGN.md)、[`./OBSERVER_DESIGN.md`](./OBSERVER_DESIGN.md)、[`./AGENT_DESIGN.md`](./AGENT_DESIGN.md)、[`./CLI_GUIDE.md`](./CLI_GUIDE.md)、[`./DEVELOPMENT.md`](./DEVELOPMENT.md)
+> 目标：4 个包 (shared + runtime + agent + cli) 的分层架构，明确职责、减少包间耦合、为多 agent 编排预留扩展空间。
 
 ---
 

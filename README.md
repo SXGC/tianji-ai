@@ -18,8 +18,13 @@ tianji-ai/
 ├─ apps/
 │  └─ cli/
 ├─ docs/
-│  ├─ ARCHITECTURE_V1.md
-│  └─ CONFIG_DESIGN.md
+│  ├─ ARCHITECTURE.md
+│  ├─ AGENT_DESIGN.md
+│  ├─ CLI_GUIDE.md
+│  ├─ CONFIG_DESIGN.md
+│  ├─ DEVELOPMENT.md
+│  ├─ OBSERVER_DESIGN.md
+│  └─ RUNTIME_DESIGN.md
 ├─ packages/
 │  ├─ agent/
 │  ├─ observer/
@@ -150,8 +155,13 @@ pnpm tianji stop
 
 ## 文档
 
-- `docs/ARCHITECTURE_V1.md`：v1 架构设计草案，描述整体分层、核心原则与包边界。
+- `docs/ARCHITECTURE.md`：架构设计文档，描述 4 包分层、各包职责、依赖约束与迁移路径。
 - `docs/CONFIG_DESIGN.md`：配置系统设计文档，描述多层 JSON 配置、优先级与 `${env:VAR_NAME}` 解析规则。
+- `docs/RUNTIME_DESIGN.md`：运行时设计文档，描述会话生命周期、执行引擎、快照持久化、工具系统与 LLM 网关。
+- `docs/OBSERVER_DESIGN.md`：Observer 设计文档，描述结构化日志协议、sink 机制、数据脱敏与 tracing。
+- `docs/AGENT_DESIGN.md`：Agent 设计文档，描述上下文装配、provider 凭据注入、daemon 协议与 SOUL.md 加载。
+- `docs/CLI_GUIDE.md`：CLI 用户指南，描述所有命令用法、配置路径与 daemon 生命周期。
+- `docs/DEVELOPMENT.md`：开发者指南，描述环境搭建、构建测试流程、代码规范与 git hooks。
 
 补充说明：runtime 已实现中心化配置加载，会按 `default < user < workspace` 顺序解析内置默认配置 `tianji.config.json`、`~/.config/tianji-ai/tianji.json` 与工作区配置文件。
 
