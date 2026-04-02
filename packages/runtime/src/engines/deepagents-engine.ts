@@ -109,6 +109,10 @@ interface AbortSignalScope {
   readonly cleanup: () => void
 }
 
+function isLangGraphChainEnd(event: { event: string; name?: string }): boolean {
+  return event.event === 'on_chain_end' && event.name === 'LangGraph'
+}
+
 /**
  * 执行一次 deepagents 运行并将其完整映射为 RuntimeEvent / RunResult。
  *
@@ -201,7 +205,7 @@ export async function executeDeepagentsRun(
       continue
     }
 
-    if (event.event === 'on_chain_end' && event.name === 'LangGraph') {
+    if (isLangGraphChainEnd(event)) {
       finalMessage = buildAssistantMessageFromDeepagentsOutput(
         messageId,
         messageStartedAt,
@@ -791,7 +795,7 @@ function sortJsonKeys(_key: string, value: unknown): unknown {
   }
 
   return Object.keys(value)
-    .sort()
+    .sort((a, b) => a.localeCompare(b))
     .reduce<Record<string, unknown>>((record, key) => {
       record[key] = value[key]
       return record

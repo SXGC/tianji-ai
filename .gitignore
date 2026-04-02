@@ -47,6 +47,9 @@ packages/coding-agent/binaries/
 todo.md
 .gitnexus
 
+# scan
+.scannerwork/
+
 # Other github
 .othergit
 .worktrees/

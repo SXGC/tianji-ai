@@ -29,9 +29,9 @@ async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
 }
 
 export class DaemonServer {
-  #session: AgentSession
-  #paths: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'> | undefined
-  #server: Server
+  readonly #session: AgentSession
+  readonly #paths: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'> | undefined
+  readonly #server: Server
   #startedAt: number
   #chatInProgress: boolean
   #shutdownPromise: Promise<void> | undefined

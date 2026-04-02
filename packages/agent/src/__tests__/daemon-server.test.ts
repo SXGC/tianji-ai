@@ -182,7 +182,7 @@ describe('DaemonServer', () => {
     await server.listen(0)
 
     await server.shutdown()
-    await server.shutdown()
+    await expect(server.shutdown()).resolves.not.toThrow()
   })
 
   it('returns 404 for unknown routes', async () => {

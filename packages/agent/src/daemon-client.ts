@@ -2,13 +2,11 @@ import { type IncomingMessage, request } from 'node:http'
 
 import type { RuntimeEvent } from '@tianji/shared'
 
-import {
-  type ChatErrorSseMessage,
-  type ChatSseMessage,
-  DAEMON_SSE_DONE_NAME,
-  DAEMON_SSE_ERROR_NAME,
-  type PingResponse,
-  type ShutdownResponse,
+import type {
+  ChatErrorSseMessage,
+  ChatSseMessage,
+  PingResponse,
+  ShutdownResponse,
 } from './daemon-protocol.js'
 
 export interface DaemonClientOptions {
@@ -81,6 +79,24 @@ function parseSseLine(line: string, state: { event: string; data: string }): Raw
   return null
 }
 
+/**
+ * Processes a list of SSE lines, yielding RuntimeEvents.
+ * Returns true if the stream is done and the caller should stop.
+ */
+function* drainSseLines(
+  lines: string[],
+  sseState: { event: string; data: string }
+): Generator<RuntimeEvent, boolean> {
+  for (const line of lines) {
+    const message = parseSseLine(line, sseState)
+    if (!message) continue
+    const result = handleSseMessage(message)
+    if (result.done) return true
+    yield result.value
+  }
+  return false
+}
+
 /** Handles a parsed SSE message: yields events, throws on errors, returns on done. */
 function handleSseMessage(msg: RawSseMessage): IteratorResult<RuntimeEvent> {
   const parsed = JSON.parse(msg.data) as ChatSseMessage
@@ -98,8 +114,8 @@ function handleSseMessage(msg: RawSseMessage): IteratorResult<RuntimeEvent> {
 }
 
 export class DaemonClient {
-  #host: string
-  #port: number
+  readonly #host: string
+  readonly #port: number
 
   constructor(options: DaemonClientOptions) {
     this.#host = options.host
@@ -150,35 +166,13 @@ export class DaemonClient {
 
       for await (const chunk of res) {
         buffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-
-        let newlineIdx = buffer.indexOf('\n')
-        while (newlineIdx !== -1) {
-          const line = buffer.slice(0, newlineIdx)
-          buffer = buffer.slice(newlineIdx + 1)
-          newlineIdx = buffer.indexOf('\n')
-
-          const message = parseSseLine(line, sseState)
-          if (message) {
-            const result = handleSseMessage(message)
-            if (result.done) {
-              return
-            }
-            yield result.value
-          }
-        }
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+        if (yield* drainSseLines(lines, sseState)) return
       }
 
       // Flush any remaining content in the buffer
-      for (const line of buffer.split('\n')) {
-        const message = parseSseLine(line, sseState)
-        if (message) {
-          const result = handleSseMessage(message)
-          if (result.done) {
-            return
-          }
-          yield result.value
-        }
-      }
+      if (yield* drainSseLines(buffer.split('\n'), sseState)) return
     } finally {
       res.destroy()
     }

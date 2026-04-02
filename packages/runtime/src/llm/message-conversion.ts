@@ -319,6 +319,45 @@ function convertSdkReasoningToApp(part: SdkReasoningPart): ThinkingContent {
   return { type: 'thinking', thinking: part.text }
 }
 
+function assertNoUnsupportedUserParts(part: unknown): void {
+  if (isSdkFilePart(part)) {
+    throw new ConversionError('User message cannot contain file parts', 'unsupported_part_type')
+  }
+  if (isSdkRedactedReasoningPart(part)) {
+    throw new ConversionError(
+      'User message cannot contain redacted-reasoning parts',
+      'unsupported_part_type'
+    )
+  }
+  if (isSdkToolResultPart(part)) {
+    throw new ConversionError(
+      'User message cannot contain tool-result parts',
+      'unsupported_part_type'
+    )
+  }
+  if (isSdkToolCallPart(part)) {
+    throw new ConversionError(
+      'User message cannot contain tool-call parts',
+      'unsupported_part_type'
+    )
+  }
+}
+
+function convertUserImagePart(part: object): MessagePart {
+  const img = (part as { image?: unknown }).image
+  if (!isUrlSafeImage(img)) {
+    throw new ConversionError(
+      'User message image must be URL or string, binary data not supported',
+      'unsupported_part_type'
+    )
+  }
+  return convertSdkImageToApp({
+    type: 'image',
+    image: img,
+    mimeType: (part as { mimeType?: string }).mimeType,
+  })
+}
+
 /**
  * Convert AI SDK user content parts to AppMessage parts.
  * Only supports text and image parts.
@@ -328,59 +367,22 @@ function convertSdkUserPartsToApp(content: unknown[]): MessagePart[] {
   const result: MessagePart[] = []
 
   for (const part of content) {
-    // Check for explicitly unsupported types first
-    if (isSdkFilePart(part)) {
-      throw new ConversionError('User message cannot contain file parts', 'unsupported_part_type')
-    }
-    if (isSdkRedactedReasoningPart(part)) {
-      throw new ConversionError(
-        'User message cannot contain redacted-reasoning parts',
-        'unsupported_part_type'
-      )
-    }
-    if (isSdkToolResultPart(part)) {
-      throw new ConversionError(
-        'User message cannot contain tool-result parts',
-        'unsupported_part_type'
-      )
-    }
-    if (isSdkToolCallPart(part)) {
-      throw new ConversionError(
-        'User message cannot contain tool-call parts',
-        'unsupported_part_type'
-      )
-    }
+    assertNoUnsupportedUserParts(part)
 
-    // Check for supported types
     if (isSdkTextPart(part)) {
       result.push(convertSdkTextToApp(part))
       continue
     }
 
-    // Check for image - need special handling for binary data
     if (
       typeof part === 'object' &&
       part !== null &&
       (part as { type?: unknown }).type === 'image'
     ) {
-      const img = (part as { image?: unknown }).image
-      if (!isUrlSafeImage(img)) {
-        throw new ConversionError(
-          'User message image must be URL or string, binary data not supported',
-          'unsupported_part_type'
-        )
-      }
-      result.push(
-        convertSdkImageToApp({
-          type: 'image',
-          image: img,
-          mimeType: (part as { mimeType?: string }).mimeType,
-        })
-      )
+      result.push(convertUserImagePart(part))
       continue
     }
 
-    // Check for reasoning (not allowed in user messages)
     if (
       typeof part === 'object' &&
       part !== null &&
@@ -392,7 +394,6 @@ function convertSdkUserPartsToApp(content: unknown[]): MessagePart[] {
       )
     }
 
-    // Unknown part type
     throw new ConversionError(
       `Unsupported SDK content part type for user: ${JSON.stringify(part)}`,
       'unsupported_part_type'
@@ -400,6 +401,49 @@ function convertSdkUserPartsToApp(content: unknown[]): MessagePart[] {
   }
 
   return result
+}
+
+function assertNoUnsupportedAssistantParts(part: unknown): void {
+  if (isSdkFilePart(part)) {
+    throw new ConversionError(
+      'Assistant message cannot contain file parts',
+      'unsupported_part_type'
+    )
+  }
+  if (isSdkRedactedReasoningPart(part)) {
+    throw new ConversionError(
+      'Assistant message cannot contain redacted-reasoning parts',
+      'unsupported_part_type'
+    )
+  }
+  if (isSdkToolResultPart(part)) {
+    throw new ConversionError(
+      'Assistant message cannot contain tool-result parts',
+      'unsupported_part_type'
+    )
+  }
+  if (typeof part === 'object' && part !== null && (part as { type?: unknown }).type === 'image') {
+    throw new ConversionError(
+      'Assistant message cannot contain image parts',
+      'unsupported_part_type'
+    )
+  }
+}
+
+function convertAssistantReasoningPart(part: object): MessagePart {
+  if ((part as { signature?: unknown }).signature !== undefined) {
+    throw new ConversionError(
+      'Assistant message reasoning with signature cannot be converted (signature not supported in AppMessage)',
+      'unsupported_part_type'
+    )
+  }
+  if (typeof (part as { text?: unknown }).text !== 'string') {
+    throw new ConversionError(
+      'Assistant message reasoning must have text field',
+      'unsupported_part_type'
+    )
+  }
+  return convertSdkReasoningToApp({ type: 'reasoning', text: (part as { text: string }).text })
 }
 
 /**
@@ -411,39 +455,8 @@ function convertSdkAssistantPartsToApp(content: unknown[]): MessagePart[] {
   const result: MessagePart[] = []
 
   for (const part of content) {
-    // Check for explicitly unsupported types first
-    if (isSdkFilePart(part)) {
-      throw new ConversionError(
-        'Assistant message cannot contain file parts',
-        'unsupported_part_type'
-      )
-    }
-    if (isSdkRedactedReasoningPart(part)) {
-      throw new ConversionError(
-        'Assistant message cannot contain redacted-reasoning parts',
-        'unsupported_part_type'
-      )
-    }
-    if (isSdkToolResultPart(part)) {
-      throw new ConversionError(
-        'Assistant message cannot contain tool-result parts',
-        'unsupported_part_type'
-      )
-    }
+    assertNoUnsupportedAssistantParts(part)
 
-    // Check for image (not allowed in assistant messages)
-    if (
-      typeof part === 'object' &&
-      part !== null &&
-      (part as { type?: unknown }).type === 'image'
-    ) {
-      throw new ConversionError(
-        'Assistant message cannot contain image parts',
-        'unsupported_part_type'
-      )
-    }
-
-    // Check for supported types
     if (isSdkTextPart(part)) {
       result.push(convertSdkTextToApp(part))
       continue
@@ -454,31 +467,15 @@ function convertSdkAssistantPartsToApp(content: unknown[]): MessagePart[] {
       continue
     }
 
-    // Check for reasoning - reject if has signature
     if (
       typeof part === 'object' &&
       part !== null &&
       (part as { type?: unknown }).type === 'reasoning'
     ) {
-      if ((part as { signature?: unknown }).signature !== undefined) {
-        throw new ConversionError(
-          'Assistant message reasoning with signature cannot be converted (signature not supported in AppMessage)',
-          'unsupported_part_type'
-        )
-      }
-      if (typeof (part as { text?: unknown }).text !== 'string') {
-        throw new ConversionError(
-          'Assistant message reasoning must have text field',
-          'unsupported_part_type'
-        )
-      }
-      result.push(
-        convertSdkReasoningToApp({ type: 'reasoning', text: (part as { text: string }).text })
-      )
+      result.push(convertAssistantReasoningPart(part))
       continue
     }
 
-    // Unknown part type
     throw new ConversionError(
       `Unsupported SDK content part type for assistant: ${JSON.stringify(part)}`,
       'unsupported_part_type'
