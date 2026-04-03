@@ -1,7 +1,7 @@
 # Tianji AI Agent 设计文档
 
 > 状态：当前
-> 日期：2026-04-02
+> 日期：2026-04-03
 > 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)、[`./RUNTIME_DESIGN.md`](./RUNTIME_DESIGN.md)、[`./CONFIG_DESIGN.md`](./CONFIG_DESIGN.md)
 > 范围：`@tianji/agent` 包的设计——上下文装配、provider 凭据注入、启动原语、daemon 协议、SOUL.md 加载。
 
@@ -9,10 +9,10 @@
 
 ## 1. 定位与职责
 
-`@tianji/agent` 是 L2 编排层，位于 runtime 和 CLI 之间，解决两个问题：
+`@tianji/agent` 是 L2 编排层，位于 runtime 和 CLI 之间，承担配置到可执行会话的装配职责，并为后续编排能力提供稳定扩展点：
 
-- **当下**：消除 CLI 对 runtime 创建细节的直接依赖，提供可复用的"配置到可执行 runtime"的转换层
-- **未来**：为多 agent 路由、规划器、agent 间通信提供独立扩展空间
+- 消除 CLI 对 runtime 创建细节的直接依赖，提供可复用的"配置到可执行 runtime"转换层
+- 为多 agent 路由、规划器、agent 间通信提供独立扩展空间
 
 具体职责：
 
@@ -128,7 +128,7 @@ SOUL.md 内容加载到 `AgentContext.soul`，在 `createAgentSession` 的 `chat
 
 ### 4.1 设计定位
 
-`injectProviderEnv()` 是一个过渡桥接——当前 AI SDK 的 provider 实现依赖 `process.env` 中的标准环境变量名来自动发现 API key。长期目标是 runtime/llm 层仅消费显式 provider 配置。
+`injectProviderEnv()` 是当前实现中的兼容桥接。部分 provider SDK 仍依赖 `process.env` 中的标准环境变量名自动发现 API key，因此 agent 层在启动前统一完成注入；整体边界仍要求 runtime/llm 优先消费显式 provider 配置。
 
 ### 4.2 映射关系
 

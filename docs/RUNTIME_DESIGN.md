@@ -1,7 +1,7 @@
 # Tianji AI 运行时设计文档
 
 > 状态：当前
-> 日期：2026-04-02
+> 日期：2026-04-03
 > 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)、[`./CONFIG_DESIGN.md`](./CONFIG_DESIGN.md)
 > 范围：`@tianji/runtime` 包的内部设计——会话生命周期、执行引擎、快照持久化、工具系统、事件流与 LLM 网关。
 
@@ -13,7 +13,7 @@
 
 - **中心化配置加载**：三层 JSON 读取、schema 校验、placeholder 解析
 - **会话运行时**：session / run 生命周期管理
-- **执行引擎**：deepagents-only，LangGraph 状态机驱动
+- **执行引擎**：基于 deepagents，使用 LangGraph 状态机驱动
 - **快照持久化**：session / run 快照的存取
 - **工具系统**：注册、策略校验、执行
 - **事件流**：可重放的异步事件流
