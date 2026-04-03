@@ -1,0 +1,31 @@
+{
+  "name": "@tianji/controlplane",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Control plane web application for tianji-ai distributed nodes",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --project tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "start": "node dist/server.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.0",
+    "@tianji/observer": "workspace:*",
+    "@tianji/shared": "workspace:*",
+    "better-sqlite3": "11.10.0",
+    "hono": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "@types/node": "^22.0.0",
+    "vitest": "^3.2.4"
+  },
+  "files": ["dist", "src"],
+  "license": "MIT"
+}

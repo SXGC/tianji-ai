@@ -1,0 +1,109 @@
+import type { AgentInfo, NodeRegisterRequest, NodeRegisterResponse } from '@tianji/shared'
+import { Hono } from 'hono'
+
+import type { ControlPlaneDb } from '../db/index.js'
+import { ACCESS_TOKEN_TTL_MS, generateAccessToken, hashToken } from '../services/auth.js'
+
+/**
+ * 创建 node 注册路由。
+ */
+export function createNodeRegisterRoute(db: ControlPlaneDb): Hono {
+  const app = new Hono()
+
+  app.post('/api/nodes/register', async (c) => {
+    const body = (await c.req.json()) as NodeRegisterRequest
+    const tokenRow = db.raw
+      .prepare('SELECT token FROM enrollment_tokens WHERE token = ?')
+      .get(body.enrollmentToken)
+
+    if (tokenRow === undefined) {
+      return c.json({ error: 'Invalid enrollment token' }, 403)
+    }
+
+    const accessToken = generateAccessToken()
+    const accessTokenHash = hashToken(accessToken)
+    const now = Date.now()
+    const expiresAt = now + ACCESS_TOKEN_TTL_MS
+    const existingNode = db.raw
+      .prepare('SELECT node_id FROM nodes WHERE node_id = ?')
+      .get(body.nodeId)
+
+    if (existingNode === undefined) {
+      db.raw
+        .prepare(
+          `INSERT INTO nodes (
+            node_id, hostname, platform, version, status,
+            execution_state, access_token_hash, access_token_expires_at,
+            enrollment_token, last_heartbeat_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, 'online', 'idle', ?, ?, ?, ?, ?, ?)`
+        )
+        .run(
+          body.nodeId,
+          body.hostname,
+          body.platform,
+          body.version,
+          accessTokenHash,
+          expiresAt,
+          body.enrollmentToken,
+          now,
+          now,
+          now
+        )
+    } else {
+      db.raw
+        .prepare(
+          `UPDATE nodes SET
+            hostname = ?,
+            platform = ?,
+            version = ?,
+            status = 'online',
+            access_token_hash = ?,
+            access_token_expires_at = ?,
+            last_heartbeat_at = ?,
+            updated_at = ?
+          WHERE node_id = ?`
+        )
+        .run(
+          body.hostname,
+          body.platform,
+          body.version,
+          accessTokenHash,
+          expiresAt,
+          now,
+          now,
+          body.nodeId
+        )
+    }
+
+    updateAgentList(db, body.nodeId, body.agentList, now)
+
+    const response: NodeRegisterResponse = {
+      accessToken,
+      expiresAt,
+    }
+
+    return c.json(response)
+  })
+
+  return app
+}
+
+/**
+ * 使用全量快照覆盖 node 的 agent 列表。
+ */
+export function updateAgentList(
+  db: ControlPlaneDb,
+  nodeId: string,
+  agentList: readonly AgentInfo[],
+  now: number
+): void {
+  db.raw.prepare('DELETE FROM agents WHERE node_id = ?').run(nodeId)
+
+  const insert = db.raw.prepare(
+    'INSERT INTO agents (node_id, agent_id, type, name, version, updated_at) VALUES (?, ?, ?, ?, ?, ?)'
+  )
+
+  for (const agent of agentList) {
+    insert.run(nodeId, agent.agentId, agent.type, agent.name, agent.version, now)
+  }
+}
