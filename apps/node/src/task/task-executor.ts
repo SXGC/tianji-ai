@@ -7,7 +7,7 @@
 import type { AgentRunner } from '../acp/index.js'
 import type { NdjsonWriter } from '../controlplane/index.js'
 
-import type { Command, NodeExecutionState, NodeId } from '@tianji/shared'
+import type { Command, NodeExecutionState, NodeId, RuntimeEvent } from '@tianji/shared'
 
 export interface TaskExecutorConfig {
   readonly nodeId: NodeId
@@ -46,10 +46,34 @@ export class TaskExecutor {
     const eventStream = await this.#config.openEventStream(this.#currentTaskId)
 
     try {
+      await eventStream.write(
+        JSON.stringify({
+          kind: 'lifecycle',
+          sequence: 1,
+          type: 'task.started',
+        })
+      )
+
       await runner.connect()
-      for await (const _event of runner.chat(command.payload.goal)) {
-        await eventStream.write('{}')
+      let sequence = 2
+      for await (const event of runner.chat(command.payload.goal)) {
+        await eventStream.write(
+          JSON.stringify({
+            kind: 'agent',
+            sequence,
+            event: serializeRuntimeEvent(event),
+          })
+        )
+        sequence += 1
       }
+
+      await eventStream.write(
+        JSON.stringify({
+          kind: 'lifecycle',
+          sequence,
+          type: 'task.completed',
+        })
+      )
     } finally {
       await runner.disconnect()
       await eventStream.close()
@@ -58,4 +82,8 @@ export class TaskExecutor {
       this.#config.onExecutionStateChange(this.#executionState)
     }
   }
+}
+
+function serializeRuntimeEvent(event: RuntimeEvent): unknown {
+  return event
 }

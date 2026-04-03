@@ -70,12 +70,14 @@ export class ControlPlaneClient {
     }
   }
 
-  async pollCommand(timeout = 30000): Promise<PollCommandResponse | null> {
+  async pollCommand(timeout = 30000, signal?: AbortSignal): Promise<PollCommandResponse | null> {
+    const requestSignal = signal ?? AbortSignal.timeout(timeout + 5000)
+
     const response = await this.#fetchAuth(
       `/api/nodes/${this.#nodeId}/commands/poll?timeout=${timeout}`,
       {
         method: 'GET',
-        signal: AbortSignal.timeout(timeout + 5000),
+        signal: requestSignal,
       }
     )
 

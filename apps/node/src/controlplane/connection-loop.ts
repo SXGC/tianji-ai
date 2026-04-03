@@ -24,6 +24,7 @@ export class ControlPlaneConnection {
   readonly #config: ControlPlaneConnectionConfig
   readonly #client: ControlPlaneClient
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null
+  #pollAbortController: AbortController | null = null
   #running = false
   #executionState: NodeExecutionState = 'idle'
 
@@ -53,6 +54,8 @@ export class ControlPlaneConnection {
 
   stop(): void {
     this.#running = false
+    this.#pollAbortController?.abort()
+    this.#pollAbortController = null
     if (this.#heartbeatTimer !== null) {
       clearInterval(this.#heartbeatTimer)
       this.#heartbeatTimer = null
@@ -89,17 +92,24 @@ export class ControlPlaneConnection {
 
   async #pollLoop(): Promise<void> {
     while (this.#running) {
+      this.#pollAbortController = new AbortController()
+
       try {
-        const command = await this.#client.pollCommand(30000)
+        const command = await this.#client.pollCommand(30000, this.#pollAbortController.signal)
         if (command !== null) {
           this.#config.onCommand(command)
         }
       } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          return
+        }
         if (error instanceof ControlPlaneAuthError) {
           await this.#reRegister()
         } else {
           await sleep(1000)
         }
+      } finally {
+        this.#pollAbortController = null
       }
     }
   }

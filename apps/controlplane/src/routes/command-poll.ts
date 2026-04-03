@@ -40,7 +40,15 @@ export function createCommandPollRoute(db: ControlPlaneDb): Hono<AuthVariables> 
 
     const deadline = Date.now() + timeout
     while (Date.now() < deadline) {
+      if (c.req.raw.signal.aborted) {
+        return c.body(null, 204)
+      }
+
       await new Promise((resolve) => setTimeout(resolve, 1000))
+
+      if (c.req.raw.signal.aborted) {
+        return c.body(null, 204)
+      }
 
       const nextCommand = tryLeasePendingCommand(db, nodeId)
       if (nextCommand !== null) {
