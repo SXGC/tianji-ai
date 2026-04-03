@@ -14,17 +14,20 @@
   "files": ["dist", "src"],
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
+    "build:acp": "pnpm build && node scripts/build-acp-bundle.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "^0.18.0",
     "@tianji/runtime": "workspace:*",
     "@tianji/shared": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.28.0"
   },
   "keywords": ["tianji", "agent"],
   "license": "MIT"

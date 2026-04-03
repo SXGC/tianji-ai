@@ -26,5 +26,7 @@ export {
   type AgentSession,
   type ChatOptions,
 } from './session.js'
+export { TianjiAcpAgent, mapRuntimeEventToSessionUpdate } from './acp/index.js'
+export { runAcpAgent } from './acp-entry.js'
 export { DaemonClient, type DaemonClientOptions } from './daemon-client.js'
 export { DaemonServer, type DaemonServerOptions } from './daemon-server.js'
