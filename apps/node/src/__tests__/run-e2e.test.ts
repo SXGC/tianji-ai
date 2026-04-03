@@ -7,7 +7,7 @@
 import { mkdir, readFile, truncate, writeFile } from 'node:fs/promises'
 
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import { type AgentSession, createAgentRuntime } from '@tianji/agent'
+import { createAgentRuntime } from '@tianji/agent'
 import { createSessionRuntime } from '@tianji/runtime'
 import { ProviderError, type RunId, type RuntimeEvent, type SessionId } from '@tianji/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -18,6 +18,7 @@ import { parseCliArgs, runCli } from '../main.js'
 import {
   captureStdout,
   captureStdoutLive,
+  createFakeAgentRunner,
   createFakeContext,
   createTempCliPaths,
   waitForOutput,
@@ -43,22 +44,11 @@ async function* failedRunEvents(): AsyncGenerator<RuntimeEvent> {
   }
 }
 
-function createStubSession(events: readonly RuntimeEvent[]): AgentSession {
-  return {
-    sessionId: 'session_test' as SessionId,
-    async *chat(): AsyncIterable<RuntimeEvent> {
-      for (const event of events) {
-        yield event
-      }
-    },
-  }
-}
-
 describe('CLI integration', () => {
   describe('run command', () => {
     it('streams assistant text to stdout and returns exit code 0', async () => {
       const fakeContext = createFakeContext()
-      const session = createStubSession([
+      const runner = createFakeAgentRunner([
         {
           type: 'message.delta',
           runId: 'run_test' as RunId,
@@ -80,7 +70,7 @@ describe('CLI integration', () => {
       const output = await captureStdout(async () => {
         const exitCode = await runCli(['run', 'say hello'], {
           loadContext: () => Promise.resolve(fakeContext),
-          createSession: () => session,
+          createAgentRunner: () => runner,
           getUserConfigPaths: () => fakeContext.paths,
         })
 
@@ -101,24 +91,25 @@ describe('CLI integration', () => {
         },
       })
 
-      const session: AgentSession = {
-        sessionId: 'session_test' as SessionId,
-        async *chat(prompt: string): AsyncIterable<RuntimeEvent> {
-          capturedPrompt = prompt
-          yield {
+      const runner = createFakeAgentRunner(
+        [
+          {
             type: 'run.completed',
             runId: 'run_test' as RunId,
             sessionId: 'session_test' as SessionId,
             triggerType: 'new',
             timestamp: Date.now(),
-          }
-        },
-      }
+          },
+        ],
+        (prompt) => {
+          capturedPrompt = prompt
+        }
+      )
 
       await captureStdout(async () => {
         const exitCode = await runCli(['run', 'test'], {
           loadContext: () => Promise.resolve(fakeContext),
-          createSession: () => session,
+          createAgentRunner: () => runner,
           getUserConfigPaths: () => fakeContext.paths,
         })
         expect(exitCode).toBe(0)
@@ -130,7 +121,7 @@ describe('CLI integration', () => {
     it('returns exit code 1 on runtime failure', async () => {
       const fakeContext = createFakeContext()
       const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-      const session = createStubSession([
+      const runner = createFakeAgentRunner([
         {
           type: 'run.failed',
           runId: 'run_test' as RunId,
@@ -143,7 +134,7 @@ describe('CLI integration', () => {
 
       const exitCode = await runCli(['run', 'test'], {
         loadContext: () => Promise.resolve(fakeContext),
-        createSession: () => session,
+        createAgentRunner: () => runner,
         getUserConfigPaths: () => fakeContext.paths,
       })
 
@@ -153,7 +144,7 @@ describe('CLI integration', () => {
 
     it('writes observer JSONL entries compatible with log follow output', async () => {
       const fakeContext = createFakeContext()
-      const session = createStubSession([
+      const runner = createFakeAgentRunner([
         {
           type: 'message.delta',
           runId: 'run_test' as RunId,
@@ -175,7 +166,7 @@ describe('CLI integration', () => {
       await captureStdout(async () => {
         const exitCode = await runCli(['run', 'test observer logger'], {
           loadContext: () => Promise.resolve(fakeContext),
-          createSession: () => session,
+          createAgentRunner: () => runner,
           getUserConfigPaths: () => fakeContext.paths,
         })
 

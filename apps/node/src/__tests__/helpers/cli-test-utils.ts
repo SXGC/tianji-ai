@@ -8,7 +8,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FakeListChatModel } from '@langchain/core/utils/testing'
 import { FileSnapshotStore, type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
+import type { RuntimeEvent } from '@tianji/shared'
 
+import type { AgentRunner } from '../../acp/index.js'
 import type { CliDependencies } from '../../commands/types.js'
 import type { LoadedUserConfigContext } from '../../config.js'
 import type { UserConfigPaths } from '../../config.js'
@@ -224,4 +226,21 @@ export function createDepsWithoutLocale(overrides: Partial<CliDependencies> = {}
     loadConfig: async () => ({}),
     ...overrides,
   }
+}
+
+export function createFakeAgentRunner(
+  events: readonly RuntimeEvent[],
+  onChat?: (prompt: string) => void | Promise<void>
+): AgentRunner {
+  return {
+    agentId: 'default',
+    connect: async () => undefined,
+    disconnect: async () => undefined,
+    async *chat(prompt: string): AsyncIterable<RuntimeEvent> {
+      await onChat?.(prompt)
+      for (const event of events) {
+        yield event
+      }
+    },
+  } as AgentRunner
 }

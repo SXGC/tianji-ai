@@ -1,8 +1,8 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 
-import { createAgentSession } from '@tianji/agent'
 import type { RunId, RuntimeEvent } from '@tianji/shared'
 
+import { AgentRunner } from '../acp/index.js'
 import { type UserConfigPaths, getUserConfigPaths, loadUserConfigContext } from '../config.js'
 import type { CliLogEntry, CliLogScope, CliLogger } from '../logger.js'
 import { createCliLogger } from '../logger.js'
@@ -32,7 +32,6 @@ export const runCommand: CommandDefinition = {
     })
 
     const loadContext = deps?.loadContext ?? loadUserConfigContext
-    const createSession = deps?.createSession ?? createAgentSession
     await logger.logInfo(CLI_RUN_CONFIG_SCOPE, 'Loading user config context')
     const context = await loadContext()
     await logger.logInfo(CLI_RUN_CONFIG_SCOPE, 'Loaded user config context', {
@@ -44,51 +43,46 @@ export const runCommand: CommandDefinition = {
       resolvedEnvVars: context.resolvedEnvVars,
     })
 
-    await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Creating session runtime', {
+    const createRunner = deps?.createAgentRunner ?? createDefaultAgentRunner
+
+    await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Connecting to agent via ACP', {
       agentName: context.agent.agentName,
       provider: context.agent.provider,
       modelName: context.agent.modelName,
-    })
-    await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Session runtime created', {
-      agentName: context.agent.agentName,
-      provider: context.agent.provider,
-      modelName: context.agent.modelName,
-    })
-
-    const session = createSession(context)
-    await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Session created', {
-      sessionId: String(session.sessionId),
-    })
-
-    await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Starting run turn', {
-      sessionId: String(session.sessionId),
       promptLength: prompt.length,
     })
 
-    return executeRunTurn(session, prompt, logger)
+    const runner = createRunner(context)
+    await runner.connect()
+
+    try {
+      return await executeRunTurn(runner, prompt, logger)
+    } finally {
+      await runner.disconnect()
+    }
   },
 }
 
 async function executeRunTurn(
-  session: Awaited<ReturnType<typeof createAgentSession>>,
+  runner: AgentRunner,
   prompt: string,
   logger: CliLogger
 ): Promise<number> {
-  await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Run started', {
-    sessionId: String(session.sessionId),
-  })
-
   let currentRunId: RunId | undefined
+  let currentSessionId: string | undefined
 
-  for await (const event of session.chat(prompt)) {
+  for await (const event of runner.chat(prompt)) {
     currentRunId = event.runId
+    if ('sessionId' in event && event.sessionId !== undefined) {
+      currentSessionId = String(event.sessionId)
+    }
     await handleRuntimeEvent(event, logger)
   }
 
   process.stdout.write('\n')
   await logger.logInfo(CLI_RUN_SCOPE, 'Run command completed', {
     runId: currentRunId === undefined ? undefined : String(currentRunId),
-    sessionId: String(session.sessionId),
+    sessionId: currentSessionId,
   })
 
   return 0
@@ -142,4 +136,13 @@ function createCliLoggerFromPaths(paths: UserConfigPaths): CliLogger {
 async function appendCliLogEntry(paths: UserConfigPaths, entry: CliLogEntry): Promise<void> {
   await mkdir(paths.logsDir, { recursive: true })
   await appendFile(paths.cliLogFilePath, `${JSON.stringify(entry)}\n`, 'utf8')
+}
+
+function createDefaultAgentRunner(
+  context: Awaited<ReturnType<typeof loadUserConfigContext>>
+): AgentRunner {
+  return new AgentRunner({
+    agentId: context.agent.agentName,
+    binaryPath: process.env.TIANJI_AGENT_BIN ?? 'tianji-agent',
+  })
 }

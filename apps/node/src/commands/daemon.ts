@@ -68,7 +68,11 @@ async function waitForDaemonReady(
   while (Date.now() < deadline) {
     const port = await readDaemonPort(paths)
     if (port !== undefined) {
-      const client = new DaemonClient({ host: '127.0.0.1', port })
+      const client = await tryCreateDaemonClient(paths)
+      if (client === undefined) {
+        await new Promise((resolve) => setTimeout(resolve, 200))
+        continue
+      }
       try {
         await client.ping()
         const pid = await readDaemonPid(paths)
@@ -133,8 +137,8 @@ const daemonStatusCommand: CommandDefinition = {
         `${i18n.t('daemon.status', {
           pid: ping.pid,
           port: port ?? 0,
-          sessionId: ping.sessionId,
-          uptime: ping.uptime,
+          sessionId: ping.sessionId ?? '',
+          uptime: ping.uptime ?? 0,
         })}\n`
       )
       return 0

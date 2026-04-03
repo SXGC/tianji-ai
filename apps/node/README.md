@@ -1,13 +1,13 @@
-# @tianji/cli
+# @tianji/node
 
-`@tianji/cli` 是 `tianji-ai` 的命令行入口，提供 `run`、`log`、`daemon`、`chat` 和 `help` 能力，并支持全局 `-h` / `--help` 与 `-V` / `--version`。
+`@tianji/node` 是 `tianji-ai` 的节点命令行入口，当前仍提供 `run`、`log`、`daemon`、`chat` 和 `help` 能力，并支持全局 `-h` / `--help` 与 `-V` / `--version`。
 
 ## 安装与运行
 
-在 monorepo 内可先构建 CLI：
+在 monorepo 内可先构建 node app：
 
 ```bash
-pnpm --filter @tianji/cli build
+pnpm --filter @tianji/node build
 ```
 
 构建后可通过以下方式运行：
@@ -19,14 +19,14 @@ pnpm tianji log --lines 20
 pnpm tianji daemon --help
 ```
 
-`apps/cli/package.json` 中声明了 `bin.tianji -> ./bin/tianji.mjs`。在 monorepo 开发环境里，推荐通过仓库根脚本 `pnpm tianji` 调用；如果将包链接到全局环境，也可以直接执行 `tianji`。
+`apps/node/package.json` 中声明了 `bin.tianji -> ./bin/tianji.mjs`。在 monorepo 开发环境里，推荐通过仓库根脚本 `pnpm tianji` 调用；如果将包链接到全局环境，也可以直接执行 `tianji`。
 
 ## 命令用法
 
 ### `tianji run "<prompt>"`
 
 - 发送一条 prompt 给默认 agent。
-- CLI 会通过 `@tianji/agent` 加载配置、解析默认 agent、读取对应 `SOUL.md`、创建会话，并把 assistant 文本流式输出到 stdout。
+- 当前 node app 仍会通过 `@tianji/agent` 加载配置、解析默认 agent、读取对应 `SOUL.md`、创建会话，并把 assistant 文本流式输出到 stdout；后续将迁移为 ACP 管理模式。
 - 首次运行时，如果 `~/.config/tianji-ai/` 下缺少配置目录，会自动创建基础目录、空的用户层 `tianji.json`、默认 agent 的 `SOUL.md`，以及日志目录。
 - 用法错误返回退出码 `2`，运行时错误返回退出码 `1`。
 
@@ -36,7 +36,7 @@ pnpm tianji daemon --help
 - 如果日志文件尚未创建，会先输出等待提示；文件出现后默认先回放最近 `100` 行，再持续输出新增日志。
 - 当前保持 follow 为默认行为；`--follow` / `-f` 作为语义规范化和后续扩展预留。
 - 可通过 `--lines <n>` 或 `-n <n>` 调整首次回放的行数，例如 `tianji log --lines 20`。
-- `@tianji/observer` 负责生成 JSONL 记录；CLI 负责 follow 文件并把 JSONL 渲染为可读文本，而不是直接输出原始 JSON。
+- `@tianji/observer` 负责生成 JSONL 记录；node app 负责 follow 文件并把 JSONL 渲染为可读文本，而不是直接输出原始 JSON。
 
 ## Daemon 命令
 
@@ -145,11 +145,11 @@ pnpm tianji daemon --help
 - 每个 agent 的 `SOUL.md` 固定在 `~/.config/tianji-ai/agents/<agent-name>/SOUL.md`。
 - `SOUL.md` 定义 agent 的价值观、边界与协作方式，agent 包会把文件内容作为 `systemPrompt` 传给 runtime。
 - `SOUL.md` 必须存在且非空；缺失、不可读或空文件都会直接报错。
-- 首次运行时，CLI 会为默认 agent 自动创建一个基础 `SOUL.md`。
+- 首次运行时，node app 会为默认 agent 自动创建一个基础 `SOUL.md`。
 
 ## 日志系统
 
-`@tianji/observer` 统一负责结构化日志协议与 JSONL 生成，CLI 当前只负责两件事：
+`@tianji/observer` 统一负责结构化日志协议与 JSONL 生成，当前 node app 只负责两件事：
 
 - 在 `run` 等命令流程中调用 observer logger 写日志。
 - 在 `log [--follow]` 中先回放尾部指定行数，再继续读取同一个 JSONL 文件并渲染输出。
@@ -206,7 +206,7 @@ pnpm tianji daemon --help
 ## 目录结构
 
 ```text
-apps/cli/
+apps/node/
 ├─ bin/
 │  └─ tianji.mjs
 ├─ src/
@@ -226,10 +226,10 @@ apps/cli/
 ## 开发命令
 
 ```bash
-pnpm --filter @tianji/cli build
-pnpm --filter @tianji/cli test
-pnpm --filter @tianji/cli typecheck
-pnpm --filter @tianji/cli clean
+pnpm --filter @tianji/node build
+pnpm --filter @tianji/node test
+pnpm --filter @tianji/node typecheck
+pnpm --filter @tianji/node clean
 ```
 
 ## 依赖关系

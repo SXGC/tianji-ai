@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { execFile } from 'node:child_process'
 /**
  * Daemon 子命令模式的端到端集成测试。
  *
@@ -8,6 +9,7 @@ import { spawn } from 'node:child_process'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 
 import { type AgentSession, DaemonClient, DaemonServer } from '@tianji/agent'
 import type { RunId, RuntimeEvent, SessionId } from '@tianji/shared'
@@ -143,6 +145,8 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+const execFileAsync = promisify(execFile)
+
 describe('daemon e2e', () => {
   it('boots a live daemon and responds to ping', async () => {
     const live = await setupLiveDaemon(createStubSession(['hello']))
@@ -225,6 +229,10 @@ describe('daemon start/status/stop', () => {
     const { paths, cleanup } = await createTempCliPaths()
 
     try {
+      await execFileAsync('pnpm', ['build'], {
+        cwd: fileURLToPath(new URL('../..', import.meta.url)),
+      })
+
       await mkdir(dirname(paths.configFilePath), { recursive: true })
       await writeFile(paths.configFilePath, '{}', 'utf8')
 

@@ -21,8 +21,8 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    name: '@tianji/cli',
-    include: ['src/__tests__/**/*.{test,spec}.ts'],
+    name: '@tianji/node',
+    include: ['src/**/__tests__/**/*.{test,spec}.ts'],
     exclude: ['node_modules', 'dist'],
     globals: true,
     root: packageRoot,

@@ -8,6 +8,7 @@
  */
 
 import { Readable, Writable } from 'node:stream'
+import { pathToFileURL } from 'node:url'
 import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk'
 
 import { TianjiAcpAgent } from './acp/agent-bridge.js'
@@ -33,7 +34,8 @@ export async function runAcpAgent(): Promise<void> {
   await connection.closed
 }
 
-const isMain = process.argv[1] !== undefined
+const isMain =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
 
 if (isMain) {
   void runAcpAgent().catch((error: unknown) => {

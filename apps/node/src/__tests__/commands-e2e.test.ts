@@ -197,28 +197,20 @@ describe('command behavior regression', () => {
   })
 
   it('workspace tianji script preserves concise unknown-command output', async () => {
-    await expect(
-      execFileAsync('pnpm', ['tianji', 'wat'], {
-        cwd: '/workspaces/dev_docker/tianji-ai',
-      })
-    ).rejects.toMatchObject({
+    const commandResult = execFileAsync('pnpm', ['tianji', 'wat'], {
+      cwd: '/workspaces/dev_docker/tianji-ai',
+    })
+
+    await expect(commandResult).rejects.toMatchObject({
       code: 2,
       stderr: 'Unknown command "wat". Run \'tianji --help\' for usage.\n',
     })
 
-    await expect(
-      execFileAsync('pnpm', ['tianji', 'wat'], {
-        cwd: '/workspaces/dev_docker/tianji-ai',
-      })
-    ).rejects.not.toMatchObject({
+    await expect(commandResult).rejects.not.toMatchObject({
       stdout: expect.stringContaining('undefined'),
     })
 
-    await expect(
-      execFileAsync('pnpm', ['tianji', 'wat'], {
-        cwd: '/workspaces/dev_docker/tianji-ai',
-      })
-    ).rejects.not.toMatchObject({
+    await expect(commandResult).rejects.not.toMatchObject({
       stdout: expect.stringContaining('ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL'),
     })
   }, 120_000)

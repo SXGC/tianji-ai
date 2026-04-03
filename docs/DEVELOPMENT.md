@@ -68,7 +68,7 @@ cli (→ shared, agent, observer)
 | `@tianji/observer` | 无 | 所有内部包 |
 | `@tianji/runtime` | shared, observer | `@tianji/agent`, `apps/*` |
 | `@tianji/agent` | shared, runtime | `ai`, `@ai-sdk/*`, `@langchain/*` |
-| `@tianji/cli` | shared, agent, observer | `@tianji/runtime`, `ai`, `@ai-sdk/*` |
+| `@tianji/node` | shared, agent, observer | `@tianji/runtime`, `ai`, `@ai-sdk/*` |
 
 ---
 
@@ -85,7 +85,7 @@ cli (→ shared, agent, observer)
 | `pnpm check` | 完整检查 = `biome check` + `typecheck` |
 | `pnpm build` | Turbo 编排构建所有包 |
 | `pnpm test` | Turbo 编排运行所有测试 |
-| `pnpm tianji <cmd>` | 构建后直接运行 CLI |
+| `pnpm tianji <cmd>` | 构建后直接运行 node CLI |
 
 ### 4.2 单包命令
 

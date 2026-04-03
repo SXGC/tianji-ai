@@ -1,0 +1,178 @@
+/**
+ * Control Plane HTTP client.
+ *
+ * @module controlplane/client
+ */
+
+import type {
+  AgentInfo,
+  NodeExecutionState,
+  NodeHeartbeatRequest,
+  NodeRegisterRequest,
+  NodeRegisterResponse,
+  PollCommandResponse,
+} from '@tianji/shared'
+
+export interface ControlPlaneClientConfig {
+  readonly baseUrl: string
+  readonly nodeId: string
+}
+
+export class ControlPlaneClient {
+  readonly #baseUrl: string
+  readonly #nodeId: string
+  #accessToken: string | null = null
+
+  constructor(config: ControlPlaneClientConfig) {
+    this.#baseUrl = config.baseUrl.replace(/\/$/, '')
+    this.#nodeId = config.nodeId
+  }
+
+  get isAuthenticated(): boolean {
+    return this.#accessToken !== null
+  }
+
+  setAccessToken(token: string): void {
+    this.#accessToken = token
+  }
+
+  async register(request: NodeRegisterRequest): Promise<NodeRegisterResponse> {
+    const response = await this.#fetch('/api/nodes/register', {
+      method: 'POST',
+      body: JSON.stringify(request),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Registration failed: ${response.status} ${await response.text()}`)
+    }
+
+    const data = (await response.json()) as NodeRegisterResponse
+    this.#accessToken = data.accessToken
+    return data
+  }
+
+  async heartbeat(
+    executionState: NodeExecutionState,
+    agentList?: readonly AgentInfo[]
+  ): Promise<void> {
+    const body: NodeHeartbeatRequest = { executionState, agentList }
+    const response = await this.#fetchAuth(`/api/nodes/${this.#nodeId}/heartbeat`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+
+    if (response.status === 401) {
+      throw new ControlPlaneAuthError('Heartbeat rejected: token expired or revoked')
+    }
+
+    if (!response.ok) {
+      throw new Error(`Heartbeat failed: ${response.status}`)
+    }
+  }
+
+  async pollCommand(timeout = 30000): Promise<PollCommandResponse | null> {
+    const response = await this.#fetchAuth(
+      `/api/nodes/${this.#nodeId}/commands/poll?timeout=${timeout}`,
+      {
+        method: 'GET',
+        signal: AbortSignal.timeout(timeout + 5000),
+      }
+    )
+
+    if (response.status === 204) {
+      return null
+    }
+    if (response.status === 401) {
+      throw new ControlPlaneAuthError('Poll rejected: token expired or revoked')
+    }
+    if (!response.ok) {
+      throw new Error(`Poll failed: ${response.status}`)
+    }
+
+    return (await response.json()) as PollCommandResponse
+  }
+
+  async openEventStream(taskId: string): Promise<NdjsonWriter> {
+    if (!this.#accessToken) {
+      throw new Error('Not authenticated. Call register() first.')
+    }
+
+    const url = `${this.#baseUrl}/api/tasks/${taskId}/events`
+    const controller = new AbortController()
+    const encoder = new TextEncoder()
+
+    const { readable, writable } = new TransformStream<string, Uint8Array>({
+      transform(chunk, streamController) {
+        streamController.enqueue(encoder.encode(chunk))
+      },
+    })
+
+    const fetchPromise = fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-ndjson',
+        Authorization: `Bearer ${this.#accessToken}`,
+      },
+      body: readable,
+      signal: controller.signal,
+      duplex: 'half',
+    })
+
+    const writer = writable.getWriter()
+
+    return {
+      async write(json: string): Promise<void> {
+        await writer.write(`${json}\n`)
+      },
+      async writeKeepalive(): Promise<void> {
+        await writer.write('\n')
+      },
+      async close(): Promise<void> {
+        await writer.close()
+        await fetchPromise
+      },
+      abort(): void {
+        controller.abort()
+      },
+    }
+  }
+
+  #fetch(path: string, init: RequestInit): Promise<Response> {
+    return fetch(`${this.#baseUrl}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...init.headers,
+      },
+    })
+  }
+
+  #fetchAuth(path: string, init: RequestInit): Promise<Response> {
+    if (!this.#accessToken) {
+      throw new Error('Not authenticated. Call register() first.')
+    }
+
+    return fetch(`${this.#baseUrl}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.#accessToken}`,
+        ...init.headers,
+      },
+    })
+  }
+}
+
+export interface NdjsonWriter {
+  write(json: string): Promise<void>
+  writeKeepalive(): Promise<void>
+  close(): Promise<void>
+  abort(): void
+}
+
+export class ControlPlaneAuthError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ControlPlaneAuthError'
+  }
+}

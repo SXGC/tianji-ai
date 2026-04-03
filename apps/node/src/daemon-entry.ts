@@ -1,11 +1,12 @@
 import { pathToFileURL } from 'node:url'
 
-import { DaemonServer, createAgentSession, loadAgentContext } from '@tianji/agent'
+import { DaemonServer, createAgentSession } from '@tianji/agent'
 
+import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
 
 export async function runDaemonEntry(): Promise<void> {
-  const context = await loadAgentContext()
+  const context = await loadUserConfigContext()
   const i18n = createI18n(detectLocale(context.config))
   const session = createAgentSession(context)
   const server = new DaemonServer({

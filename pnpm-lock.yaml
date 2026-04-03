@@ -27,34 +27,6 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@22.19.15)(yaml@2.8.2)
 
-  apps/cli:
-    dependencies:
-      '@langchain/openai':
-        specifier: ^1.3.1
-        version: 1.3.1(@langchain/core@1.1.33(@opentelemetry/api@1.9.0)(openai@6.33.0(zod@4.3.6)))
-      '@tianji/agent':
-        specifier: workspace:*
-        version: link:../../packages/agent
-      '@tianji/observer':
-        specifier: workspace:*
-        version: link:../../packages/observer
-      '@tianji/runtime':
-        specifier: workspace:*
-        version: link:../../packages/runtime
-      '@tianji/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
-    devDependencies:
-      '@langchain/core':
-        specifier: ^1.1.33
-        version: 1.1.33(@opentelemetry/api@1.9.0)(openai@6.33.0(zod@4.3.6))
-      '@types/node':
-        specifier: ^22.0.0
-        version: 22.19.15
-      vitest:
-        specifier: ^3.2.4
-        version: 3.2.4(@types/node@22.19.15)(yaml@2.8.2)
-
   apps/controlplane:
     dependencies:
       '@hono/node-server':
@@ -76,6 +48,37 @@ importers:
       '@types/better-sqlite3':
         specifier: ^7.6.0
         version: 7.6.13
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.15
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@22.19.15)(yaml@2.8.2)
+
+  apps/node:
+    dependencies:
+      '@agentclientprotocol/sdk':
+        specifier: ^0.18.0
+        version: 0.18.0(zod@4.3.6)
+      '@langchain/openai':
+        specifier: ^1.3.1
+        version: 1.3.1(@langchain/core@1.1.33(@opentelemetry/api@1.9.0)(openai@6.33.0(zod@4.3.6)))
+      '@tianji/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@tianji/observer':
+        specifier: workspace:*
+        version: link:../../packages/observer
+      '@tianji/runtime':
+        specifier: workspace:*
+        version: link:../../packages/runtime
+      '@tianji/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+    devDependencies:
+      '@langchain/core':
+        specifier: ^1.1.33
+        version: 1.1.33(@opentelemetry/api@1.9.0)(openai@6.33.0(zod@4.3.6))
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.15

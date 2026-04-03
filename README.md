@@ -85,9 +85,9 @@ agent 装配层，负责把配置解析结果、默认 agent、`SOUL.md`、provi
 
 该包位于 CLI 与 runtime 之间，承接应用层初始化逻辑，避免 CLI 直接依赖 runtime 创建细节。
 
-### `@tianji/cli`
+### `@tianji/node`
 
-命令行应用，提供 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon`、`tianji chat`、`tianji status`、`tianji stop` 和 `tianji help` 七个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。`run` 命令会通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；`daemon` 命令启动后台守护进程，`chat` 命令连接守护进程进行多轮对话，`status` 查看守护进程状态，`stop` 停止守护进程；日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。
+节点命令行应用，提供 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon`、`tianji chat`、`tianji status`、`tianji stop` 和 `tianji help` 七个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。当前 `run` 命令仍通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；后续会逐步迁移为 ACP 管理的 node 架构。日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。
 
 ## 开发命令
 
@@ -131,7 +131,7 @@ pnpm tianji status
 pnpm tianji stop
 ```
 
-用户配置文件位于 `~/.config/tianji-ai/tianji.json`，首次运行时会自动生成。默认 agent 的 `SOUL.md` 位于 `~/.config/tianji-ai/agents/default/SOUL.md`。更多细节见 `apps/cli/README.md`。
+用户配置文件位于 `~/.config/tianji-ai/tianji.json`，首次运行时会自动生成。默认 agent 的 `SOUL.md` 位于 `~/.config/tianji-ai/agents/default/SOUL.md`。更多细节见 `apps/node/README.md`。
 
 ## 环境变量
 

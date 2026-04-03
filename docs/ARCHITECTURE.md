@@ -36,7 +36,7 @@ graph BT
     SHARED["@tianji/shared<br/>L0: 类型 + Schema + 纯函数"]
     RUNTIME["@tianji/runtime<br/>L1: 配置加载 + LLM 适配 + 执行引擎"]
     AGENT["@tianji/agent<br/>L2: 上下文装配 + 启动封装"]
-    CLI["@tianji/cli<br/>L3: 命令路由 + 终端输出"]
+    CLI["@tianji/node<br/>L3: 命令路由 + 终端输出"]
 
     RUNTIME --> SHARED
     AGENT --> SHARED
@@ -50,7 +50,7 @@ graph BT
 - `@tianji/shared` 不依赖其他内部包。
 - `@tianji/runtime` 依赖 `@tianji/shared`，集中处理运行期能力。
 - `@tianji/agent` 依赖 `@tianji/shared` 和 `@tianji/runtime`，承担装配层职责。
-- `@tianji/cli` 依赖 `@tianji/agent` 和 `@tianji/shared`，避免直接依赖 runtime 细节。
+- `@tianji/node` 依赖 `@tianji/agent` 和 `@tianji/shared`，避免直接依赖 runtime 细节。
 
 ---
 
@@ -58,7 +58,7 @@ graph BT
 
 ```mermaid
 flowchart LR
-    USER["用户输入 / CLI 命令"] --> CLI["@tianji/cli\n参数解析与命令分发"]
+    USER["用户输入 / CLI 命令"] --> CLI["@tianji/node\n参数解析与命令分发"]
     CLI --> AGENTCTX["@tianji/agent\nloadAgentContext"]
     AGENTCTX --> RCONFIG["@tianji/runtime\nloadResolvedConfig"]
     AGENTCTX --> ARUNTIME["@tianji/agent\ncreateAgentRuntime / createAgentSession"]
@@ -223,7 +223,7 @@ export interface AgentSession {
 
 **设计说明**：`agent` 的核心职责是把最终配置映射为可执行 runtime 输入。CLI、Web、Bot 等入口可以共享装配逻辑，但按各自入口决定如何消费 `RuntimeEvent`。
 
-### 4.4 `@tianji/cli` — L3 UI 层
+### 4.4 `@tianji/node` — L3 UI 层
 
 **职责**：
 
@@ -256,14 +256,14 @@ export interface AgentSession {
 | `@tianji/shared` | 无 | `zod` | 所有内部包, `ai`, `@ai-sdk/*`, `@langchain/*`, `deepagents` |
 | `@tianji/runtime` | `@tianji/shared` | `ai`, `@ai-sdk/*`, `@langchain/*`, `langchain`, `deepagents`, `zod` | `@tianji/agent`, `apps/*` |
 | `@tianji/agent` | `@tianji/shared`, `@tianji/runtime` | `zod`（可选） | `ai`, `@ai-sdk/*`, `@langchain/*`, Provider SDK, `apps/*` |
-| `@tianji/cli` | `@tianji/agent`, `@tianji/shared` | `@types/node` | `@tianji/runtime`, `ai`, `@ai-sdk/*`, `@langchain/*`, Provider SDK |
+| `@tianji/node` | `@tianji/agent`, `@tianji/shared` | `@types/node` | `@tianji/runtime`, `ai`, `@ai-sdk/*`, `@langchain/*`, Provider SDK |
 
 **实施手段**：
 
 - `package.json#exports` 限制 deep import
 - CI lint 检查禁止违规依赖
 - 对 `@tianji/shared` 持续执行零内部包依赖检查
-- 对 `@tianji/agent` 和 `@tianji/cli` 执行禁止直接使用框架依赖检查
+- 对 `@tianji/agent` 和 `@tianji/node` 执行禁止直接使用框架依赖检查
 
 **补充约束**：CLI 如果需要消费 `RuntimeEvent`、`AppMessage` 等协议类型，应从 `shared` 获取，或由 `agent` 统一再导出；但 CLI 不应直接 import runtime 创建或配置装配原语。
 
