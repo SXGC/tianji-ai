@@ -1,13 +1,22 @@
 import { describe, expect, it } from 'vitest'
 import {
+  type CommandId,
+  type NodeId,
   type RunId,
   type SessionId,
+  type TaskId,
   type ThreadId,
+  createCommandId,
+  createNodeId,
   createRunId,
   createSessionId,
+  createTaskId,
   createThreadId,
+  isCommandId,
+  isNodeId,
   isRunId,
   isSessionId,
+  isTaskId,
   isThreadId,
 } from '../identifiers.js'
 
@@ -163,6 +172,75 @@ describe('identifiers', () => {
       const runId: RunId = createRunId('run-789')
       const sessionId: SessionId = runId as unknown as SessionId
       expect(sessionId).toBe('run-789')
+    })
+  })
+
+  describe('createTaskId', () => {
+    it('should create a TaskId from a string', () => {
+      const id = createTaskId('task-001')
+      expect(id).toBe('task-001')
+    })
+
+    it('should return a string at runtime', () => {
+      const id = createTaskId('test')
+      expect(typeof id).toBe('string')
+    })
+  })
+
+  describe('createNodeId', () => {
+    it('should create a NodeId from a string', () => {
+      const id = createNodeId('node-001')
+      expect(id).toBe('node-001')
+    })
+
+    it('should return a string at runtime', () => {
+      const id = createNodeId('test')
+      expect(typeof id).toBe('string')
+    })
+  })
+
+  describe('createCommandId', () => {
+    it('should create a CommandId from a string', () => {
+      const id = createCommandId('cmd-001')
+      expect(id).toBe('cmd-001')
+    })
+
+    it('should return a string at runtime', () => {
+      const id = createCommandId('test')
+      expect(typeof id).toBe('string')
+    })
+  })
+
+  describe('isTaskId', () => {
+    it('should return true for strings', () => {
+      expect(isTaskId('any-string')).toBe(true)
+    })
+
+    it('should return false for non-strings', () => {
+      expect(isTaskId(123)).toBe(false)
+      expect(isTaskId(null)).toBe(false)
+    })
+  })
+
+  describe('isNodeId', () => {
+    it('should return true for strings', () => {
+      expect(isNodeId('any-string')).toBe(true)
+    })
+
+    it('should return false for non-strings', () => {
+      expect(isNodeId(123)).toBe(false)
+      expect(isNodeId(null)).toBe(false)
+    })
+  })
+
+  describe('isCommandId', () => {
+    it('should return true for strings', () => {
+      expect(isCommandId('any-string')).toBe(true)
+    })
+
+    it('should return false for non-strings', () => {
+      expect(isCommandId(123)).toBe(false)
+      expect(isCommandId(null)).toBe(false)
     })
   })
 })

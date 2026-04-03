@@ -31,6 +31,15 @@ export type ThreadId = string & { readonly __brand: unique symbol }
  */
 export type RunId = string & { readonly __brand: unique symbol }
 
+/** 唯一标识一个 Task（控制平面创建的长期工作对象） */
+export type TaskId = string & { readonly __brand: unique symbol }
+
+/** 唯一标识一个 Node（设备级 agent 管理器） */
+export type NodeId = string & { readonly __brand: unique symbol }
+
+/** 唯一标识一个 Command（控制平面下发给 node 的指令） */
+export type CommandId = string & { readonly __brand: unique symbol }
+
 // ============================================================================
 // Factory Functions
 // ============================================================================
@@ -60,6 +69,21 @@ export function createThreadId(value: string): ThreadId {
  */
 export function createRunId(value: string): RunId {
   return value as RunId
+}
+
+/** @param value - 字符串值，标记为 TaskId */
+export function createTaskId(value: string): TaskId {
+  return value as TaskId
+}
+
+/** @param value - 字符串值，标记为 NodeId */
+export function createNodeId(value: string): NodeId {
+  return value as NodeId
+}
+
+/** @param value - 字符串值，标记为 CommandId */
+export function createCommandId(value: string): CommandId {
+  return value as CommandId
 }
 
 // ============================================================================
@@ -96,5 +120,17 @@ export function isThreadId(value: unknown): value is ThreadId {
  * @returns True if the value is a string (branded as RunId at compile time)
  */
 export function isRunId(value: unknown): value is RunId {
+  return typeof value === 'string'
+}
+
+export function isTaskId(value: unknown): value is TaskId {
+  return typeof value === 'string'
+}
+
+export function isNodeId(value: unknown): value is NodeId {
+  return typeof value === 'string'
+}
+
+export function isCommandId(value: unknown): value is CommandId {
   return typeof value === 'string'
 }

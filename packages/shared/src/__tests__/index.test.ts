@@ -10,10 +10,25 @@ import type {
   RunSnapshot,
   RuntimeEvent,
   SessionSnapshot,
+  TaskRunPayload,
   ToolResult,
   ToolSpec,
 } from '../index.js'
-import { DEFAULT_EXECUTION_POLICY, ProviderError, createRunId, createSessionId } from '../index.js'
+import {
+  COMMAND_STATES,
+  DEFAULT_EXECUTION_POLICY,
+  NODE_EXECUTION_STATES,
+  NODE_STATUSES,
+  ProviderError,
+  TASK_LIFECYCLE_TYPES,
+  TASK_STATUSES,
+  createNodeId,
+  createRunId,
+  createSessionId,
+  createTaskId,
+  isTerminalCommandState,
+  isTerminalTaskStatus,
+} from '../index.js'
 
 interface PackageJson {
   dependencies?: Record<string, string>
@@ -31,9 +46,15 @@ describe('@tianji/shared barrel', () => {
       expect(shared.createSessionId).toBeDefined()
       expect(shared.createThreadId).toBeDefined()
       expect(shared.createRunId).toBeDefined()
+      expect(shared.createTaskId).toBeDefined()
+      expect(shared.createNodeId).toBeDefined()
+      expect(shared.createCommandId).toBeDefined()
       expect(shared.isSessionId).toBeDefined()
       expect(shared.isThreadId).toBeDefined()
       expect(shared.isRunId).toBeDefined()
+      expect(shared.isTaskId).toBeDefined()
+      expect(shared.isNodeId).toBeDefined()
+      expect(shared.isCommandId).toBeDefined()
     })
 
     it('should export delta aggregation helpers', async () => {
@@ -101,6 +122,7 @@ describe('@tianji/shared barrel', () => {
         runId: delta.runId,
         sessionId: sessionSnapshot.sessionId,
         status: 'completed',
+        triggerType: 'new',
         messages: sessionSnapshot.messages,
         createdAt: 1,
         updatedAt: 1,
@@ -122,6 +144,13 @@ describe('@tianji/shared barrel', () => {
         'provider export works'
       ).toPlainObject()
       const combinedDelta: Delta = delta
+      const taskPayload: TaskRunPayload = {
+        taskId: createTaskId('task-shared-exports'),
+        agentId: 'default',
+        goal: 'validate exports',
+        sessionIds: [sessionSnapshot.sessionId],
+      }
+      const nodeId = createNodeId('node-shared-exports')
 
       expect(toolSpec.name).toBe('echo')
       expect(toolResult.toolCallId).toBe('tool-call-shared-exports')
@@ -133,6 +162,15 @@ describe('@tianji/shared barrel', () => {
       expect(executionPolicy.tool.timeoutMs).toBeGreaterThan(0)
       expect(errorPlainObject.code).toBe('PROVIDER_SHARED_EXPORTS')
       expect(combinedDelta).toEqual(delta)
+      expect(taskPayload.sessionIds).toEqual([sessionSnapshot.sessionId])
+      expect(nodeId).toBe('node-shared-exports')
+      expect(TASK_STATUSES).toContain('completed')
+      expect(TASK_LIFECYCLE_TYPES).toContain('task.started')
+      expect(isTerminalTaskStatus('completed')).toBe(true)
+      expect(COMMAND_STATES).toContain('leased')
+      expect(isTerminalCommandState('failed')).toBe(true)
+      expect(NODE_EXECUTION_STATES).toContain('idle')
+      expect(NODE_STATUSES).toContain('online')
     })
   })
 

@@ -78,6 +78,9 @@ export * from './message.js'
 export * from './policy.js'
 export * from './snapshot.js'
 export * from './tool.js'
+export * from './task-event.js'
+export * from './command.js'
+export * from './node-types.js'
 
 export type { RunSnapshot, RunStatus, RunTriggerType } from './snapshot.js'
 
