@@ -193,14 +193,63 @@ describe('daemon start/status/stop', () => {
 
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toContain('Daemon stopped')
+      // 等待 server 异步完成文件删除（#handleShutdown 是 fire-and-forget）
+      await live.cleanup()
       await expectDaemonFilesRemoved(live.paths)
     } finally {
       await live.cleanup()
     }
   }, 15_000)
+
+  it('reports already running when daemon start is called with daemon active', async () => {
+    const live = await setupLiveDaemon(createStubSession(['already']))
+    try {
+      const result = await runCommand(['daemon', 'start', '--fg'], {
+        getUserConfigPaths: () => live.paths,
+        runDaemonEntry: vi.fn(async () => undefined),
+      })
+
+      // daemon start 发现 ping 成功，应打印 "already running" 并返回 0，不调用 runDaemonEntry
+      expect(result.exitCode).toBe(0)
+      expect(result.stdout).toContain('Daemon already running')
+      expect(result.stdout).toContain('pid=')
+    } finally {
+      await live.cleanup()
+    }
+  }, 15_000)
+
+  it('returns non-zero when daemon stop is called with no daemon running', async () => {
+    const { paths, cleanup } = await createTempCliPaths()
+    try {
+      const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const exitCode = await runCli(['daemon', 'stop'], {
+        getUserConfigPaths: () => paths,
+      })
+      stderrSpy.mockRestore()
+      expect(exitCode).toBe(1)
+    } finally {
+      await cleanup()
+    }
+  })
 })
 
 describe('daemon restart', () => {
+  it('starts a fresh daemon when restart is called with no daemon running', async () => {
+    const { paths, cleanup } = await createTempCliPaths()
+    try {
+      const runDaemonEntry = vi.fn(async () => undefined)
+      const result = await runCommand(['daemon', 'restart', '--fg'], {
+        getUserConfigPaths: () => paths,
+        runDaemonEntry,
+      })
+
+      expect(result.exitCode).toBe(0)
+      expect(runDaemonEntry).toHaveBeenCalledOnce()
+    } finally {
+      await cleanup()
+    }
+  }, 15_000)
+
   it('restarts a running daemon in foreground mode', async () => {
     const first = await setupLiveDaemon(createStubSession(['first']))
     const replacement = vi.fn(async () => undefined)
