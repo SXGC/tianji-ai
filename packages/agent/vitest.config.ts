@@ -8,6 +8,9 @@ export default defineConfig({
       '@tianji/observer': fileURLToPath(new URL('../observer/src/index.ts', import.meta.url)),
       '@tianji/runtime': fileURLToPath(new URL('../runtime/src/index.ts', import.meta.url)),
       '@tianji/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)),
+      '@langchain/core': fileURLToPath(
+        new URL('../runtime/node_modules/@langchain/core', import.meta.url)
+      ),
     },
   },
   test: {
