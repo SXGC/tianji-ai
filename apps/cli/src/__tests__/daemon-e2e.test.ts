@@ -1,10 +1,13 @@
+import { spawn } from 'node:child_process'
 /**
  * Daemon 子命令模式的端到端集成测试。
  *
  * 验证 DaemonServer、DaemonClient、临时路径文件和 runCli 命令处理
  * 之间的集成行为，不 mock 内部 daemon 协议。
  */
-import { access, readFile, writeFile } from 'node:fs/promises'
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { type AgentSession, DaemonClient, DaemonServer } from '@tianji/agent'
 import type { RunId, RuntimeEvent, SessionId } from '@tianji/shared'
@@ -215,6 +218,57 @@ describe('daemon start/status/stop', () => {
       expect(result.stdout).toContain('pid=')
     } finally {
       await live.cleanup()
+    }
+  }, 15_000)
+
+  it('returns promptly after background daemon start completes', async () => {
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      await mkdir(dirname(paths.configFilePath), { recursive: true })
+      await writeFile(paths.configFilePath, '{}', 'utf8')
+
+      const cliEntryPath = fileURLToPath(new URL('../../bin/tianji.mjs', import.meta.url))
+      const child = spawn(process.execPath, [cliEntryPath, 'daemon', 'start'], {
+        cwd: new URL('../..', import.meta.url),
+        env: {
+          ...process.env,
+          HOME: dirname(paths.configDir),
+          XDG_CONFIG_HOME: dirname(paths.configDir),
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+
+      const stdoutChunks: Buffer[] = []
+      const stderrChunks: Buffer[] = []
+      child.stdout.on('data', (chunk: Buffer | string) => {
+        stdoutChunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+      })
+      child.stderr.on('data', (chunk: Buffer | string) => {
+        stderrChunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+      })
+
+      const exitCode = await Promise.race([
+        new Promise<number | null>((resolve, reject) => {
+          child.once('error', reject)
+          child.once('exit', resolve)
+        }),
+        new Promise<never>((_, reject) => {
+          setTimeout(() => {
+            child.kill('SIGTERM')
+            reject(new Error('daemon start did not exit promptly'))
+          }, 3_000)
+        }),
+      ])
+
+      const stdout = Buffer.concat(stdoutChunks).toString('utf8')
+      const stderr = Buffer.concat(stderrChunks).toString('utf8')
+
+      expect(exitCode).toBe(0)
+      expect(stderr).toBe('')
+      expect(stdout.length).toBeGreaterThan(0)
+    } finally {
+      await cleanup()
     }
   }, 15_000)
 

@@ -43,9 +43,15 @@ function httpRequest(
 
 async function readBody(res: IncomingMessage): Promise<string> {
   const chunks: Buffer[] = []
-  for await (const chunk of res) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+  try {
+    for await (const chunk of res) {
+      chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
+    }
+  } finally {
+    // 确保短连接请求在读取完成后立即释放底层 socket，避免 CLI 进程被挂住。
+    res.destroy()
   }
+
   return Buffer.concat(chunks).toString('utf8')
 }
 
@@ -116,10 +122,19 @@ function handleSseMessage(msg: RawSseMessage): IteratorResult<RuntimeEvent> {
 export class DaemonClient {
   readonly #host: string
   readonly #port: number
+  #lastResponse: IncomingMessage | undefined
 
   constructor(options: DaemonClientOptions) {
     this.#host = options.host
     this.#port = options.port
+  }
+
+  /**
+   * 关闭最近一次短连接请求残留的响应 socket，避免 CLI 进程被挂住。
+   */
+  close(): void {
+    this.#lastResponse?.destroy()
+    this.#lastResponse = undefined
   }
 
   /** Sends a GET /ping request and returns session metadata. */
@@ -130,8 +145,10 @@ export class DaemonClient {
       method: 'GET',
       path: '/ping',
     })
+    this.#lastResponse = res
     assertOk(res, '/ping')
     const body = await readBody(res)
+    this.#lastResponse = undefined
     return JSON.parse(body) as PingResponse
   }
 
@@ -143,8 +160,10 @@ export class DaemonClient {
       method: 'POST',
       path: '/shutdown',
     })
+    this.#lastResponse = res
     assertOk(res, '/shutdown')
     const body = await readBody(res)
+    this.#lastResponse = undefined
     return JSON.parse(body) as ShutdownResponse
   }
 

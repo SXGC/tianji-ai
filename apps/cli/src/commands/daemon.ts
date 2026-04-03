@@ -51,6 +51,15 @@ async function cleanupStaleDaemonFiles(paths: UserConfigPaths): Promise<void> {
   await rm(paths.daemonPidPath, { force: true })
 }
 
+function startDetachedDaemonProcess(): void {
+  const child = fork(new URL('../daemon-entry.js', import.meta.url), [], {
+    detached: true,
+    stdio: 'ignore',
+  })
+  child.disconnect()
+  child.unref()
+}
+
 async function waitForDaemonReady(
   paths: UserConfigPaths,
   timeoutMs = 10000
@@ -66,6 +75,8 @@ async function waitForDaemonReady(
         return { pid: pid ?? 0, port }
       } catch {
         // Daemon not accepting connections yet.
+      } finally {
+        client.close()
       }
     }
     await new Promise((resolve) => setTimeout(resolve, 200))
@@ -99,11 +110,7 @@ const daemonStartCommand: CommandDefinition = {
       return 0
     }
 
-    const child = fork(new URL('../daemon-entry.js', import.meta.url), [], {
-      detached: true,
-      stdio: 'ignore',
-    })
-    child.unref()
+    startDetachedDaemonProcess()
 
     const { pid, port } = await waitForDaemonReady(paths)
     process.stdout.write(`${i18n.t('daemon.started', { pid, port })}\n`)
@@ -195,11 +202,7 @@ const daemonRestartCommand: CommandDefinition = {
       return 0
     }
 
-    const child = fork(new URL('../daemon-entry.js', import.meta.url), [], {
-      detached: true,
-      stdio: 'ignore',
-    })
-    child.unref()
+    startDetachedDaemonProcess()
 
     const { pid, port } = await waitForDaemonReady(paths)
     process.stdout.write(`${i18n.t('daemon.started', { pid, port })}\n`)
