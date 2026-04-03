@@ -9,12 +9,14 @@
  * - 被 packages/runtime/src/__tests__ 下多个集成与回归测试直接复用。
  * - 依赖 runtime、snapshot-store、tool-catalog 的公开接口构建测试上下文。
  */
+import { FakeListChatModel } from '@langchain/core/utils/testing'
 import {
   type AggregatedMessageDeltaState,
   type AppMessage,
   type RunId,
   type RunSnapshot,
   type RuntimeEvent,
+  type SessionId,
   applyMessageDelta,
 } from '@tianji/shared'
 
@@ -24,7 +26,12 @@ import {
   createSessionRuntime,
 } from '../../runtime.js'
 import { InMemorySnapshotStore } from '../../snapshot-store.js'
-import { type ToolCatalog, ToolRegistry } from '../../tool-catalog.js'
+import {
+  type RuntimeToolDefinition,
+  type RuntimeToolSideEffect,
+  type ToolCatalog,
+  ToolRegistry,
+} from '../../tool-catalog.js'
 
 export interface Deferred<T> {
   readonly promise: Promise<T>
@@ -184,4 +191,170 @@ export async function waitForRunStatus(
   throw new Error(
     `Timed out waiting for run "${runId}" to reach status "${status}". Last status: ${snapshot?.status ?? 'missing'}`
   )
+}
+
+// ---------------------------------------------------------------------------
+// 集成测试工具函数
+// ---------------------------------------------------------------------------
+
+export interface MockToolOptions {
+  readonly sideEffect?: RuntimeToolSideEffect
+  readonly result?: unknown
+  readonly error?: Error
+  readonly delayMs?: number
+}
+
+/**
+ * 创建一个用于测试的模拟工具定义。
+ *
+ * @param name - 工具名称
+ * @param opts - 可选配置：副作用等级、返回值、抛出错误、延迟毫秒
+ */
+export function createMockTool(name: string, opts?: MockToolOptions): RuntimeToolDefinition {
+  return {
+    spec: {
+      name,
+      description: `Mock tool: ${name}`,
+      parameters: { type: 'object' },
+    },
+    sideEffect: opts?.sideEffect ?? 'none',
+    execute: async () => {
+      if (opts?.delayMs !== undefined && opts.delayMs > 0) {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, opts.delayMs)
+        })
+      }
+
+      if (opts?.error !== undefined) {
+        throw opts.error
+      }
+
+      return opts?.result ?? 'ok'
+    },
+  }
+}
+
+/**
+ * 快速创建包含指定工具定义的 ToolRegistry。
+ */
+export function createToolRegistry(...tools: RuntimeToolDefinition[]): ToolRegistry {
+  const registry = new ToolRegistry()
+
+  for (const tool of tools) {
+    registry.registerTool(tool)
+  }
+
+  return registry
+}
+
+/**
+ * 创建一个返回预设响应列表的假 LLM 模型。
+ */
+export function createFakeModel(responses: string[]): FakeListChatModel {
+  return new FakeListChatModel({ responses })
+}
+
+/**
+ * 顺序执行多轮对话，每轮发送一条用户消息并收集所有事件。
+ *
+ * @param runtime - 待测 SessionRuntime 实例
+ * @param sessionId - 会话 ID
+ * @param prompts - 每轮的消息 ID 与文本
+ * @param options - 可选的系统提示
+ */
+export async function driveMultiTurn(
+  runtime: SessionRuntime,
+  sessionId: SessionId,
+  prompts: Array<{ id: string; text: string }>,
+  options?: { systemPrompt?: string }
+): Promise<Array<{ runId: RunId; events: RuntimeEvent[] }>> {
+  const results: Array<{ runId: RunId; events: RuntimeEvent[] }> = []
+
+  for (const prompt of prompts) {
+    const message = createUserMessage(prompt.id, prompt.text)
+    const runId = await runtime.runTurn({
+      sessionId,
+      message,
+      systemPrompt: options?.systemPrompt,
+    })
+    const events = await collectRuntimeEvents(runId, runtime)
+    results.push({ runId, events })
+  }
+
+  return results
+}
+
+/**
+ * 等待指定类型的事件出现在事件流中，超时则抛出错误。
+ *
+ * @param runtime - 待测 SessionRuntime 实例
+ * @param runId - 运行 ID
+ * @param eventType - 要等待的事件类型
+ * @param timeoutMs - 超时毫秒数，默认 5000
+ */
+export async function waitForEvent(
+  runtime: SessionRuntime,
+  runId: RunId,
+  eventType: RuntimeEvent['type'],
+  timeoutMs = 5_000
+): Promise<RuntimeEvent> {
+  const deadline = Date.now() + timeoutMs
+
+  for await (const event of runtime.streamEvents(runId)) {
+    if (event.type === eventType) {
+      return event
+    }
+
+    if (Date.now() > deadline) {
+      break
+    }
+  }
+
+  throw new Error(`Timed out waiting for event "${eventType}" on run "${runId}"`)
+}
+
+/**
+ * 断言事件列表中包含 run.completed 且不含 run.failed。
+ */
+export function assertRunCompleted(events: RuntimeEvent[]): void {
+  const types = events.map((e) => e.type)
+  expect(types).toContain('run.completed')
+  expect(types).not.toContain('run.failed')
+}
+
+/**
+ * 断言事件列表中包含 run.failed，可选匹配错误消息模式。
+ */
+export function assertRunFailed(events: RuntimeEvent[], errorPattern?: RegExp): void {
+  const failedEvent = events.find((e) => e.type === 'run.failed')
+  expect(failedEvent).toBeDefined()
+
+  if (errorPattern !== undefined && failedEvent?.type === 'run.failed') {
+    expect(failedEvent.error.message).toMatch(errorPattern)
+  }
+}
+
+/**
+ * 断言指定工具被调用且成功完成。
+ */
+export function assertToolCalled(events: RuntimeEvent[], toolName: string): void {
+  const started = events.find(
+    (e) => e.type === 'tool.started' && e.invocation.toolName === toolName
+  )
+  expect(started).toBeDefined()
+
+  if (started?.type === 'tool.started') {
+    const completed = events.find(
+      (e) => e.type === 'tool.completed' && e.toolCallId === started.toolCallId
+    )
+    expect(completed).toBeDefined()
+  }
+}
+
+/**
+ * 断言指定工具执行失败。
+ */
+export function assertToolFailed(events: RuntimeEvent[], toolName: string): void {
+  const failed = events.find((e) => e.type === 'tool.failed' && e.invocation.toolName === toolName)
+  expect(failed).toBeDefined()
 }
