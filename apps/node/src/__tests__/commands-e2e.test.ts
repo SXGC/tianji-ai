@@ -27,6 +27,7 @@ describe('command dispatch e2e', () => {
     const { exitCode, stdout } = await runCommand(['--help'], deps)
     expect(exitCode).toBe(0)
     expect(stdout).toContain('tianji run <prompt>')
+    expect(stdout).toContain('tianji register <url>')
     expect(stdout).toContain('tianji daemon <subcommand>')
     expect(stdout).toContain('tianji log')
     expect(stdout).toContain('tianji chat')
@@ -75,6 +76,13 @@ describe('command dispatch e2e', () => {
     expect(stdout).toContain('--lines')
   })
 
+  it('tianji register --help shows register usage', async () => {
+    const { exitCode, stdout } = await runCommand(['register', '--help'], deps)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('tianji register <url>')
+    expect(stdout).toContain('<url>')
+  })
+
   it('tianji help daemon is equivalent to daemon --help', async () => {
     const { exitCode, stdout } = await runCommand(['help', 'daemon'], deps)
     expect(exitCode).toBe(0)
@@ -118,6 +126,14 @@ describe('command dispatch e2e', () => {
   it('run without prompt exits 2', async () => {
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const exitCode = await runCli(['run'], deps)
+    expect(exitCode).toBe(2)
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/Missing required argument/))
+    stderrSpy.mockRestore()
+  })
+
+  it('register without url exits 2', async () => {
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const exitCode = await runCli(['register'], deps)
     expect(exitCode).toBe(2)
     expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/Missing required argument/))
     stderrSpy.mockRestore()

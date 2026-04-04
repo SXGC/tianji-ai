@@ -1,8 +1,41 @@
 # tianji-ai
 
-`tianji-ai` 是一个基于 `pnpm` 和 `turbo` 的 TypeScript monorepo，用于构建 AI 会话运行时、observer 能力、共享协议与配置模型，以及命令行应用。
+`tianji-ai` 是一个基于 `pnpm` 和 `turbo` 的 TypeScript monorepo，用于构建 AI 会话运行时、observer 能力、共享协议与配置模型，以及 node / controlplane 应用。
 
-当前仓库包含 `shared`、`runtime`、`observer`、`agent` 四个核心 package，以及 `apps/cli` 命令行应用。
+当前仓库包含 `shared`、`runtime`、`observer`、`agent` 四个核心 package，以及 `apps/node` 和 `apps/controlplane` 两个应用。
+
+## Quick Start
+
+```bash
+pnpm install
+
+# 构建 node
+pnpm --filter @tianji/node build
+
+# 本地直接使用 node CLI
+pnpm tianji run "hello"
+
+# 构建并启动 controlplane
+pnpm --filter @tianji/controlplane build
+pnpm --filter @tianji/controlplane start
+
+# 让 node 注册到 controlplane
+TIANJI_CP_BASE_URL=http://127.0.0.1:3000 \
+TIANJI_CP_ENROLLMENT_TOKEN=<enrollment-token> \
+TIANJI_NODE_ID=node-001 \
+pnpm tianji
+```
+
+启动 controlplane 后，默认访问 `http://127.0.0.1:3000/`。
+
+如果没有设置 `TIANJI_CP_BASE_URL`、`TIANJI_CP_ENROLLMENT_TOKEN` 和 `TIANJI_NODE_ID` 启动 node，controlplane 页面不会出现可用节点。
+
+注意：`pnpm tianji run "hello"` 只会执行本地 CLI 请求，不会把 node 注册到 controlplane。controlplane 模式需要直接运行 `pnpm tianji`，并且不带子命令。
+
+详细使用说明：
+
+- node CLI：[`docs/usage/node.md`](./docs/usage/node.md)
+- controlplane：[`docs/usage/controlplane.md`](./docs/usage/controlplane.md)
 
 ## 当前范围
 
@@ -16,15 +49,21 @@
 ```text
 tianji-ai/
 ├─ apps/
-│  └─ cli/
+│  ├─ controlplane/
+│  └─ node/
 ├─ docs/
-│  ├─ ARCHITECTURE.md
-│  ├─ AGENT_DESIGN.md
-│  ├─ CLI_GUIDE.md
-│  ├─ CONFIG_DESIGN.md
-│  ├─ DEVELOPMENT.md
-│  ├─ OBSERVER_DESIGN.md
-│  └─ RUNTIME_DESIGN.md
+│  ├─ development/
+│  │  ├─ ARCHITECTURE.md
+│  │  ├─ AGENT_DESIGN.md
+│  │  ├─ CLI_GUIDE.md
+│  │  ├─ CONFIG_DESIGN.md
+│  │  ├─ DEVELOPMENT.md
+│  │  ├─ OBSERVER_DESIGN.md
+│  │  └─ RUNTIME_DESIGN.md
+│  ├─ superpowers/
+│  └─ usage/
+│     ├─ controlplane.md
+│     └─ node.md
 ├─ packages/
 │  ├─ agent/
 │  ├─ observer/
@@ -87,7 +126,7 @@ agent 装配层，负责把配置解析结果、默认 agent、`SOUL.md`、provi
 
 ### `@tianji/node`
 
-节点命令行应用，提供 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon`、`tianji chat`、`tianji status`、`tianji stop` 和 `tianji help` 七个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。当前 `run` 命令仍通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；后续会逐步迁移为 ACP 管理的 node 架构。日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。
+节点命令行应用，提供 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon`、`tianji chat`、`tianji status`、`tianji stop` 和 `tianji help` 七个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。当前 `run` 命令仍通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；后续会逐步迁移为 ACP 管理的 node 架构。日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。使用说明见 [`docs/usage/node.md`](./docs/usage/node.md)。
 
 ## 开发命令
 
@@ -131,7 +170,7 @@ pnpm tianji status
 pnpm tianji stop
 ```
 
-用户配置文件位于 `~/.config/tianji-ai/tianji.json`，首次运行时会自动生成。默认 agent 的 `SOUL.md` 位于 `~/.config/tianji-ai/agents/default/SOUL.md`。更多细节见 `apps/node/README.md`。
+用户配置文件位于 `~/.config/tianji-ai/tianji.json`，首次运行时会自动生成。默认 agent 的 `SOUL.md` 位于 `~/.config/tianji-ai/agents/default/SOUL.md`。更多细节见 [`docs/usage/node.md`](./docs/usage/node.md) 和 [`apps/node/README.md`](./apps/node/README.md)。
 
 ## 环境变量
 
@@ -149,7 +188,7 @@ pnpm tianji stop
 
 ## Controlplane Web UI
 
-`apps/controlplane` 现在会在 `/` 提供浏览器聊天界面。启动 controlplane 与 node 后，可直接访问 `http://127.0.0.1:3100/`，选择在线节点并发送 task。
+`apps/controlplane` 现在会在 `/` 提供浏览器聊天界面。启动 controlplane 与 node 后，可直接访问 `http://127.0.0.1:3000/`，选择在线节点并发送 task。使用说明见 [`docs/usage/controlplane.md`](./docs/usage/controlplane.md)。
 
 ## Git Hooks
 
@@ -159,24 +198,31 @@ pnpm tianji stop
 
 ## 文档
 
-- `docs/ARCHITECTURE.md`：架构设计文档，描述 4 包分层、各包职责、依赖约束与迁移路径。
-- `docs/CONFIG_DESIGN.md`：配置系统设计文档，描述多层 JSON 配置、优先级与 `${env:VAR_NAME}` 解析规则。
-- `docs/RUNTIME_DESIGN.md`：运行时设计文档，描述会话生命周期、执行引擎、快照持久化、工具系统与 LLM 网关。
-- `docs/OBSERVER_DESIGN.md`：Observer 设计文档，描述结构化日志协议、sink 机制、数据脱敏与 tracing。
-- `docs/AGENT_DESIGN.md`：Agent 设计文档，描述上下文装配、provider 凭据注入、daemon 协议与 SOUL.md 加载。
-- `docs/CLI_GUIDE.md`：CLI 用户指南，描述所有命令用法、配置路径与 daemon 生命周期。
-- `docs/DEVELOPMENT.md`：开发者指南，描述环境搭建、构建测试流程、代码规范与 git hooks。
+### 使用文档
+
+- `docs/usage/node.md`：node 命令行使用说明，覆盖构建、运行、配置与日志。
+- `docs/usage/controlplane.md`：controlplane 浏览器界面使用说明，覆盖启动、访问地址、环境变量与节点联调。
+
+### 开发文档
+
+- `docs/development/ARCHITECTURE.md`：架构设计文档，描述 4 包分层、各包职责、依赖约束与迁移路径。
+- `docs/development/CONFIG_DESIGN.md`：配置系统设计文档，描述多层 JSON 配置、优先级与 `${env:VAR_NAME}` 解析规则。
+- `docs/development/RUNTIME_DESIGN.md`：运行时设计文档，描述会话生命周期、执行引擎、快照持久化、工具系统与 LLM 网关。
+- `docs/development/OBSERVER_DESIGN.md`：Observer 设计文档，描述结构化日志协议、sink 机制、数据脱敏与 tracing。
+- `docs/development/AGENT_DESIGN.md`：Agent 设计文档，描述上下文装配、provider 凭据注入、daemon 协议与 SOUL.md 加载。
+- `docs/development/CLI_GUIDE.md`：CLI 用户指南，描述所有命令用法、配置路径与 daemon 生命周期。
+- `docs/development/DEVELOPMENT.md`：开发者指南，描述环境搭建、构建测试流程、代码规范与 git hooks。
 
 补充说明：runtime 已实现中心化配置加载，会按 `default < user < workspace` 顺序解析内置默认配置 `tianji.config.json`、`~/.config/tianji-ai/tianji.json` 与工作区配置文件。
 
 ## 当前状态说明
 
-- 仓库包含四个核心 package（`shared`、`runtime`、`observer`、`agent`）和一个 CLI 应用（`apps/cli`）。
+- 仓库包含四个核心 package（`shared`、`runtime`、`observer`、`agent`）和两个应用（`apps/node`、`apps/controlplane`）。
 - CLI 已支持 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon`、`tianji chat`、`tianji status`、`tianji stop` 完整流程。
 - 配置系统支持 `providers`、`agents`、`runtime`、`observer` 四个顶层配置块。
 - 日志系统当前通过 `@tianji/observer` 的 JSONL sink 落盘到 `~/.config/tianji-ai/logs/tianji.log`。
 - `docs/` 中部分内容会提到后续规划的 `tools-node` 等模块，这些仍未在仓库中完整落地。
-- 因此，阅读本仓库时应优先以 `packages/` 与 `apps/cli` 下现有源码和导出 API 为准。
+- 因此，阅读本仓库时应优先以 `packages/`、`apps/node` 与 `apps/controlplane` 下现有源码和导出 API 为准。
 
 ## License
 

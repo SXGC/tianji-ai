@@ -48,6 +48,19 @@ describe('parseCommand', () => {
     })
   })
 
+  it('parses register url positional argument', () => {
+    const result = parseCommand(
+      ['register', 'http://127.0.0.1:3000/register?enrollment-token=test-token'],
+      COMMAND_REGISTRY,
+      createI18n('en')
+    )
+
+    expect(result.command.name).toBe('register')
+    expect(result.context.args).toEqual({
+      url: 'http://127.0.0.1:3000/register?enrollment-token=test-token',
+    })
+  })
+
   it('rejects unknown commands with translated usage hint', () => {
     expect(() => parseCommand(['wat'], COMMAND_REGISTRY, createI18n('en'))).toThrow(
       /Unknown command "wat"/i

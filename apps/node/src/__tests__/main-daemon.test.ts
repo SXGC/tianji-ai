@@ -63,6 +63,17 @@ describe('parseCliArgs daemon commands', () => {
   })
 })
 
+describe('parseCliArgs register command', () => {
+  it('parses register command', () => {
+    expect(
+      parseCliArgs(['register', 'http://127.0.0.1:3000/register?enrollment-token=test-token'])
+    ).toEqual({
+      kind: 'register',
+      url: 'http://127.0.0.1:3000/register?enrollment-token=test-token',
+    })
+  })
+})
+
 describe('createTempCliPaths daemon paths', () => {
   it('creates daemon pid and port paths for daemon CLI tests', async () => {
     const { paths, cleanup } = await createTempCliPaths()
