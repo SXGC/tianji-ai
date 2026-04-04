@@ -8,6 +8,42 @@ import { createTask, fetchNodes } from '../lib/api'
 import { streamTask } from '../lib/task-stream'
 import { Route as RootRoute } from './__root'
 
+/**
+ * 将流式 delta 追加到指定消息的文本末尾。
+ *
+ * @param messages - 当前消息列表
+ * @param targetId - 目标消息 id
+ * @param delta - 本次增量文本
+ */
+function appendDeltaToMessage(
+  messages: ChatMessage[],
+  targetId: string,
+  delta: string
+): ChatMessage[] {
+  return messages.map((message) =>
+    message.id === targetId ? { ...message, text: message.text + delta } : message
+  )
+}
+
+/**
+ * 若目标消息文本为空，则填充兜底文本。
+ *
+ * @param messages - 当前消息列表
+ * @param targetId - 目标消息 id
+ * @param fallbackText - 兜底文本
+ */
+function fillEmptyMessage(
+  messages: ChatMessage[],
+  targetId: string,
+  fallbackText: string
+): ChatMessage[] {
+  return messages.map((message) =>
+    message.id === targetId && message.text.trim().length === 0
+      ? { ...message, text: fallbackText }
+      : message
+  )
+}
+
 export const Route = createRoute({
   getParentRoute: () => RootRoute,
   path: '/',
@@ -77,20 +113,12 @@ export function IndexRouteComponent() {
           setSessionId(nextSessionId)
         },
         onMessageDelta: (delta) => {
-          setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantId ? { ...message, text: message.text + delta } : message
-            )
-          )
+          setMessages((current) => appendDeltaToMessage(current, assistantId, delta))
         },
         onDone: () => {
           setSending(false)
           setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantId && message.text.trim().length === 0
-                ? { ...message, text: '任务已完成，但当前没有可显示的文本输出。' }
-                : message
-            )
+            fillEmptyMessage(current, assistantId, '任务已完成，但当前没有可显示的文本输出。')
           )
         },
         onError: () => {
