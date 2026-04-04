@@ -1,4 +1,5 @@
 import { type ChildProcess, spawn } from 'node:child_process'
+import { access } from 'node:fs/promises'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -21,6 +22,12 @@ describe('controlplane <-> node e2e', () => {
   afterEach(async () => {
     nodeProcess?.kill('SIGTERM')
     nodeProcess = null
+  })
+
+  it('fails fast when node dist entrypoint is missing', async () => {
+    await expect(assertNodeDistReady('/tmp/tianji-missing-node-dist.js')).rejects.toThrow(
+      'Missing built node entrypoint: /tmp/tianji-missing-node-dist.js. Run `pnpm --filter @tianji/node build` before running controlplane-node e2e tests.'
+    )
   })
 
   it('shows node in ui after successful registration', async () => {
@@ -163,6 +170,8 @@ async function setupTestEnv(nodeId: string): Promise<{
   const db = createDatabase(':memory:')
   const now = Date.now()
 
+  await assertNodeDistReady(nodeDistBinPath)
+
   db.raw
     .prepare('INSERT INTO enrollment_tokens(token, created_at) VALUES(?, ?)')
     .run('e2e-token', now)
@@ -215,6 +224,19 @@ async function setupTestEnv(nodeId: string): Promise<{
     nodeProcess,
     stdoutChunks,
     stderrChunks,
+  }
+}
+
+/**
+ * 确保 node e2e 所需的已构建 CLI 入口存在，避免测试以注册超时的假象失败。
+ */
+async function assertNodeDistReady(entrypointPath: string): Promise<void> {
+  try {
+    await access(entrypointPath)
+  } catch {
+    throw new Error(
+      `Missing built node entrypoint: ${entrypointPath}. Run \`pnpm --filter @tianji/node build\` before running controlplane-node e2e tests.`
+    )
   }
 }
 
