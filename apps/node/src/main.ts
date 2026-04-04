@@ -135,7 +135,7 @@ export async function runCli(
 
     const parsed = parseCommand(globalFlags.remaining, COMMAND_REGISTRY, i18n, deps)
 
-    return await parsed.command.handler(parsed.context)
+    return (await parsed.command.handler(parsed.context)) ?? 0
   } catch (error) {
     console.error(formatCliError(error))
     return error instanceof CliUsageError ? 2 : 1

@@ -102,7 +102,7 @@ const daemonStartCommand: CommandDefinition = {
       try {
         const ping = await existingClient.ping()
         process.stdout.write(`${i18n.t('daemon.already_running', { pid: ping.pid })}\n`)
-        return 0
+        return undefined
       } catch {
         await cleanupStaleDaemonFiles(paths)
       }
@@ -111,14 +111,13 @@ const daemonStartCommand: CommandDefinition = {
     if (options.fg === true) {
       const runDaemonEntryCommand = deps?.runDaemonEntry ?? runDaemonEntry
       await runDaemonEntryCommand()
-      return 0
+      return undefined
     }
 
     startDetachedDaemonProcess()
 
     const { pid, port } = await waitForDaemonReady(paths)
     process.stdout.write(`${i18n.t('daemon.started', { pid, port })}\n`)
-    return 0
   },
 }
 
@@ -203,14 +202,13 @@ const daemonRestartCommand: CommandDefinition = {
     if (options.fg === true) {
       const runDaemonEntryCommand = deps?.runDaemonEntry ?? runDaemonEntry
       await runDaemonEntryCommand()
-      return 0
+      return undefined
     }
 
     startDetachedDaemonProcess()
 
     const { pid, port } = await waitForDaemonReady(paths)
     process.stdout.write(`${i18n.t('daemon.started', { pid, port })}\n`)
-    return 0
   },
 }
 

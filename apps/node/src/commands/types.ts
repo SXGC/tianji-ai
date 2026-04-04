@@ -52,7 +52,7 @@ export interface CommandContext {
   readonly deps: CliDependencies | undefined
 }
 
-export type CommandHandler = (context: CommandContext) => Promise<number>
+export type CommandHandler = (context: CommandContext) => Promise<number | undefined>
 
 export interface CommandDefinition {
   readonly name: string
