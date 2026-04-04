@@ -132,6 +132,67 @@ function parseSubcommand(
   }
 }
 
+/**
+ * 构建选项标志到定义的映射，并收集默认值。
+ *
+ * @param definitions - 命令的选项定义列表
+ * @returns 标志映射表和默认值对象
+ */
+function initializeOptionMap(definitions: readonly OptionDefinition[]): {
+  optionByFlag: Map<string, OptionDefinition>
+  defaults: Record<string, string | number | boolean>
+} {
+  const optionByFlag = new Map<string, OptionDefinition>()
+  const defaults: Record<string, string | number | boolean> = {}
+  for (const definition of definitions) {
+    optionByFlag.set(definition.long, definition)
+    if (definition.short !== undefined) {
+      optionByFlag.set(definition.short, definition)
+    }
+    if (definition.default !== undefined) {
+      defaults[toOptionName(definition.long)] = definition.default
+    }
+  }
+  return { optionByFlag, defaults }
+}
+
+/**
+ * 解析单个选项 token 并将结果写入 options。
+ *
+ * @param definition - 匹配到的选项定义
+ * @param token - 当前 token（如 `--port`）
+ * @param nextToken - 紧随其后的 token，用于需要值的选项
+ * @param options - 待写入的选项结果对象
+ * @param i18n - 翻译实例
+ * @returns 消耗的额外 token 数：boolean 选项返回 0，值选项返回 1
+ */
+function parseOptionValue(
+  definition: OptionDefinition,
+  token: string,
+  nextToken: string | undefined,
+  options: Record<string, string | number | boolean>,
+  i18n: I18n
+): number {
+  const optionName = toOptionName(definition.long)
+  if (definition.type === 'boolean') {
+    options[optionName] = true
+    return 0
+  }
+  if (nextToken === undefined) {
+    throw new CliUsageError(i18n.t('error.option_requires_value', { option: token }))
+  }
+  if (definition.type === 'number') {
+    const parsedValue = Number.parseInt(nextToken, 10)
+    if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+      throw new CliUsageError(i18n.t('error.option_invalid_number', { option: token }))
+    }
+    options[optionName] = parsedValue
+  } else {
+    options[optionName] = nextToken
+  }
+  return 1
+}
+
 function parseArgsAndOptions(
   argv: readonly string[],
   definitions: readonly OptionDefinition[],
@@ -140,24 +201,16 @@ function parseArgsAndOptions(
   args: string[]
   options: Record<string, string | number | boolean>
 } {
-  const options: Record<string, string | number | boolean> = {}
+  const { optionByFlag, defaults } = initializeOptionMap(definitions)
+  const options = { ...defaults }
   const args: string[] = []
-  const optionByFlag = new Map<string, OptionDefinition>()
+  let index = 0
 
-  for (const definition of definitions) {
-    optionByFlag.set(definition.long, definition)
-    if (definition.short !== undefined) {
-      optionByFlag.set(definition.short, definition)
-    }
-    if (definition.default !== undefined) {
-      options[toOptionName(definition.long)] = definition.default
-    }
-  }
-
-  for (let index = 0; index < argv.length; index += 1) {
+  while (index < argv.length) {
     const token = argv[index]
     if (!token.startsWith('-')) {
       args.push(token)
+      index += 1
       continue
     }
 
@@ -166,29 +219,8 @@ function parseArgsAndOptions(
       throw new CliUsageError(i18n.t('error.unknown_option', { option: token }))
     }
 
-    const optionName = toOptionName(definition.long)
-    if (definition.type === 'boolean') {
-      options[optionName] = true
-      continue
-    }
-
-    const nextToken = argv[index + 1]
-    if (nextToken === undefined) {
-      throw new CliUsageError(i18n.t('error.option_requires_value', { option: token }))
-    }
-
-    if (definition.type === 'number') {
-      const parsedValue = Number.parseInt(nextToken, 10)
-      if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
-        throw new CliUsageError(i18n.t('error.option_invalid_number', { option: token }))
-      }
-
-      options[optionName] = parsedValue
-    } else {
-      options[optionName] = nextToken
-    }
-
-    index += 1
+    const consumed = parseOptionValue(definition, token, argv[index + 1], options, i18n)
+    index += 1 + consumed
   }
 
   return { args, options }
