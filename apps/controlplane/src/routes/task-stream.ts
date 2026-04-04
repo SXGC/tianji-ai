@@ -62,8 +62,13 @@ export function createTaskStreamRoute(db: ControlPlaneDb): Hono {
 
 function extractAgentEventType(payload: string): string {
   try {
-    const parsed = JSON.parse(payload) as { type?: string }
-    return parsed.type ?? 'unknown'
+    const parsed = JSON.parse(payload) as {
+      type?: string
+      event?: {
+        type?: string
+      }
+    }
+    return parsed.event?.type ?? parsed.type ?? 'unknown'
   } catch {
     return 'unknown'
   }

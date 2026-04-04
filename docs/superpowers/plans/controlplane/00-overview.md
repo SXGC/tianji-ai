@@ -100,7 +100,7 @@ V3 设计涉及 4 个独立子系统，每个子系统有独立的实现计划�
 
 | 项目 | 原因 | 建议时机 |
 |------|------|----------|
-| 前端 SPA（Vite + React） | 独立子系统，规模大 | Phase 5 独立计划 |
+| 前端 SPA（Vite + React + TanStack Router + TanStack Query ） | 独立子系统，规模大 | Phase 5 独立计划 |
 | 完整聊天内容代理（controlplane → node 反向查询） | 需 node 侧 HTTP 端点支持 | Phase 5 |
 | NDJSON 环形缓冲区 + 指数退避重连 | Node 侧可靠性增强 | Phase 5 |
 | enrollmentToken 管理 CLI 子命令 | 运维工具 | Phase 5 |

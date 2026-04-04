@@ -20,6 +20,7 @@
 - 不得通过删除代码、降级能力或绕过逻辑来规避由依赖过时引起的类型错误；应优先升级依赖。
 - 删除看起来是有意设计的功能或代码前，必须先询问用户。
 - 禁止硬编码快捷键判断，例如 `matchesKey(keyData, "ctrl+x")`。
+- 所有 build 产物必须放到对应包的 dist 目录中，并且在 .gitignore 中忽视。
 - 所有快捷键都必须可配置，并在默认配置中声明，例如：
   - `DEFAULT_EDITOR_KEYBINDINGS`
   - `DEFAULT_APP_KEYBINDINGS`
