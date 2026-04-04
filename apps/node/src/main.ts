@@ -24,6 +24,11 @@ export interface RunCommand {
   readonly prompt: string
 }
 
+export interface RegisterCommand {
+  readonly kind: 'register'
+  readonly url: string
+}
+
 export interface LogFollowCommand {
   readonly kind: 'log-follow'
   readonly lines: number
@@ -35,6 +40,7 @@ export interface HelpCommand {
 
 export type TianjiCliCommand =
   | RunCommand
+  | RegisterCommand
   | LogFollowCommand
   | HelpCommand
   | DaemonCommand
@@ -61,6 +67,9 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
   const parsed = parseCommand(globalFlags.remaining, COMMAND_REGISTRY, i18n)
   if (parsed.command.name === 'run') {
     return { kind: 'run', prompt: parsed.context.args.prompt }
+  }
+  if (parsed.command.name === 'register') {
+    return { kind: 'register', url: parsed.context.args.url }
   }
   if (parsed.command.name === 'log') {
     return { kind: 'log-follow', lines: parsed.context.options.lines as number }

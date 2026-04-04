@@ -8,7 +8,7 @@
 
 ```bash
 pnpm install
-pnpm --filter @tianji/controlplane build
+pnpm build
 pnpm --filter @tianji/controlplane start
 ```
 
@@ -76,6 +76,47 @@ TIANJI_CP_PORT=3100 pnpm --filter @tianji/controlplane start
 ```text
 ~/.config/tianji-ai/controlplane/controlplane.db
 ```
+
+## 如何获取 Enrollment Token
+
+controlplane 在注册 node 时，会校验 `enrollment_tokens` 表中的 token。也就是说，`register` URL 里的 `enrollment-token` 必须先存在于 controlplane 的数据库中。
+
+现在可以直接使用 controlplane 自带命令生成 token：
+
+```bash
+pnpm --filter @tianji/controlplane token:create
+```
+
+命令会输出两行：
+
+- `Enrollment token: <token>`
+- `Register URL: http://127.0.0.1:3000/register?enrollment-token=<token>`
+
+如果 controlplane 对外访问地址不是默认的 `http://127.0.0.1:3000`，可以在执行前设置：
+
+```bash
+TIANJI_CP_PUBLIC_BASE_URL=http://your-host:3000 pnpm --filter @tianji/controlplane token:create
+```
+
+如果你需要显式指定 token，也可以直接把 token 作为参数传入：
+
+```bash
+pnpm --filter @tianji/controlplane token:create dev-token
+```
+
+默认数据库路径：
+
+```text
+~/.config/tianji-ai/controlplane/controlplane.db
+```
+
+插入后，node 可使用下面的 URL 注册：
+
+```bash
+pnpm tianji register "http://127.0.0.1:3000/register?enrollment-token=dev-token"
+```
+
+如果 token 不存在，controlplane 会返回 `403 Invalid enrollment token`。
 
 ## 常见问题
 

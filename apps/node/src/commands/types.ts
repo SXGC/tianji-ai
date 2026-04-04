@@ -5,6 +5,10 @@ import type { AgentRunner } from '../acp/index.js'
 import type { UserConfigPaths } from '../config.js'
 import type { I18n, MessageKey } from '../i18n/index.js'
 import type { FollowCliLogOptions } from '../log-follow.js'
+import type {
+  ControlPlaneRuntimeConfig,
+  ControlPlaneRuntimeHandle,
+} from '../node-runtime/controlplane-runtime.js'
 
 /**
  * 所有 CLI 命令共用的可注入依赖。
@@ -19,6 +23,9 @@ export interface CliDependencies {
     i18n: I18n,
     options?: FollowCliLogOptions
   ) => Promise<void>
+  readonly createControlPlaneRuntime?: (
+    config: ControlPlaneRuntimeConfig
+  ) => ControlPlaneRuntimeHandle
   readonly writeStdout?: (message: string) => void
   readonly runDaemonEntry?: () => Promise<void>
   readonly loadConfig?: () => Promise<Partial<TianjiConfig>>

@@ -43,14 +43,16 @@ export interface TaskExecutorLike {
   execute(command: Command): Promise<void>
 }
 
+export interface ControlPlaneRuntimeHandle {
+  readonly connection: ControlPlaneConnectionLike
+  readonly taskExecutor: TaskExecutorLike
+  readonly onCommand: (command: Command) => Promise<void>
+}
+
 export function createControlPlaneRuntime(
   config: ControlPlaneRuntimeConfig,
   deps: ControlPlaneRuntimeDeps = {}
-): {
-  connection: ControlPlaneConnectionLike
-  taskExecutor: TaskExecutorLike
-  onCommand(command: Command): Promise<void>
-} {
+): ControlPlaneRuntimeHandle {
   let currentConnection: ControlPlaneConnectionLike | null = null
   let taskExecutorRef: TaskExecutorLike | null = null
 

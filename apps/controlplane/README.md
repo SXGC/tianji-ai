@@ -8,7 +8,7 @@
 
 ```bash
 pnpm install
-pnpm --filter @tianji/controlplane build
+pnpm build
 pnpm --filter @tianji/controlplane start
 ```
 
@@ -45,6 +45,7 @@ Controlplane 自身不执行模型调用，任务实际由在线 node 执行。
 | `TIANJI_CP_PORT` | `3000` | HTTP 监听端口 |
 | `TIANJI_CP_HOST` | `0.0.0.0` | HTTP 监听地址 |
 | `TIANJI_CP_DATA_DIR` | `~/.config/tianji-ai/controlplane` | 数据目录 |
+| `TIANJI_CP_PUBLIC_BASE_URL` | `http://127.0.0.1:3000` | `token:create` 输出的 register URL 基础地址 |
 
 默认 SQLite 数据库路径：
 
@@ -71,11 +72,30 @@ Controlplane 自身不执行模型调用，任务实际由在线 node 执行。
 
 | 命令 | 说明 |
 |---|---|
-| `pnpm --filter @tianji/controlplane build` | 构建前端资源并编译服务端代码 |
+| `pnpm build` | 构建 monorepo 中所有 package 和 app |
 | `pnpm --filter @tianji/controlplane typecheck` | 运行服务端与前端类型检查 |
 | `pnpm --filter @tianji/controlplane test` | 运行 Vitest |
 | `pnpm --filter @tianji/controlplane start` | 启动已构建产物 |
+| `pnpm --filter @tianji/controlplane token:create [token]` | 生成 enrollment token 并输出 register URL |
 | `pnpm --filter @tianji/controlplane clean` | 清理 `dist/` |
+
+## 生成 Enrollment Token
+
+```bash
+pnpm --filter @tianji/controlplane token:create
+```
+
+如果需要固定 token：
+
+```bash
+pnpm --filter @tianji/controlplane token:create dev-token
+```
+
+如果需要输出不同的对外访问地址：
+
+```bash
+TIANJI_CP_PUBLIC_BASE_URL=http://your-host:3000 pnpm --filter @tianji/controlplane token:create
+```
 
 ## 目录结构
 

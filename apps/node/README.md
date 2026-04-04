@@ -1,13 +1,13 @@
 # @tianji/node
 
-`@tianji/node` 是 `tianji-ai` 的节点命令行入口，当前仍提供 `run`、`log`、`daemon`、`chat` 和 `help` 能力，并支持全局 `-h` / `--help` 与 `-V` / `--version`。
+`@tianji/node` 是 `tianji-ai` 的节点命令行入口，当前提供 `run`、`register`、`log`、`daemon`、`chat` 和 `help` 能力，并支持全局 `-h` / `--help` 与 `-V` / `--version`。
 
 ## 安装与运行
 
 在 monorepo 内可先构建 node app：
 
 ```bash
-pnpm --filter @tianji/node build
+pnpm build
 ```
 
 构建后可通过以下方式运行：
@@ -15,6 +15,7 @@ pnpm --filter @tianji/node build
 ```bash
 pnpm tianji --help
 pnpm tianji run "hello"
+pnpm tianji register "http://127.0.0.1:3000/register?enrollment-token=<enrollment-token>"
 pnpm tianji log --lines 20
 pnpm tianji daemon --help
 ```
@@ -29,6 +30,15 @@ pnpm tianji daemon --help
 - 当前 node app 仍会通过 `@tianji/agent` 加载配置、解析默认 agent、读取对应 `SOUL.md`、创建会话，并把 assistant 文本流式输出到 stdout；后续将迁移为 ACP 管理模式。
 - 首次运行时，如果 `~/.config/tianji-ai/` 下缺少配置目录，会自动创建基础目录、空的用户层 `tianji.json`、默认 agent 的 `SOUL.md`，以及日志目录。
 - 用法错误返回退出码 `2`，运行时错误返回退出码 `1`。
+
+### `tianji register "<url>"`
+
+- 把当前 node 注册到 controlplane，并保持长连接在线。
+- URL 格式固定为 `http://cp_base_url/register?enrollment-token=xxxxx`。
+- 命令会从 URL 中解析 controlplane 基础地址和 enrollment token，然后启动注册、心跳和任务轮询流程。
+- 启动后会输出 `nodeId`、`baseUrl` 和连接状态，便于确认当前 node 是否已经连上 controlplane。
+- `tianji run "<prompt>"` 不会注册 node；它只会执行一次本地 CLI 请求。
+- 已移除旧的“依赖环境变量并在不带子命令时自动进入 controlplane 模式”的行为。
 
 ### `tianji log [--follow] [--lines <n>]`
 
@@ -226,7 +236,7 @@ apps/node/
 ## 开发命令
 
 ```bash
-pnpm --filter @tianji/node build
+pnpm build
 pnpm --filter @tianji/node test
 pnpm --filter @tianji/node typecheck
 pnpm --filter @tianji/node clean

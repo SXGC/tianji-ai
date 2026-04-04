@@ -6,6 +6,8 @@
   "help.subcommands_header": "子命令:",
   "cmd.run.description": "通过配置的 agent 执行一次 prompt",
   "cmd.run.arg.prompt": "发送给 agent 的 prompt 文本",
+  "cmd.register.description": "把当前 node 注册到 controlplane 并保持在线",
+  "cmd.register.arg.url": "注册 URL，格式为 http://cp/register?enrollment-token=xxx",
   "cmd.log.description": "跟踪 CLI 日志并回放最近的行",
   "cmd.log.option.follow": "跟踪日志输出",
   "cmd.log.option.lines": "回放的最近行数",

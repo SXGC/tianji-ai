@@ -8,29 +8,26 @@
 
 ```bash
 pnpm install
-
-# 构建 node
-pnpm --filter @tianji/node build
+pnpm build
 
 # 本地直接使用 node CLI
 pnpm tianji run "hello"
 
-# 构建并启动 controlplane
-pnpm --filter @tianji/controlplane build
+# 启动 controlplane
 pnpm --filter @tianji/controlplane start
 
+# 生成 enrollment token
+pnpm --filter @tianji/controlplane token:create
+
 # 让 node 注册到 controlplane
-TIANJI_CP_BASE_URL=http://127.0.0.1:3000 \
-TIANJI_CP_ENROLLMENT_TOKEN=<enrollment-token> \
-TIANJI_NODE_ID=node-001 \
-pnpm tianji
+pnpm tianji register "http://127.0.0.1:3000/register?enrollment-token=<enrollment-token>"
 ```
 
 启动 controlplane 后，默认访问 `http://127.0.0.1:3000/`。
 
-如果没有设置 `TIANJI_CP_BASE_URL`、`TIANJI_CP_ENROLLMENT_TOKEN` 和 `TIANJI_NODE_ID` 启动 node，controlplane 页面不会出现可用节点。
+如果没有执行 `tianji register "<url>"`，controlplane 页面不会出现可用节点。
 
-注意：`pnpm tianji run "hello"` 只会执行本地 CLI 请求，不会把 node 注册到 controlplane。controlplane 模式需要直接运行 `pnpm tianji`，并且不带子命令。
+注意：`pnpm tianji run "hello"` 只会执行本地 CLI 请求，不会把 node 注册到 controlplane。
 
 详细使用说明：
 

@@ -6,6 +6,8 @@
   "help.subcommands_header": "Subcommands:",
   "cmd.run.description": "Run one prompt through the configured agent",
   "cmd.run.arg.prompt": "The prompt text to send to the agent",
+  "cmd.register.description": "Register this node to controlplane and keep it online",
+  "cmd.register.arg.url": "Register URL in the form http://cp/register?enrollment-token=xxx",
   "cmd.log.description": "Follow the CLI log and replay the latest lines first",
   "cmd.log.option.follow": "Follow the log output",
   "cmd.log.option.lines": "Number of recent lines to replay",

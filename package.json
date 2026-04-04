@@ -4,10 +4,11 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "tianji": "pnpm -r --filter @tianji/runtime... build && pnpm -r --filter @tianji/node... build && node apps/node/bin/tianji.mjs",
+    "tianji": "node apps/node/bin/tianji.mjs",
     "check": "pnpm exec biome check --files-ignore-unknown=true --error-on-warnings . && pnpm typecheck",
     "build": "turbo build",
     "test": "turbo test",
+    "test:coverage": "turbo test:coverage",
     "lint": "pnpm exec biome lint --files-ignore-unknown=true --error-on-warnings .",
     "format": "pnpm exec biome format --write --files-ignore-unknown=true .",
     "format:check": "pnpm exec biome check --formatter-enabled=true --linter-enabled=false --organize-imports-enabled=false --files-ignore-unknown=true .",

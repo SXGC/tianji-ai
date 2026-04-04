@@ -26,7 +26,7 @@ describe('controlplane <-> node e2e', () => {
 
   it('fails fast when node dist entrypoint is missing', async () => {
     await expect(assertNodeDistReady('/tmp/tianji-missing-node-dist.js')).rejects.toThrow(
-      'Missing built node entrypoint: /tmp/tianji-missing-node-dist.js. Run `pnpm --filter @tianji/node build` before running controlplane-node e2e tests.'
+      'Missing built node entrypoint: /tmp/tianji-missing-node-dist.js. Run `pnpm build` before running controlplane-node e2e tests.'
     )
   })
 
@@ -184,15 +184,15 @@ async function setupTestEnv(nodeId: string): Promise<{
   await mkdir(homeDir, { recursive: true })
   await writeFile(join(configDir, 'tianji.json'), '{}', 'utf8')
 
-  const nodeProcess = spawn('/usr/bin/env', ['node', nodeDistBinPath], {
+  const registerUrl = `http://127.0.0.1:${port}/register?enrollment-token=e2e-token`
+
+  const nodeProcess = spawn('/usr/bin/env', ['node', nodeDistBinPath, 'register', registerUrl], {
     cwd: nodeAppDir,
     env: {
       ...process.env,
       HOME: homeDir,
       XDG_CONFIG_HOME: join(baseDir, 'config'),
-      TIANJI_CP_BASE_URL: `http://127.0.0.1:${port}`,
       TIANJI_NODE_ID: nodeId,
-      TIANJI_CP_ENROLLMENT_TOKEN: 'e2e-token',
       TIANJI_AGENT_BIN: '/usr/bin/env',
       TIANJI_AGENT_ARGS: JSON.stringify(['node', fakeAcpAgentPath]),
       TIANJI_NODE_AGENT_LIST: JSON.stringify([
@@ -235,7 +235,7 @@ async function assertNodeDistReady(entrypointPath: string): Promise<void> {
     await access(entrypointPath)
   } catch {
     throw new Error(
-      `Missing built node entrypoint: ${entrypointPath}. Run \`pnpm --filter @tianji/node build\` before running controlplane-node e2e tests.`
+      `Missing built node entrypoint: ${entrypointPath}. Run \`pnpm build\` before running controlplane-node e2e tests.`
     )
   }
 }
