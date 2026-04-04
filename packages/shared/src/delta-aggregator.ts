@@ -38,7 +38,7 @@ function readChannelPartValue(part: MessagePart | undefined, channel: MessageDel
 
 function normalizePayload(delta: MessageDelta): string {
   if (typeof delta.payload !== 'string') {
-    throw new Error(
+    throw new TypeError(
       `MessageDelta payload for channel ${delta.channel} must be a string for ${delta.op} operations`
     )
   }
@@ -68,7 +68,7 @@ export function applyMessageDelta(
   }
 
   const nextContent = [...baseMessage.content]
-  const completedChannels = { ...(current?.completedChannels ?? {}) }
+  const completedChannels = { ...current?.completedChannels }
 
   if (delta.op === 'complete') {
     completedChannels[delta.channel] = true

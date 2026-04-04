@@ -21,8 +21,8 @@ const ZH_CN_VARIANTS = new Set(['zh-cn', 'zh-hans', 'zh-sg'])
  * @returns The rendered string, preserving unknown placeholders as-is
  */
 export function interpolate(template: string, params: Record<string, string | number>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key: string) =>
-    params[key] !== undefined ? String(params[key]) : `{${key}}`
+  return template.replaceAll(/\{(\w+)\}/g, (_, key: string) =>
+    params[key] === undefined ? `{${key}}` : String(params[key])
   )
 }
 
@@ -33,7 +33,7 @@ export function interpolate(template: string, params: Record<string, string | nu
  * @returns A supported locale when recognized, otherwise `undefined`
  */
 export function normalizeLocale(locale: string): SupportedLocale | undefined {
-  const normalized = locale.replace(/_/g, '-').split('.')[0].toLowerCase()
+  const normalized = locale.replaceAll('_', '-').split('.')[0].toLowerCase()
   if (normalized === 'en' || normalized.startsWith('en-')) {
     return 'en'
   }

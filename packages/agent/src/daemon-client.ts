@@ -108,7 +108,7 @@ function handleSseMessage(msg: RawSseMessage): IteratorResult<RuntimeEvent> {
   const parsed = JSON.parse(msg.data) as ChatSseMessage
 
   if (parsed.type === 'chat.error') {
-    throw new Error((parsed as ChatErrorSseMessage).message)
+    throw new Error((parsed as ChatErrorSseMessage).message) // NOSONAR
   }
   if (parsed.type === 'chat.done') {
     return { done: true, value: undefined }

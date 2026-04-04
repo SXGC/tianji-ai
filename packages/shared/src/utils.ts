@@ -38,7 +38,7 @@ export function deepClone<T>(value: T): T {
 
   // Handle Date
   if (value instanceof Date) {
-    return new Date(value.getTime()) as T
+    return new Date(+value) as T
   }
 
   // Handle Map

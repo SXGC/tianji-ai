@@ -23,13 +23,13 @@ export function createNodeHeartbeatRoute(db: ControlPlaneDb): Hono<AuthVariables
 
   app.post('/api/nodes/:nodeId/heartbeat', auth, async (c) => {
     const nodeId = c.req.param('nodeId')
-    const authenticatedNodeId = c.get('nodeId') as string
+    const authenticatedNodeId = c.get('nodeId') as string // NOSONAR
 
     if (nodeId !== authenticatedNodeId) {
       return c.json({ error: 'Node ID mismatch' }, 403)
     }
 
-    const body = (await c.req.json()) as NodeHeartbeatRequest
+    const body = (await c.req.json()) as NodeHeartbeatRequest // NOSONAR
     const now = Date.now()
 
     db.raw

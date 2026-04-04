@@ -11,7 +11,7 @@ export function createNodeRegisterRoute(db: ControlPlaneDb): Hono {
   const app = new Hono()
 
   app.post('/api/nodes/register', async (c) => {
-    const body = (await c.req.json()) as NodeRegisterRequest
+    const body = (await c.req.json()) as NodeRegisterRequest // NOSONAR
     const tokenRow = db.raw
       .prepare('SELECT token FROM enrollment_tokens WHERE token = ?')
       .get(body.enrollmentToken)

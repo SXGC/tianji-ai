@@ -81,7 +81,7 @@ export interface SessionRuntimeDeepagentsConfig {
   readonly providerConfig?: RuntimeProviderConfig
   readonly middleware?: readonly unknown[]
   readonly backend?: unknown
-  readonly checkpointer?: boolean | unknown
+  readonly checkpointer?: unknown
   readonly store?: unknown
   readonly subagents?: readonly { readonly name: string; [key: string]: unknown }[]
   readonly skills?: readonly string[]
@@ -108,7 +108,7 @@ export interface DeepagentsRunWorkflowState {
   readonly interrupts: readonly DeepagentsInterruptRecord[]
 }
 
-export type { ObserverLogger }
+export type { ObserverLogger } from '@tianji/observer'
 
 export interface SessionRuntimeOptions {
   readonly engine?: Extract<SessionRuntimeEngine, 'deepagents'>
@@ -345,7 +345,7 @@ class SessionRuntimeImpl implements SessionRuntime {
       ...snapshot,
       updatedAt: Date.now(),
       metadata: {
-        ...(snapshot.metadata ?? {}),
+        ...snapshot.metadata,
         closedAt: Date.now(),
       },
     }
@@ -764,8 +764,8 @@ class SessionRuntimeImpl implements SessionRuntime {
       sessionId: fields.sessionId,
       runId: fields.runId,
       triggerType: fields.triggerType,
-      ...(fields.parentRunId === undefined ? {} : { parentRunId: fields.parentRunId }),
-      ...(extraData ?? {}),
+      ...(fields.parentRunId === undefined ? undefined : { parentRunId: fields.parentRunId }),
+      ...extraData,
     }
 
     void logger[level](['runtime', 'run'], message, data)
@@ -909,8 +909,8 @@ function mergeMetadata(
   }
 
   return {
-    ...(base ?? {}),
-    ...(extra ?? {}),
+    ...base,
+    ...extra,
   }
 }
 
@@ -990,9 +990,9 @@ function writeSessionRuntimeMetadata(
   runtimeMetadata: SessionRuntimeMetadata
 ): Record<string, unknown> {
   return {
-    ...(metadata ?? {}),
+    ...metadata,
     runtime: {
-      ...(readRuntimeMetadataRecord(metadata) ?? {}),
+      ...readRuntimeMetadataRecord(metadata),
       engine: runtimeMetadata.engine,
     },
   }
@@ -1003,7 +1003,7 @@ function writeRunRuntimeMetadata(
   runtimeMetadata: RunRuntimeMetadata
 ): Record<string, unknown> {
   const nextRuntimeMetadata: Record<string, unknown> = {
-    ...(readRuntimeMetadataRecord(metadata) ?? {}),
+    ...readRuntimeMetadataRecord(metadata),
     engine: runtimeMetadata.engine,
   }
 
@@ -1016,7 +1016,7 @@ function writeRunRuntimeMetadata(
   }
 
   return {
-    ...(metadata ?? {}),
+    ...metadata,
     runtime: nextRuntimeMetadata,
   }
 }

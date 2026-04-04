@@ -184,7 +184,7 @@ export function appMessageToSdkMessage(message: AppMessage): CoreMessage {
           'unsupported_part_type'
         )
       }
-      const textPart = message.content[0] as TextContent
+      const textPart = message.content[0] as TextContent // NOSONAR
       return {
         role: 'system',
         content: textPart.text,

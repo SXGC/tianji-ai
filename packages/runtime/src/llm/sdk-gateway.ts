@@ -173,7 +173,7 @@ function toJsonValue(value: unknown): JsonValue {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, toJsonValue(item)]))
   }
 
-  return String(value)
+  return typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)
 }
 
 function toJsonObject(value: Record<string, unknown>): Record<string, JsonValue> {
@@ -208,7 +208,7 @@ function buildCallOptions(config: LlmProviderConfig, request: LlmRequest, model:
     maxSteps:
       request.config?.maxSteps ??
       (request.tools !== undefined && request.executeTool !== undefined ? 2 : 1),
-    ...(request.config?.extra ?? {}),
+    ...request.config?.extra,
   }
 }
 
@@ -261,9 +261,7 @@ class SdkLlmStream implements LlmStream {
   ) {}
 
   private ensureStarted(): Promise<LlmResponse> {
-    if (this.completion === undefined) {
-      this.completion = this.consume()
-    }
+    this.completion ??= this.consume()
 
     return this.completion
   }

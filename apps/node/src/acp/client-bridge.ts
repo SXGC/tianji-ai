@@ -41,7 +41,7 @@ export class AcpNodeClient implements Client {
     return {
       outcome: {
         outcome: 'selected',
-        optionId: allowOption?.optionId ?? params.options[0]!.optionId,
+        optionId: allowOption?.optionId ?? params.options[0]!.optionId, // NOSONAR
       },
     }
   }

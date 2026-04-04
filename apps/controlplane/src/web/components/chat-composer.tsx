@@ -1,4 +1,4 @@
-import type { FormEvent } from 'react'
+import type React from 'react'
 import { useState } from 'react'
 
 interface ChatComposerProps {
@@ -9,7 +9,7 @@ interface ChatComposerProps {
 export function ChatComposer(props: ChatComposerProps) {
   const [value, setValue] = useState('')
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const nextValue = value.trim()
     if (nextValue.length === 0) {

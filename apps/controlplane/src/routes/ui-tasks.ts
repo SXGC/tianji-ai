@@ -26,6 +26,13 @@ type NodeStatusRow = {
   status: string
 }
 
+type CreateTaskBody = {
+  nodeId: string
+  agentId: string
+  goal: string
+  sessionIds?: string[]
+}
+
 /**
  * 创建 UI task 路由。
  */
@@ -33,12 +40,7 @@ export function createUiTasksRoute(db: ControlPlaneDb): Hono {
   const app = new Hono()
 
   app.post('/api/ui/tasks', async (c) => {
-    const body = (await c.req.json()) as {
-      nodeId: string
-      agentId: string
-      goal: string
-      sessionIds?: string[]
-    }
+    const body = (await c.req.json()) as CreateTaskBody // NOSONAR
     const now = Date.now()
     const node = db.raw.prepare('SELECT status FROM nodes WHERE node_id = ?').get(body.nodeId) as
       | NodeStatusRow

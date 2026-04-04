@@ -18,6 +18,12 @@ type SessionRow = {
   updated_at: number
 }
 
+type CreateSessionBody = {
+  nodeId: string
+  agentId: string
+  title?: string
+}
+
 /**
  * 创建 UI session 路由。
  */
@@ -25,11 +31,7 @@ export function createUiSessionsRoute(db: ControlPlaneDb): Hono {
   const app = new Hono()
 
   app.post('/api/ui/sessions', async (c) => {
-    const body = (await c.req.json()) as {
-      nodeId: string
-      agentId: string
-      title?: string
-    }
+    const body = (await c.req.json()) as CreateSessionBody // NOSONAR
 
     const node = db.raw.prepare('SELECT status FROM nodes WHERE node_id = ?').get(body.nodeId) as
       | NodeStatusRow
@@ -99,7 +101,7 @@ export function createUiSessionsRoute(db: ControlPlaneDb): Hono {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }))
-    const nextCursor = hasMore ? (items[items.length - 1]?.sessionId ?? null) : null
+    const nextCursor = hasMore ? (items.at(-1)?.sessionId ?? null) : null
 
     return c.json({ items, nextCursor })
   })

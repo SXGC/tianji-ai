@@ -30,7 +30,7 @@ export function createUiTaskEventsRoute(db: ControlPlaneDb): Hono {
       payload: JSON.parse(event.payload),
       receivedAt: event.receivedAt,
     }))
-    const nextSequence = events.length > 0 ? events[events.length - 1]!.sequence + 1 : after + 1
+    const nextSequence = events.length > 0 ? events.at(-1)!.sequence + 1 : after + 1
 
     return c.json({ items, nextSequence, truncated })
   })

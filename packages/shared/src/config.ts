@@ -20,7 +20,7 @@ import { z } from 'zod'
  * Placeholder pattern for environment variable references.
  * Syntax: ${env:VAR_NAME}
  */
-export const ENV_PLACEHOLDER_PATTERN = /^\$\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/
+export const ENV_PLACEHOLDER_PATTERN = /^\$\{env:([A-Za-z_]\w*)\}$/
 
 /**
  * Configuration error thrown when placeholder resolution fails.
@@ -52,7 +52,7 @@ export function isEnvPlaceholder(value: string): boolean {
  * @returns The variable name, or null if not a valid placeholder
  */
 export function extractEnvVarName(value: string): string | null {
-  const match = value.match(ENV_PLACEHOLDER_PATTERN)
+  const match = ENV_PLACEHOLDER_PATTERN.exec(value)
   return match ? match[1] : null
 }
 
@@ -453,7 +453,7 @@ export const DEFAULT_RETRY_CONFIG: Required<RetryConfig> = {
  */
 export const DEFAULT_PATH_POLICY_CONFIG: Required<PathPolicyConfig> = {
   forbidDirectories: ['.git/', 'node_modules/'],
-  filenameDenyPatterns: ['^\\.env($|\\.)', '(^|/)id_rsa$'],
+  filenameDenyPatterns: [String.raw`^\.env($|\.)`, '(^|/)id_rsa$'],
 }
 
 /**
