@@ -38,8 +38,10 @@ const isMain =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
 
 if (isMain) {
-  void runAcpAgent().catch((error: unknown) => {
+  try {
+    await runAcpAgent()
+  } catch (error: unknown) {
     console.error('ACP agent fatal error:', error)
     process.exit(1)
-  })
+  }
 }

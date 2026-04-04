@@ -32,5 +32,5 @@ const _isMain =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
 
 if (_isMain) {
-  void runDaemonEntry()
+  await runDaemonEntry()
 }

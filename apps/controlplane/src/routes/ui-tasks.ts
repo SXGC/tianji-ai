@@ -57,7 +57,7 @@ export function createUiTasksRoute(db: ControlPlaneDb): Hono {
           .prepare('SELECT node_id FROM sessions WHERE session_id = ?')
           .get(sessionId) as SessionNodeRow | undefined
 
-        if (session === undefined || session.node_id !== body.nodeId) {
+        if (session?.node_id !== body.nodeId) {
           return c.json(
             { error: `Session ${sessionId} does not belong to node ${body.nodeId}` },
             400
@@ -119,7 +119,7 @@ export function createUiTasksRoute(db: ControlPlaneDb): Hono {
     const rows = db.raw.prepare(sql).all(...params) as TaskRow[]
     const hasMore = rows.length > limit
     const items = rows.slice(0, limit).map(mapTaskRow)
-    const nextCursor = hasMore ? (items[items.length - 1]?.taskId ?? null) : null
+    const nextCursor = hasMore ? (items.at(-1)?.taskId ?? null) : null
 
     return c.json({ items, nextCursor })
   })

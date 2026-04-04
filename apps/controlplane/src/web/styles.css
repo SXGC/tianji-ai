@@ -134,7 +134,7 @@ body {
 
 .bubble.user {
   margin-left: auto;
-  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
 }
 
 .bubble.assistant {
@@ -174,7 +174,7 @@ button {
   border: 0;
   border-radius: 16px;
   padding: 0 18px;
-  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  background: linear-gradient(135deg, #7c3aed, #5b21b6);
   color: #fff;
   font: inherit;
   cursor: pointer;

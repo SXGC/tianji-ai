@@ -9,7 +9,7 @@ import { hashToken } from '../services/auth.js'
 export function createAuthMiddleware(db: ControlPlaneDb) {
   return async (c: Context, next: Next) => {
     const authHeader = c.req.header('Authorization')
-    if (authHeader === undefined || !authHeader.startsWith('Bearer ')) {
+    if (!authHeader?.startsWith('Bearer ')) {
       return c.json({ error: 'Missing authorization' }, 401)
     }
 
