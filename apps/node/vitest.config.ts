@@ -27,5 +27,12 @@ export default defineConfig({
     globals: true,
     root: packageRoot,
     setupFiles: ['./src/__tests__/setup-env.ts'],
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'json', 'html', 'lcov'],
+      reportsDirectory: './coverage',
+      include: ['src/**/*.ts'],
+      exclude: ['src/**/__tests__/**', 'src/**/*.test.ts', 'src/**/*.spec.ts'],
+    },
   },
 })

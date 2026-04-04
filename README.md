@@ -221,6 +221,15 @@ pnpm tianji stop
 - `docs/` 中部分内容会提到后续规划的 `tools-node` 等模块，这些仍未在仓库中完整落地。
 - 因此，阅读本仓库时应优先以 `packages/`、`apps/node` 与 `apps/controlplane` 下现有源码和导出 API 为准。
 
+## CI/CD
+
+                                                                  
+### 生成覆盖率报告                                                             
+  pnpm test:coverage                                              
+
+### 然后执行 sonar 扫描                                                        
+  pnpm sonar
+
 ## License
 
 本仓库使用 Apache License 2.0，详见根目录 `LICENSE`。
