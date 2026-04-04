@@ -381,7 +381,7 @@ async function executeDeepagentsToolCall(
   const definition = options.toolCatalog.getTool(input.toolName)
 
   if (definition === undefined) {
-    throw new ToolError('TOOL_NOT_FOUND', `Tool \"${input.toolName}\" is not registered`)
+    throw new ToolError('TOOL_NOT_FOUND', `Tool "${input.toolName}" is not registered`)
   }
 
   ensureToolAllowed(definition, options.policy.tool.allowDestructive)
@@ -459,14 +459,7 @@ async function executeDeepagentsToolCall(
       })
     }
 
-    const resolvedError =
-      error instanceof ToolError
-        ? error
-        : error instanceof TimeoutError
-          ? new ToolError('TOOL_TIMEOUT', error.message, { cause: error })
-          : new ToolError('TOOL_EXECUTION_FAILED', toError(error).message, {
-              cause: toError(error),
-            })
+    const resolvedError = resolveToolError(error)
 
     options.pendingOperations.set(toolCallId, {
       id: toolCallId,
@@ -782,7 +775,7 @@ function stableSerialize(value: unknown): string {
       return sortJsonKeys('', candidate)
     })
   } catch {
-    return String(value)
+    return typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)
   }
 }
 
@@ -900,6 +893,23 @@ function toError(error: unknown): Error {
 }
 
 /**
+ * 将工具执行过程中捕获的未知错误归一化为 ToolError。
+ * - 已经是 ToolError 直接返回。
+ * - TimeoutError 映射为 TOOL_TIMEOUT。
+ * - 其余情况包装为 TOOL_EXECUTION_FAILED。
+ */
+function resolveToolError(error: unknown): ToolError {
+  if (error instanceof ToolError) {
+    return error
+  }
+  if (error instanceof TimeoutError) {
+    return new ToolError('TOOL_TIMEOUT', error.message, { cause: error })
+  }
+  const wrapped = toError(error)
+  return new ToolError('TOOL_EXECUTION_FAILED', wrapped.message, { cause: wrapped })
+}
+
+/**
  * 合并多个 AbortSignal，并返回可清理的监听作用域。
  * 只要任一信号中断，合成信号就会立刻中断；cleanup 用于移除注册的事件监听器。
  */
@@ -962,9 +972,10 @@ function resolveDeepagentsCheckpointer(value: SessionRuntimeDeepagentsConfig['ch
 }
 
 /**
- * 解析 middleware 配置并复制数组，避免调用方后续修改原始引用。
+ * 当数组有效且非空时返回其浅拷贝，否则返回 undefined。
+ * 用于统一处理 middleware / subagents 等可选数组配置，避免共享可变引用。
  */
-function resolveDeepagentsMiddleware(value: SessionRuntimeDeepagentsConfig['middleware']) {
+function resolveOptionalArray<T>(value: readonly T[] | undefined): T[] | undefined {
   if (value === undefined || value.length === 0) {
     return undefined
   }
@@ -973,14 +984,17 @@ function resolveDeepagentsMiddleware(value: SessionRuntimeDeepagentsConfig['midd
 }
 
 /**
+ * 解析 middleware 配置并复制数组，避免调用方后续修改原始引用。
+ */
+function resolveDeepagentsMiddleware(value: SessionRuntimeDeepagentsConfig['middleware']) {
+  return resolveOptionalArray(value)
+}
+
+/**
  * 解析 subagents 配置并复制数组，避免共享可变引用。
  */
 function resolveDeepagentsSubagents(value: SessionRuntimeDeepagentsConfig['subagents']) {
-  if (value === undefined || value.length === 0) {
-    return undefined
-  }
-
-  return [...value]
+  return resolveOptionalArray(value)
 }
 
 /**

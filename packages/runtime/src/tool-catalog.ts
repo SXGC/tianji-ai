@@ -59,7 +59,7 @@ class StaticToolCatalog implements ToolCatalog {
     const definition = this.getTool(invocation.toolName)
 
     if (definition === undefined) {
-      throw new ToolError('TOOL_NOT_FOUND', `Tool \"${invocation.toolName}\" is not registered`)
+      throw new ToolError('TOOL_NOT_FOUND', `Tool "${invocation.toolName}" is not registered`)
     }
 
     return definition.execute(invocation.args, context)
@@ -79,7 +79,7 @@ export class ToolRegistry implements ToolCatalog {
     if (this.definitions.has(definition.spec.name)) {
       throw new ToolError(
         'TOOL_DUPLICATE',
-        `Tool \"${definition.spec.name}\" has already been registered`
+        `Tool "${definition.spec.name}" has already been registered`
       )
     }
 
@@ -96,7 +96,7 @@ export class ToolRegistry implements ToolCatalog {
       const definition = this.definitions.get(toolName)
 
       if (definition === undefined) {
-        throw new ToolError('TOOL_NOT_FOUND', `Tool \"${toolName}\" is not registered`)
+        throw new ToolError('TOOL_NOT_FOUND', `Tool "${toolName}" is not registered`)
       }
 
       return definition
@@ -131,7 +131,7 @@ export function ensureToolAllowed(
   if (definition.sideEffect === 'destructive' && !allowDestructive) {
     throw new PolicyError(
       'TOOL_DESTRUCTIVE_BLOCKED',
-      `Tool \"${definition.spec.name}\" is blocked by the current execution policy`
+      `Tool "${definition.spec.name}" is blocked by the current execution policy`
     )
   }
 }

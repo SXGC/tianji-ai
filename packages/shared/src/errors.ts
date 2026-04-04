@@ -61,16 +61,25 @@ export class TianjiError extends Error {
       category: this.category,
       code: this.code,
       message: this.message,
-      cause: this.cause
-        ? this.cause instanceof TianjiError
-          ? this.cause.toPlainObject()
-          : {
-              name: this.cause.name,
-              category: 'internal' as ErrorCategory,
-              code: this.cause.name,
-              message: this.cause.message,
-            }
-        : undefined,
+      cause: this.serializeCause(),
+    }
+  }
+
+  /**
+   * 将 cause 序列化为 ErrorPlainObject；无 cause 时返回 undefined。
+   */
+  private serializeCause(): ErrorPlainObject | undefined {
+    if (!this.cause) {
+      return undefined
+    }
+    if (this.cause instanceof TianjiError) {
+      return this.cause.toPlainObject()
+    }
+    return {
+      name: this.cause.name,
+      category: 'internal' as ErrorCategory,
+      code: this.cause.name,
+      message: this.cause.message,
     }
   }
 }
