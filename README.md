@@ -147,6 +147,10 @@ pnpm tianji stop
 - `tianji log -f` 由 CLI 负责读取已有日志、持续 follow 新增内容，并渲染为人类可读文本。
 - 日志不会记录 prompt 原文、`SOUL.md` 正文或 provider `apiKey`。
 
+## Controlplane Web UI
+
+`apps/controlplane` 现在会在 `/` 提供浏览器聊天界面。启动 controlplane 与 node 后，可直接访问 `http://127.0.0.1:3100/`，选择在线节点并发送 task。
+
 ## Git Hooks
 
 - 仓库使用 Husky 安装 `pre-commit` hook，`pnpm install` 后会通过 `prepare` 自动安装。

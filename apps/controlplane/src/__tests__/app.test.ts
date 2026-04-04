@@ -16,4 +16,33 @@ describe('createApp', () => {
     monitor.stop()
     db.close()
   })
+
+  it('returns the controlplane spa shell at root', async () => {
+    const db = createDatabase(':memory:')
+    const { app, monitor } = createApp(db)
+
+    const response = await app.request('http://localhost/')
+    const html = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/html')
+    expect(html).toContain('<div id="root"></div>')
+    expect(html).toMatch(/(?:\/main\.tsx|\/assets\/.*\.js)/)
+
+    monitor.stop()
+    db.close()
+  })
+
+  it('does not intercept api routes when serving web ui', async () => {
+    const db = createDatabase(':memory:')
+    const { app, monitor } = createApp(db)
+
+    const response = await app.request('http://localhost/api/ui/nodes')
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type') ?? '').toContain('application/json')
+
+    monitor.stop()
+    db.close()
+  })
 })

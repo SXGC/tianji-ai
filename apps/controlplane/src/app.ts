@@ -10,6 +10,7 @@ import { createUiNodesRoute } from './routes/ui-nodes.js'
 import { createUiSessionsRoute } from './routes/ui-sessions.js'
 import { createUiTaskEventsRoute } from './routes/ui-task-events.js'
 import { createUiTasksRoute } from './routes/ui-tasks.js'
+import { createWebUiRoute } from './routes/web-ui.js'
 import { ObservationMonitor } from './services/observation-monitor.js'
 
 export interface ControlPlaneApp {
@@ -35,6 +36,7 @@ export function createApp(db: ControlPlaneDb): ControlPlaneApp {
   app.route('/', createUiSessionsRoute(db))
   app.route('/', createUiTaskEventsRoute(db))
   app.route('/', createTaskStreamRoute(db))
+  app.route('/', createWebUiRoute())
 
   return {
     app,

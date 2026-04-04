@@ -3,7 +3,7 @@ import { renderCommandHelp, renderHelp } from './commands/help.js'
 import { CliUsageError, extractGlobalFlags, parseCommand } from './commands/parse.js'
 import { COMMAND_REGISTRY } from './commands/registry.js'
 import type { CliDependencies } from './commands/types.js'
-import { loadUserConfigContext } from './config.js'
+import { type LoadedUserConfigContext, loadUserConfigContext } from './config.js'
 import { loadDevelopmentEnv } from './dev-env.js'
 import { createI18n, detectLocale } from './i18n/index.js'
 
@@ -94,7 +94,7 @@ export async function runCli(
     const config = deps?.loadConfig
       ? await deps.loadConfig().catch(() => ({}))
       : await loadUserConfigContext()
-          .then((context) => context.config)
+          .then((context: LoadedUserConfigContext) => context.config)
           .catch(() => ({}))
     const i18n = createI18n(detectLocale(config))
 

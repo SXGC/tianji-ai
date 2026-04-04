@@ -39,7 +39,26 @@ describe('GET /api/ui/tasks/:taskId/stream (SSE)', () => {
 
     const store = new EventStore(db)
     store.insertEvent('task-1', 1, 'lifecycle', JSON.stringify({ type: 'task.started' }))
-    store.insertEvent('task-1', 2, 'agent', JSON.stringify({ type: 'message.delta' }))
+    store.insertEvent(
+      'task-1',
+      2,
+      'lifecycle',
+      JSON.stringify({
+        type: 'task.session.attached',
+        sessionId: 'session-1',
+      })
+    )
+    store.insertEvent(
+      'task-1',
+      3,
+      'agent',
+      JSON.stringify({
+        kind: 'agent_event',
+        event: {
+          type: 'message.delta',
+        },
+      })
+    )
 
     const app = new Hono()
     app.route('/', createTaskStreamRoute(db))
@@ -59,6 +78,28 @@ describe('GET /api/ui/tasks/:taskId/stream (SSE)', () => {
     expect(text).toContain('id: task-1:2')
   })
 
+  it('should expose nested agent event types in SSE event names', async () => {
+    const app = setup()
+    const response = await app.request('/api/ui/tasks/task-1/stream', {
+      headers: { Accept: 'text/event-stream' },
+    })
+
+    const text = await response.text()
+    expect(text).toContain('event: agent.message.delta')
+  })
+
+  it('streams lifecycle session attach events', async () => {
+    const app = setup()
+    const response = await app.request('/api/ui/tasks/task-1/stream', {
+      headers: { Accept: 'text/event-stream' },
+    })
+
+    const text = await response.text()
+    expect(text).toContain('event: task.lifecycle')
+    expect(text).toContain('task.session.attached')
+    expect(text).toContain('session-1')
+  })
+
   it('should resume from Last-Event-ID', async () => {
     const app = setup()
     const response = await app.request('/api/ui/tasks/task-1/stream', {
@@ -71,5 +112,6 @@ describe('GET /api/ui/tasks/:taskId/stream (SSE)', () => {
     const text = await response.text()
     expect(text).not.toContain('id: task-1:1')
     expect(text).toContain('id: task-1:2')
+    expect(text).toContain('id: task-1:3')
   })
 })
