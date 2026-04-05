@@ -29,6 +29,8 @@ export interface CliDependencies {
   readonly writeStdout?: (message: string) => void
   readonly runDaemonEntry?: () => Promise<void>
   readonly loadConfig?: () => Promise<Partial<TianjiConfig>>
+  readonly confirmOverwrite?: (message: string) => Promise<boolean>
+  readonly saveConfig?: (config: Partial<TianjiConfig>) => Promise<void>
 }
 
 /** CLI 选项值的允许类型。 */

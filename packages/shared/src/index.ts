@@ -44,6 +44,8 @@ export {
   type TianjiAgentsConfig,
   ObserverConfigSchema,
   type ObserverConfig,
+  ControlPlaneConfigSchema,
+  type ControlPlaneConfig,
   TianjiConfigSchema,
   type TianjiConfig,
   // Validation functions

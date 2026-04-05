@@ -14,6 +14,7 @@
   "cmd.daemon.description": "Manage the background daemon (start, status, stop, restart)",
   "cmd.daemon.start.description": "Start the background daemon",
   "cmd.daemon.start.option.fg": "Run in foreground instead of background",
+  "cmd.daemon.start.option.register": "Register URL to persist before starting the daemon",
   "cmd.daemon.status.description": "Check daemon status",
   "cmd.daemon.stop.description": "Stop the daemon",
   "cmd.daemon.restart.description": "Restart the daemon (stop + start)",
@@ -42,5 +43,9 @@
   "error.daemon_timeout": "Timed out waiting for daemon to become ready.",
   "error.run_failed": "Run failed: {message}",
   "error.run_help_hint": "Run 'tianji --help' for usage.",
-  "error.run_command_help_hint": "Run 'tianji {command} --help' for usage."
+  "error.run_command_help_hint": "Run 'tianji {command} --help' for usage.",
+  "daemon.register.no_config": "No controlplane configuration found. Use --register to provide a register URL.",
+  "daemon.register.confirm_overwrite": "Stored controlplane config differs from the provided register URL. Overwrite?",
+  "daemon.register.saved": "Controlplane configuration saved.",
+  "daemon.register.declined": "Overwrite declined. Exiting without starting daemon."
 }

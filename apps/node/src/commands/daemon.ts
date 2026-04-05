@@ -5,6 +5,12 @@ import { DaemonClient } from '@tianji/agent'
 
 import { type UserConfigPaths, getUserConfigPaths } from '../config.js'
 import { runDaemonEntry } from '../daemon-entry.js'
+import {
+  areStoredControlPlaneConfigsEqual,
+  buildStoredControlPlaneConfig,
+  readStoredControlPlaneConfig,
+} from '../node-runtime/controlplane-config.js'
+import { parseRegisterUrl } from './register.js'
 
 import type { CommandDefinition } from './types.js'
 
@@ -92,10 +98,57 @@ async function waitForDaemonReady(
 const daemonStartCommand: CommandDefinition = {
   name: 'start',
   description: 'cmd.daemon.start.description',
-  options: [{ long: '--fg', description: 'cmd.daemon.start.option.fg', type: 'boolean' }],
+  options: [
+    { long: '--fg', description: 'cmd.daemon.start.option.fg', type: 'boolean' },
+    { long: '--register', description: 'cmd.daemon.start.option.register', type: 'string' },
+  ],
   handler: async ({ options, deps, i18n }) => {
     const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
     const paths = resolveUserConfigPaths()
+
+    // 配置加载与 --register 处理
+    const registerUrl = options.register as string | undefined
+    const loadConfig = deps?.loadConfig ?? (async () => ({}))
+    const config = await loadConfig().catch(() => ({}))
+
+    if (registerUrl) {
+      const parsed = parseRegisterUrl(registerUrl)
+      const candidate = buildStoredControlPlaneConfig(parsed)
+      const stored = readStoredControlPlaneConfig(config)
+
+      if (stored && !areStoredControlPlaneConfigsEqual(stored, candidate)) {
+        const confirm = deps?.confirmOverwrite ?? (async () => false)
+        const accepted = await confirm(i18n.t('daemon.register.confirm_overwrite'))
+        if (!accepted) {
+          process.stderr.write(`${i18n.t('daemon.register.declined')}\n`)
+          return 0
+        }
+      }
+
+      if (!stored || !areStoredControlPlaneConfigsEqual(stored, candidate)) {
+        const saveConfig = deps?.saveConfig
+        if (saveConfig) {
+          await saveConfig({
+            ...config,
+            controlPlane: {
+              baseUrl: candidate.baseUrl,
+              enrollmentToken: candidate.enrollmentToken,
+              nodeId: String(candidate.nodeId),
+              hostname: candidate.hostname,
+              platform: candidate.platform,
+              version: candidate.version,
+            },
+          })
+          process.stdout.write(`${i18n.t('daemon.register.saved')}\n`)
+        }
+      }
+    } else {
+      const stored = readStoredControlPlaneConfig(config)
+      if (!stored) {
+        process.stderr.write(`${i18n.t('daemon.register.no_config')}\n`)
+        return 1
+      }
+    }
 
     const existingClient = await tryCreateDaemonClient(paths)
     if (existingClient !== undefined) {

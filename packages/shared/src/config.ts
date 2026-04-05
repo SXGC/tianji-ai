@@ -321,6 +321,20 @@ export const ObserverConfigSchema = z.object({
 export type ObserverConfig = z.infer<typeof ObserverConfigSchema>
 
 /**
+ * Schema for control plane connection configuration.
+ */
+export const ControlPlaneConfigSchema = z.object({
+  baseUrl: z.string(),
+  enrollmentToken: z.string(),
+  nodeId: z.string(),
+  hostname: z.string().optional(),
+  platform: z.string().optional(),
+  version: z.string().optional(),
+})
+
+export type ControlPlaneConfig = z.infer<typeof ControlPlaneConfigSchema>
+
+/**
  * Schema for the top-level tianji-ai configuration.
  *
  * This schema represents the v1 configuration shape as defined in docs/CONFIG_DESIGN.md.
@@ -332,6 +346,7 @@ export const TianjiConfigSchema = z.object({
   agents: TianjiAgentsConfigSchema.optional(),
   runtime: RuntimeConfigSchema.optional(),
   observer: ObserverConfigSchema.optional(),
+  controlPlane: ControlPlaneConfigSchema.optional(),
 })
 
 export type TianjiConfig = z.infer<typeof TianjiConfigSchema>

@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { parseCliArgs, runCli } from '../main.js'
-import { createTempCliPaths } from './helpers/cli-test-utils.js'
-import { captureStdout } from './helpers/cli-test-utils.js'
+import { captureStdout, createTempCliPaths } from './helpers/cli-test-utils.js'
 
 describe('parseCliArgs daemon commands', () => {
   it('parses daemon start command', () => {
@@ -9,6 +8,19 @@ describe('parseCliArgs daemon commands', () => {
       kind: 'daemon',
       subcommand: 'start',
       foreground: false,
+    })
+    expect(
+      parseCliArgs([
+        'daemon',
+        'start',
+        '--register',
+        'http://127.0.0.1:3000/register?enrollment-token=test-token',
+      ])
+    ).toEqual({
+      kind: 'daemon',
+      subcommand: 'start',
+      foreground: false,
+      registerUrl: 'http://127.0.0.1:3000/register?enrollment-token=test-token',
     })
     expect(parseCliArgs(['daemon', 'start', '--fg'])).toEqual({
       kind: 'daemon',
@@ -55,22 +67,19 @@ describe('parseCliArgs daemon commands', () => {
   it('rejects extra args on status and stop subcommands', () => {
     expect(() => parseCliArgs(['daemon', 'status', '--fg'])).toThrow(/Unknown option "--fg"/)
     expect(() => parseCliArgs(['daemon', 'stop', '--fg'])).toThrow(/Unknown option "--fg"/)
+    expect(() =>
+      parseCliArgs([
+        'daemon',
+        'restart',
+        '--register',
+        'http://127.0.0.1:3000/register?enrollment-token=test-token',
+      ])
+    ).toThrow(/Unknown option "--register"/)
   })
 
   it('rejects old top-level status and stop commands', () => {
     expect(() => parseCliArgs(['status'])).toThrow(/Unknown command/)
     expect(() => parseCliArgs(['stop'])).toThrow(/Unknown command/)
-  })
-})
-
-describe('parseCliArgs register command', () => {
-  it('parses register command', () => {
-    expect(
-      parseCliArgs(['register', 'http://127.0.0.1:3000/register?enrollment-token=test-token'])
-    ).toEqual({
-      kind: 'register',
-      url: 'http://127.0.0.1:3000/register?enrollment-token=test-token',
-    })
   })
 })
 
@@ -132,6 +141,13 @@ describe('runCli daemon commands', () => {
       const exitCode = await runCli(['daemon', 'start', '--fg'], {
         getUserConfigPaths: () => paths,
         runDaemonEntry,
+        loadConfig: async () => ({
+          controlPlane: {
+            baseUrl: 'http://localhost:3000',
+            enrollmentToken: 'tok',
+            nodeId: 'n1',
+          },
+        }),
       })
 
       expect(exitCode).toBe(0)
@@ -153,6 +169,128 @@ describe('runCli daemon commands', () => {
 
       expect(exitCode).toBe(0)
       expect(runDaemonEntry).toHaveBeenCalledOnce()
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('daemon start --fg with no stored config and no --register returns exitCode 1', async () => {
+    expect.assertions(2)
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      const exitCode = await runCli(['daemon', 'start', '--fg'], {
+        getUserConfigPaths: () => paths,
+        runDaemonEntry,
+        loadConfig: async () => ({}),
+      })
+
+      expect(exitCode).toBe(1)
+      expect(runDaemonEntry).not.toHaveBeenCalled()
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('daemon start --fg --register with conflicting stored config and declined overwrite returns 0', async () => {
+    expect.assertions(2)
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      const exitCode = await runCli(
+        [
+          'daemon',
+          'start',
+          '--fg',
+          '--register',
+          'http://127.0.0.1:3000/register?enrollment-token=new-token',
+        ],
+        {
+          getUserConfigPaths: () => paths,
+          runDaemonEntry,
+          loadConfig: async () => ({
+            controlPlane: {
+              baseUrl: 'http://127.0.0.1:3000',
+              enrollmentToken: 'old-token',
+              nodeId: 'n1',
+            },
+          }),
+          confirmOverwrite: async () => false,
+          saveConfig: vi.fn(async () => undefined),
+        }
+      )
+
+      expect(exitCode).toBe(0)
+      expect(runDaemonEntry).not.toHaveBeenCalled()
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('daemon start --fg --register with no stored config saves config and starts daemon', async () => {
+    expect.assertions(3)
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const saveConfig = vi.fn(async () => undefined)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      const exitCode = await runCli(
+        [
+          'daemon',
+          'start',
+          '--fg',
+          '--register',
+          'http://127.0.0.1:3000/register?enrollment-token=test-token',
+        ],
+        {
+          getUserConfigPaths: () => paths,
+          runDaemonEntry,
+          loadConfig: async () => ({}),
+          saveConfig,
+        }
+      )
+
+      expect(exitCode).toBe(0)
+      expect(saveConfig).toHaveBeenCalledOnce()
+      expect(runDaemonEntry).toHaveBeenCalledOnce()
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('daemon start --fg --register with same stored config skips confirmation and starts daemon', async () => {
+    expect.assertions(2)
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const confirmOverwrite = vi.fn(async () => false)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      const exitCode = await runCli(
+        [
+          'daemon',
+          'start',
+          '--fg',
+          '--register',
+          'http://127.0.0.1:3000/register?enrollment-token=test-token',
+        ],
+        {
+          getUserConfigPaths: () => paths,
+          runDaemonEntry,
+          loadConfig: async () => ({
+            controlPlane: {
+              baseUrl: 'http://127.0.0.1:3000',
+              enrollmentToken: 'test-token',
+              nodeId: 'n1',
+            },
+          }),
+          confirmOverwrite,
+        }
+      )
+
+      expect(exitCode).toBe(0)
+      expect(confirmOverwrite).not.toHaveBeenCalled()
     } finally {
       await cleanup()
     }

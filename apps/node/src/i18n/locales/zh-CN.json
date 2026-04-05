@@ -14,6 +14,7 @@
   "cmd.daemon.description": "管理后台守护进程 (start, status, stop, restart)",
   "cmd.daemon.start.description": "启动后台守护进程",
   "cmd.daemon.start.option.fg": "在前台运行而非后台",
+  "cmd.daemon.start.option.register": "启动前写入并使用注册 URL",
   "cmd.daemon.status.description": "检查守护进程状态",
   "cmd.daemon.stop.description": "停止守护进程",
   "cmd.daemon.restart.description": "重启守护进程 (先停止再启动)",
@@ -42,5 +43,9 @@
   "error.daemon_timeout": "等待守护进程就绪超时。",
   "error.run_failed": "执行失败: {message}",
   "error.run_help_hint": "执行 'tianji --help' 查看用法。",
-  "error.run_command_help_hint": "执行 'tianji {command} --help' 查看用法。"
+  "error.run_command_help_hint": "执行 'tianji {command} --help' 查看用法。",
+  "daemon.register.no_config": "未找到 controlplane 配置。请使用 --register 提供注册 URL。",
+  "daemon.register.confirm_overwrite": "已存储的 controlplane 配置与提供的注册 URL 不一致，是否覆盖？",
+  "daemon.register.saved": "controlplane 配置已保存。",
+  "daemon.register.declined": "已取消覆盖，不启动守护进程。"
 }
