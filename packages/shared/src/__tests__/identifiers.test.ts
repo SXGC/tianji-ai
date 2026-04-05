@@ -160,18 +160,21 @@ describe('identifiers', () => {
       const sessionId = createSessionId('session-123')
       // @ts-expect-error -- branded types prevent cross-assignment at compile time
       const _threadId: ThreadId = sessionId
+      expect(_threadId).toBeDefined()
     })
 
     it('ThreadId is not directly assignable to RunId', () => {
       const threadId = createThreadId('thread-456')
       // @ts-expect-error -- branded types prevent cross-assignment at compile time
       const _runId: RunId = threadId
+      expect(_runId).toBeDefined()
     })
 
     it('RunId is not directly assignable to SessionId', () => {
       const runId = createRunId('run-789')
       // @ts-expect-error -- branded types prevent cross-assignment at compile time
       const _sessionId: SessionId = runId
+      expect(_sessionId).toBeDefined()
     })
   })
 
