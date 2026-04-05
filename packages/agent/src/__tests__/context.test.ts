@@ -1,8 +1,17 @@
-import { FileSnapshotStore } from '@tianji/runtime'
-import { afterEach, describe, expect, it } from 'vitest'
+import * as fs from 'node:fs/promises'
 
-import type { LoadedAgentContext } from '../context.js'
-import { getAgentAppPaths, injectProviderEnv } from '../context.js'
+import { FileSnapshotStore } from '@tianji/runtime'
+import * as runtime from '@tianji/runtime'
+import * as shared from '@tianji/shared'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { AgentAppPaths, LoadedAgentContext } from '../context.js'
+import {
+  ensureDefaultUserConfig,
+  getAgentAppPaths,
+  injectProviderEnv,
+  loadAgentContext,
+} from '../context.js'
 
 const KNOWN_ENV_KEYS = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY']
 
@@ -32,7 +41,37 @@ function createTestContext(provider: string, apiKey?: string): LoadedAgentContex
   }
 }
 
+vi.mock('node:fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+  return {
+    ...actual,
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    access: vi.fn(),
+  }
+})
+
+vi.mock('@tianji/runtime', async () => {
+  const actual = await vi.importActual<typeof import('@tianji/runtime')>('@tianji/runtime')
+  return {
+    ...actual,
+    loadResolvedConfig: vi.fn(),
+  }
+})
+
+vi.mock('@tianji/shared', async () => {
+  const actual = await vi.importActual<typeof import('@tianji/shared')>('@tianji/shared')
+  return {
+    ...actual,
+    getDefaultAgentDefinition: vi.fn(actual.getDefaultAgentDefinition),
+    parseAgentModelRef: vi.fn(actual.parseAgentModelRef),
+    getAgentSoulPath: vi.fn(actual.getAgentSoulPath),
+    loadAgentSoul: vi.fn(),
+  }
+})
+
 afterEach(() => {
+  vi.restoreAllMocks()
   for (const key of KNOWN_ENV_KEYS) {
     delete process.env[key]
   }
@@ -83,5 +122,147 @@ describe('agent context', () => {
     for (const key of KNOWN_ENV_KEYS) {
       expect(process.env[key]).toBeUndefined()
     }
+  })
+})
+
+function createTestPaths(): AgentAppPaths {
+  return {
+    configDir: '/tmp/tianji-ctx-test',
+    agentsDir: '/tmp/tianji-ctx-test/agents',
+    logsDir: '/tmp/tianji-ctx-test/logs',
+    configFilePath: '/tmp/tianji-ctx-test/tianji.json',
+    cliLogFilePath: '/tmp/tianji-ctx-test/logs/tianji.log',
+    daemonPortPath: '/tmp/tianji-ctx-test/daemon.port',
+    daemonPidPath: '/tmp/tianji-ctx-test/daemon.pid',
+  }
+}
+
+describe('ensureDefaultUserConfig', () => {
+  it('creates directories and writes config when files do not exist', async () => {
+    const paths = createTestPaths()
+    const mockedAccess = vi.mocked(fs.access)
+    // access rejects → file does not exist
+    mockedAccess.mockRejectedValue(new Error('ENOENT'))
+
+    vi.mocked(runtime.loadResolvedConfig).mockResolvedValue({
+      config: {},
+      resolvedEnvVars: [],
+      paths: {} as never,
+      workspace: {} as never,
+      layers: [],
+    })
+
+    vi.mocked(shared.getAgentSoulPath).mockReturnValue(
+      '/tmp/tianji-ctx-test/agents/default/SOUL.md'
+    )
+
+    const result = await ensureDefaultUserConfig(paths)
+
+    expect(result).toBe(paths)
+    expect(fs.mkdir).toHaveBeenCalledWith(paths.configDir, { recursive: true })
+    expect(fs.mkdir).toHaveBeenCalledWith(paths.agentsDir, { recursive: true })
+    expect(fs.mkdir).toHaveBeenCalledWith(paths.logsDir, { recursive: true })
+    // Config file did not exist, so writeFile is called for it
+    expect(fs.writeFile).toHaveBeenCalledWith(paths.configFilePath, '{}\n', 'utf8')
+    // Soul file did not exist, so writeFile is called for it
+    expect(fs.writeFile).toHaveBeenCalledWith(
+      '/tmp/tianji-ctx-test/agents/default/SOUL.md',
+      expect.stringContaining('Default Tianji Agent'),
+      'utf8'
+    )
+  })
+
+  it('skips writing files when they already exist', async () => {
+    const paths = createTestPaths()
+    const mockedAccess = vi.mocked(fs.access)
+    // access resolves → file exists
+    mockedAccess.mockResolvedValue(undefined)
+
+    vi.mocked(runtime.loadResolvedConfig).mockResolvedValue({
+      config: {},
+      resolvedEnvVars: [],
+      paths: {} as never,
+      workspace: {} as never,
+      layers: [],
+    })
+
+    vi.mocked(shared.getAgentSoulPath).mockReturnValue(
+      '/tmp/tianji-ctx-test/agents/default/SOUL.md'
+    )
+
+    await ensureDefaultUserConfig(paths)
+
+    // writeFile should NOT be called since both files exist
+    expect(fs.writeFile).not.toHaveBeenCalled()
+  })
+
+  it('reads defaultAgent name from config', async () => {
+    const paths = createTestPaths()
+    vi.mocked(fs.access).mockResolvedValue(undefined)
+
+    vi.mocked(runtime.loadResolvedConfig).mockResolvedValue({
+      config: { agents: { defaultAgent: 'custom-agent', definitions: {} } },
+      resolvedEnvVars: [],
+      paths: {} as never,
+      workspace: {} as never,
+      layers: [],
+    })
+
+    vi.mocked(shared.getAgentSoulPath).mockReturnValue(
+      '/tmp/tianji-ctx-test/agents/custom-agent/SOUL.md'
+    )
+
+    await ensureDefaultUserConfig(paths)
+
+    expect(shared.getAgentSoulPath).toHaveBeenCalledWith(paths.configDir, 'custom-agent')
+  })
+})
+
+describe('loadAgentContext', () => {
+  it('returns a fully populated LoadedAgentContext', async () => {
+    // Mock access to always succeed (files exist)
+    vi.mocked(fs.access).mockResolvedValue(undefined)
+
+    vi.mocked(runtime.loadResolvedConfig).mockResolvedValue({
+      config: {
+        agents: {
+          defaultAgent: 'test-agent',
+          definitions: {
+            'test-agent': { model: 'openai/gpt-4' },
+          },
+        },
+        providers: {
+          openai: { apiKey: 'sk-xxx' },
+        },
+      },
+      resolvedEnvVars: ['OPENAI_API_KEY'],
+      paths: {} as never,
+      workspace: {} as never,
+      layers: [],
+    })
+
+    vi.mocked(shared.getDefaultAgentDefinition).mockReturnValue({
+      agentName: 'test-agent',
+      agent: { model: 'openai/gpt-4' },
+    })
+
+    vi.mocked(shared.parseAgentModelRef).mockReturnValue({
+      provider: 'openai',
+      modelName: 'gpt-4',
+    })
+
+    vi.mocked(shared.getAgentSoulPath).mockReturnValue('/tmp/agents/test-agent/SOUL.md')
+    vi.mocked(shared.loadAgentSoul).mockResolvedValue('You are a test agent.')
+
+    const ctx = await loadAgentContext()
+
+    expect(ctx.agent.agentName).toBe('test-agent')
+    expect(ctx.agent.provider).toBe('openai')
+    expect(ctx.agent.modelName).toBe('gpt-4')
+    expect(ctx.agent.modelRef).toBe('openai/gpt-4')
+    expect(ctx.agent.providerConfig).toEqual({ apiKey: 'sk-xxx' })
+    expect(ctx.agent.soul).toBe('You are a test agent.')
+    expect(ctx.resolvedEnvVars).toEqual(['OPENAI_API_KEY'])
+    expect(ctx.snapshotStore).toBeInstanceOf(FileSnapshotStore)
   })
 })

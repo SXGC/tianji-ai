@@ -27,7 +27,15 @@ export default defineConfig({
       reporter: ['text', 'json', 'html', 'lcov'],
       reportsDirectory: './coverage',
       include: ['src/**/*.{ts,tsx}'],
-      exclude: ['src/**/__tests__/**', 'src/**/*.test.ts', 'src/**/*.spec.ts'],
+      exclude: [
+        'src/**/__tests__/**',
+        'src/**/*.test.ts',
+        'src/**/*.spec.ts',
+        // Web UI 组件 — 需要浏览器环境
+        'src/web/**',
+        // 入口文件
+        'src/server.ts',
+      ],
     },
   },
 })

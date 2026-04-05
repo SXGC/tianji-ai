@@ -32,7 +32,14 @@ export default defineConfig({
       reporter: ['text', 'json', 'html', 'lcov'],
       reportsDirectory: './coverage',
       include: ['src/**/*.ts'],
-      exclude: ['src/**/__tests__/**', 'src/**/*.test.ts', 'src/**/*.spec.ts'],
+      exclude: [
+        'src/**/__tests__/**',
+        'src/**/*.test.ts',
+        'src/**/*.spec.ts',
+        // 入口文件
+        'src/bin.ts',
+        'src/daemon-entry.ts',
+      ],
     },
   },
 })

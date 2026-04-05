@@ -28,6 +28,12 @@ export default defineConfig({
         '**/*.test.{ts,tsx}',
         '**/*.spec.{ts,tsx}',
         '**/types/**',
+        // Web UI 组件 — 需要浏览器环境，不纳入 node 单元测试覆盖率
+        '**/src/web/**',
+        // 入口文件 — 仅含启动/导出胶水代码
+        '**/src/bin.ts',
+        '**/src/server.ts',
+        '**/src/daemon-entry.ts',
       ],
     },
 
