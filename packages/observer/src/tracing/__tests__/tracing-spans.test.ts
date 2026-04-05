@@ -105,7 +105,7 @@ describe('span functions when tracing is initialized', () => {
     const result = startRunSpan({ runId: 'run-1' })
 
     expect(result).toBeDefined()
-    const attrs = mockStartSpan.mock.calls[0]?.[1]?.attributes as Record<string, string> | undefined
+    const attrs = mockStartSpan.mock.lastCall?.[1]?.attributes as Record<string, string> | undefined
     expect(attrs).toBeDefined()
     expect('tianji.session.id' in attrs!).toBe(false)
     result!.end()
@@ -143,7 +143,7 @@ describe('span functions when tracing is initialized', () => {
     const result = startToolSpan({ toolName: 'file_search' })
 
     expect(result).toBeDefined()
-    const attrs = mockStartSpan.mock.calls[0]?.[1]?.attributes as Record<string, string> | undefined
+    const attrs = mockStartSpan.mock.lastCall?.[1]?.attributes as Record<string, string> | undefined
     expect(attrs).toBeDefined()
     expect('tianji.run.id' in attrs!).toBe(false)
     result!.end()
@@ -191,7 +191,7 @@ describe('span functions when tracing is initialized', () => {
     const result = startLlmCallSpan({ provider: 'openai', model: 'gpt-4' })
 
     expect(result).toBeDefined()
-    const attrs = mockStartSpan.mock.calls[0]?.[1]?.attributes as Record<string, string> | undefined
+    const attrs = mockStartSpan.mock.lastCall?.[1]?.attributes as Record<string, string> | undefined
     expect(attrs).toBeDefined()
     expect('tianji.session.id' in attrs!).toBe(false)
     expect('tianji.run.id' in attrs!).toBe(false)
@@ -202,7 +202,7 @@ describe('span functions when tracing is initialized', () => {
     const result = startLlmCallSpan({ provider: 'openai', model: 'gpt-4', sessionId: 'sess-1' })
 
     expect(result).toBeDefined()
-    const attrs = mockStartSpan.mock.calls[0]?.[1]?.attributes as Record<string, string> | undefined
+    const attrs = mockStartSpan.mock.lastCall?.[1]?.attributes as Record<string, string> | undefined
     expect(attrs).toBeDefined()
     expect(attrs!['tianji.session.id']).toBe('sess-1')
     expect('tianji.run.id' in attrs!).toBe(false)
@@ -213,7 +213,7 @@ describe('span functions when tracing is initialized', () => {
     const result = startLlmCallSpan({ provider: 'openai', model: 'gpt-4', runId: 'run-1' })
 
     expect(result).toBeDefined()
-    const attrs = mockStartSpan.mock.calls[0]?.[1]?.attributes as Record<string, string> | undefined
+    const attrs = mockStartSpan.mock.lastCall?.[1]?.attributes as Record<string, string> | undefined
     expect(attrs).toBeDefined()
     expect(attrs!['tianji.run.id']).toBe('run-1')
     expect('tianji.session.id' in attrs!).toBe(false)
