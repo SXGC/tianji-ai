@@ -31,6 +31,9 @@ export interface CliDependencies {
   readonly loadConfig?: () => Promise<Partial<TianjiConfig>>
 }
 
+/** CLI 选项值的允许类型。 */
+export type OptionValue = string | number | boolean
+
 export interface ArgumentDefinition {
   readonly name: string
   readonly description: MessageKey
@@ -42,12 +45,12 @@ export interface OptionDefinition {
   readonly short?: `-${string}`
   readonly description: MessageKey
   readonly type: 'string' | 'number' | 'boolean'
-  readonly default?: string | number | boolean
+  readonly default?: OptionValue
 }
 
 export interface CommandContext {
   readonly args: Record<string, string>
-  readonly options: Record<string, string | number | boolean>
+  readonly options: Record<string, OptionValue>
   readonly i18n: I18n
   readonly deps: CliDependencies | undefined
 }

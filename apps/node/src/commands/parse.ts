@@ -5,6 +5,7 @@ import type {
   CliDependencies,
   CommandDefinition,
   OptionDefinition,
+  OptionValue,
   ParsedCommandResult,
 } from './types.js'
 
@@ -140,10 +141,10 @@ function parseSubcommand(
  */
 function initializeOptionMap(definitions: readonly OptionDefinition[]): {
   optionByFlag: Map<string, OptionDefinition>
-  defaults: Record<string, string | number | boolean>
+  defaults: Record<string, OptionValue>
 } {
   const optionByFlag = new Map<string, OptionDefinition>()
-  const defaults: Record<string, string | number | boolean> = {}
+  const defaults: Record<string, OptionValue> = {}
   for (const definition of definitions) {
     optionByFlag.set(definition.long, definition)
     if (definition.short !== undefined) {
@@ -170,7 +171,7 @@ function parseOptionValue(
   definition: OptionDefinition,
   token: string,
   nextToken: string | undefined,
-  options: Record<string, string | number | boolean>,
+  options: Record<string, OptionValue>,
   i18n: I18n
 ): number {
   const optionName = toOptionName(definition.long)
@@ -199,7 +200,7 @@ function parseArgsAndOptions(
   i18n: I18n
 ): {
   args: string[]
-  options: Record<string, string | number | boolean>
+  options: Record<string, OptionValue>
 } {
   const { optionByFlag, defaults } = initializeOptionMap(definitions)
   const options = { ...defaults }
