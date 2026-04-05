@@ -9,7 +9,7 @@ interface ChatComposerProps {
 export function ChatComposer(props: ChatComposerProps) {
   const [value, setValue] = useState('')
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>) {
     event.preventDefault()
     const nextValue = value.trim()
     if (nextValue.length === 0) {
