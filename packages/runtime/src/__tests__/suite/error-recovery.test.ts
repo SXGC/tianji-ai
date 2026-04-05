@@ -61,43 +61,46 @@ describe('suite/error-recovery', () => {
 
   it('run 失败后同 session 可发起新 runTurn', async () => {
     const snapshotStore = new InMemorySnapshotStore()
+    let callCount = 0
+    const toolRegistry = new ToolRegistry().registerTool({
+      spec: { name: 'conditional', description: 'Conditional', parameters: { type: 'object' } },
+      execute: async () => {
+        callCount++
+        if (callCount === 1) {
+          throw new Error('first-run-error')
+        }
+        return 'ok'
+      },
+    })
 
-    // 第一轮：失败
-    const failTool = createMockTool('fail-tool', { error: new Error('first-run-error') })
-    const failRegistry = createToolRegistry(failTool)
-    const failRuntime = createSessionRuntime({
+    const runtime = createSessionRuntime({
       deepagents: {
-        model: fakeModel().respondWithTools([{ name: 'fail-tool', args: {}, id: 'tool-fail-1' }]),
+        model: fakeModel()
+          .respondWithTools([{ name: 'conditional', args: {}, id: 'tool-fail-1' }])
+          .respond(new AIMessage('recovered')),
       },
       snapshotStore,
-      toolCatalog: failRegistry,
+      toolCatalog: toolRegistry,
     })
 
     const sessionId = createSessionId('err-recover-session')
-    await failRuntime.createSession({ sessionId })
+    await runtime.createSession({ sessionId })
 
-    const failRunId = await failRuntime.runTurn({
+    // 第一轮：失败
+    const failRunId = await runtime.runTurn({
       sessionId,
       message: createUserMessage('msg-fail', 'do something'),
     })
-    const failOutcome = await collectRuntimeOutcome(failRunId, failRuntime)
+    const failOutcome = await collectRuntimeOutcome(failRunId, runtime)
     expect(failOutcome.error).toBeDefined()
-    await waitForRunStatus(failRuntime, failRunId, 'failed')
+    await waitForRunStatus(runtime, failRunId, 'failed')
 
-    // 第二轮：成功（共享 snapshotStore）
-    const successRuntime = createSessionRuntime({
-      deepagents: {
-        model: fakeModel().respond(new AIMessage('recovered')),
-      },
-      snapshotStore,
-      toolCatalog: new ToolRegistry(),
-    })
-
-    const successRunId = await successRuntime.runTurn({
+    // 第二轮：同一 runtime 实例恢复
+    const successRunId = await runtime.runTurn({
       sessionId,
       message: createUserMessage('msg-recover', 'recover'),
     })
-    const successEvents = await collectRuntimeEvents(successRunId, successRuntime)
+    const successEvents = await collectRuntimeEvents(successRunId, runtime)
 
     assertRunCompleted(successEvents)
   })
