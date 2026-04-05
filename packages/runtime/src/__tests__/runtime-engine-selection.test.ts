@@ -54,6 +54,7 @@ describe('runtime engine selection', () => {
     })
 
     it('rejects explicit legacy engine after final removal', () => {
+      expect.assertions(3)
       expect(() => createRuntimeWithLegacyEngineOverride()).toThrow(TianjiError)
 
       try {
@@ -90,6 +91,7 @@ describe('runtime engine selection', () => {
 
   describe('legacy snapshot compatibility boundaries', () => {
     it('rejects runTurn for sessions bound to the legacy engine', async () => {
+      expect.assertions(5)
       const store = new InMemorySnapshotStore()
       const legacySession: SessionSnapshot = {
         sessionId: createSessionId('session-legacy-boundary'),
@@ -141,6 +143,7 @@ describe('runtime engine selection', () => {
     })
 
     it('rejects resumeRun when the stored run is bound to the legacy engine', async () => {
+      expect.assertions(5)
       const store = new InMemorySnapshotStore()
       const session: SessionSnapshot = {
         sessionId: createSessionId('session-resume-engine-mismatch'),
@@ -188,6 +191,7 @@ describe('runtime engine selection', () => {
     })
 
     it('rejects resumeRun when historical cancelled runs have no runtime engine metadata', async () => {
+      expect.assertions(5)
       const store = new InMemorySnapshotStore()
       const session: SessionSnapshot = {
         sessionId: createSessionId('session-resume-missing-engine'),

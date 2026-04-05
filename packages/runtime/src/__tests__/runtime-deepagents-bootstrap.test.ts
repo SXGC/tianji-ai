@@ -65,6 +65,7 @@ describe('deepagents runtime bootstrap', () => {
   })
 
   it('fails fast when model is missing', () => {
+    expect.assertions(4)
     const deepagents = {} as SessionRuntimeDeepagentsConfig
 
     expect(() =>
