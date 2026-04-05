@@ -775,7 +775,15 @@ function stableSerialize(value: unknown): string {
       return sortJsonKeys('', candidate)
     })
   } catch {
-    return typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)
+    if (typeof value !== 'object' || value === null) {
+      return String(value)
+    }
+
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return '[Unserializable]'
+    }
   }
 }
 
