@@ -156,22 +156,22 @@ describe('identifiers', () => {
   })
 
   describe('branded type isolation', () => {
-    it('should not allow SessionId to be assigned to ThreadId at compile time', () => {
-      const sessionId: SessionId = createSessionId('session-123')
-      const threadId: ThreadId = sessionId as unknown as ThreadId
-      expect(threadId).toBe('session-123')
+    it('SessionId is not directly assignable to ThreadId', () => {
+      const sessionId = createSessionId('session-123')
+      // @ts-expect-error -- branded types prevent cross-assignment at compile time
+      const _threadId: ThreadId = sessionId
     })
 
-    it('should not allow ThreadId to be assigned to RunId at compile time', () => {
-      const threadId: ThreadId = createThreadId('thread-456')
-      const runId: RunId = threadId as unknown as RunId
-      expect(runId).toBe('thread-456')
+    it('ThreadId is not directly assignable to RunId', () => {
+      const threadId = createThreadId('thread-456')
+      // @ts-expect-error -- branded types prevent cross-assignment at compile time
+      const _runId: RunId = threadId
     })
 
-    it('should not allow RunId to be assigned to SessionId at compile time', () => {
-      const runId: RunId = createRunId('run-789')
-      const sessionId: SessionId = runId as unknown as SessionId
-      expect(sessionId).toBe('run-789')
+    it('RunId is not directly assignable to SessionId', () => {
+      const runId = createRunId('run-789')
+      // @ts-expect-error -- branded types prevent cross-assignment at compile time
+      const _sessionId: SessionId = runId
     })
   })
 
