@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { readStoredControlPlaneConfig } from '../controlplane-config.js'
 import { readControlPlaneRuntimeConfigFromEnv } from '../env-config.js'
 
 describe('readControlPlaneRuntimeConfigFromEnv', () => {
@@ -38,5 +39,46 @@ describe('readControlPlaneRuntimeConfigFromEnv', () => {
     expect(config?.baseUrl).toBe('http://127.0.0.1:3000')
     expect(String(config?.nodeId)).toBe('node-001')
     expect(config?.agentList).toHaveLength(1)
+  })
+})
+
+describe('readStoredControlPlaneConfig', () => {
+  it('returns null when user config has no stored controlplane config', () => {
+    expect(readStoredControlPlaneConfig({})).toBeNull()
+  })
+
+  it('reads controlplane config from TianjiConfig', () => {
+    const result = readStoredControlPlaneConfig({
+      controlPlane: {
+        baseUrl: 'http://127.0.0.1:3000',
+        enrollmentToken: 'token',
+        nodeId: 'node-1',
+        hostname: 'host',
+        platform: 'linux',
+        version: '0.0.1',
+      },
+    })
+    expect(result).not.toBeNull()
+    expect(result!.baseUrl).toBe('http://127.0.0.1:3000')
+    expect(result!.enrollmentToken).toBe('token')
+    expect(result!.hostname).toBe('host')
+    expect(result!.platform).toBe('linux')
+    expect(result!.version).toBe('0.0.1')
+  })
+
+  it('returns null when baseUrl is missing', () => {
+    expect(
+      readStoredControlPlaneConfig({
+        controlPlane: { enrollmentToken: 'token' } as Record<string, unknown>,
+      })
+    ).toBeNull()
+  })
+
+  it('returns null when enrollmentToken is missing', () => {
+    expect(
+      readStoredControlPlaneConfig({
+        controlPlane: { baseUrl: 'http://localhost' } as Record<string, unknown>,
+      })
+    ).toBeNull()
   })
 })

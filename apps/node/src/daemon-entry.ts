@@ -4,6 +4,11 @@ import { DaemonServer, createAgentSession } from '@tianji/agent'
 
 import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
+import { readStoredControlPlaneConfig } from './node-runtime/controlplane-config.js'
+import {
+  type ControlPlaneRuntimeHandle,
+  createControlPlaneRuntime,
+} from './node-runtime/controlplane-runtime.js'
 
 export async function runDaemonEntry(): Promise<void> {
   const context = await loadUserConfigContext()
@@ -20,7 +25,20 @@ export async function runDaemonEntry(): Promise<void> {
 
   process.stdout.write(`${i18n.t('daemon.listening', { port: server.port })}\n`)
 
+  // 如果用户配置中包含 controlplane 配置，则启动 controlplane 连接
+  const controlPlaneConfig = readStoredControlPlaneConfig(context.config)
+  let controlPlaneHandle: ControlPlaneRuntimeHandle | null = null
+  if (controlPlaneConfig) {
+    const runtime = createControlPlaneRuntime({
+      ...controlPlaneConfig,
+      agentList: [],
+    })
+    await runtime.connection.start()
+    controlPlaneHandle = runtime
+  }
+
   const shutdown = () => {
+    controlPlaneHandle?.connection.stop()
     void server.shutdown().finally(() => process.exit(0))
   }
   process.on('SIGTERM', shutdown)
