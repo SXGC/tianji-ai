@@ -127,9 +127,14 @@ describe('InMemorySnapshotStore', () => {
     }
 
     await store.saveSession(snapshot)
-    const loaded = await store.loadSession(sessionId)
 
-    // Mutate the loaded copy
+    // Mutate original after save — stored copy should be unaffected
+    ;(snapshot as SessionSnapshot & { messages: unknown[] }).messages.push({ role: 'system' })
+
+    const loaded = await store.loadSession(sessionId)
+    expect(loaded?.messages).toEqual([])
+
+    // Mutate the loaded copy — stored copy should still be unaffected
     ;(loaded as SessionSnapshot & { messages: unknown[] }).messages.push({ role: 'user' })
 
     // Reload should still have empty messages
@@ -214,8 +219,8 @@ describe('FileSnapshotStore', () => {
       sessionId,
       status: 'completed',
       messages: [],
-      createdAt: 1,
-      updatedAt: 1,
+      createdAt: 2,
+      updatedAt: 2,
       pendingOperations: [],
     }
     const secondRun: RunSnapshot = {
@@ -223,8 +228,8 @@ describe('FileSnapshotStore', () => {
       sessionId,
       status: 'cancelled',
       messages: [],
-      createdAt: 2,
-      updatedAt: 2,
+      createdAt: 1,
+      updatedAt: 1,
       pendingOperations: [],
     }
 
@@ -232,6 +237,7 @@ describe('FileSnapshotStore', () => {
     await store.saveRun(secondRun)
 
     await expect(store.loadRun(firstRun.runId)).resolves.toEqual(firstRun)
-    await expect(store.listRuns(sessionId)).resolves.toEqual([firstRun, secondRun])
+    // secondRun has createdAt=1, firstRun has createdAt=2 — sorted ascending by createdAt
+    await expect(store.listRuns(sessionId)).resolves.toEqual([secondRun, firstRun])
   })
 })
