@@ -173,7 +173,7 @@ function toJsonValue(value: unknown): JsonValue {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, toJsonValue(item)]))
   }
 
-  return typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value)
+  return String(value)
 }
 
 function toJsonObject(value: Record<string, unknown>): Record<string, JsonValue> {
