@@ -173,7 +173,8 @@ function toJsonValue(value: unknown): JsonValue {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, toJsonValue(item)]))
   }
 
-  return String(value)
+  // Remaining non-JSON-representable types (undefined, symbol, bigint, function)
+  return null
 }
 
 function toJsonObject(value: Record<string, unknown>): Record<string, JsonValue> {

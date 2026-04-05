@@ -775,12 +775,12 @@ function stableSerialize(value: unknown): string {
       return sortJsonKeys('', candidate)
     })
   } catch {
-    if (typeof value !== 'object' || value === null) {
-      return String(value)
+    if (typeof value === 'string') {
+      return value
     }
 
     try {
-      return JSON.stringify(value)
+      return JSON.stringify(value) ?? 'undefined'
     } catch {
       return '[Unserializable]'
     }
