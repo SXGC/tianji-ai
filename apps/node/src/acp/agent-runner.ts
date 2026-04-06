@@ -5,16 +5,21 @@
  */
 
 import { ClientSideConnection, ndJsonStream } from '@agentclientprotocol/sdk'
-import { type RuntimeEvent, createRunId, createSessionId } from '@tianji/shared'
+import {
+  DEFAULT_AGENT_COMMAND,
+  type RuntimeEvent,
+  createRunId,
+  createSessionId,
+} from '@tianji/shared'
 
-import { AgentProcessManager, resolveAgentEntryPath } from './agent-process.js'
+import { AgentProcessManager } from './agent-process.js'
 import { AcpNodeClient } from './client-bridge.js'
 import { mapSessionUpdateToRuntimeEvent } from './event-adapter.js'
 
 export interface AgentRunnerConfig {
   readonly agentId: string
-  /** agent 入口 JS 文件路径，默认解析 @tianji/agent 的 acp-entry.js */
-  readonly entryPath?: string
+  /** 可执行命令，默认 tianji-agent */
+  readonly command?: string
   readonly args?: readonly string[]
   readonly env?: Record<string, string>
 }
@@ -35,7 +40,7 @@ export class AgentRunner {
   async connect(): Promise<void> {
     this.#processManager = new AgentProcessManager({
       agentId: this.#config.agentId,
-      entryPath: this.#config.entryPath ?? resolveAgentEntryPath(),
+      command: this.#config.command ?? DEFAULT_AGENT_COMMAND,
       args: [...(this.#config.args ?? [])],
       env: this.#config.env,
     })

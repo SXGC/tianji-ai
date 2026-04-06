@@ -2,7 +2,7 @@ export interface TaskStreamHandlers {
   readonly onSessionAttached: (sessionId: string) => void
   readonly onMessageDelta: (delta: string) => void
   readonly onDone: () => void
-  readonly onError: () => void
+  readonly onError: (message?: string) => void
 }
 
 /**
@@ -16,6 +16,7 @@ export function streamTask(taskId: string, handlers: TaskStreamHandlers): () => 
       payload?: {
         type?: string
         sessionId?: string
+        error?: string
       }
     }
 
@@ -24,6 +25,16 @@ export function streamTask(taskId: string, handlers: TaskStreamHandlers): () => 
       typeof data.payload.sessionId === 'string'
     ) {
       handlers.onSessionAttached(data.payload.sessionId)
+      return
+    }
+
+    if (data.payload?.type === 'task.failed') {
+      handlers.onError(data.payload.error ?? '任务执行失败。')
+      return
+    }
+
+    if (data.payload?.type === 'task.cancelled') {
+      handlers.onError('任务已取消。')
     }
   })
 

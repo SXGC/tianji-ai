@@ -77,7 +77,8 @@ describe('POST /api/nodes/register', () => {
     expect(response.status).toBe(403)
     expect(
       sink.entries.some(
-        (e) => e.level === 'warn' && e.message === 'Registration rejected: invalid enrollment token'
+        (e) =>
+          e.level === 'error' && e.message === 'Registration rejected: invalid enrollment token'
       )
     ).toBe(true)
   })

@@ -23,7 +23,7 @@ export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogg
       .get(body.enrollmentToken)
 
     if (tokenRow === undefined) {
-      await logger.warn(SCOPE_REGISTER, 'Registration rejected: invalid enrollment token')
+      await logger.error(SCOPE_REGISTER, 'Registration rejected: invalid enrollment token')
       return c.json({ error: 'Invalid enrollment token' }, 403)
     }
 

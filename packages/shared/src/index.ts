@@ -63,6 +63,8 @@ export {
   DEFAULT_AGENTS_CONFIG,
   DEFAULT_TIANJI_CONFIG,
   // Agent helpers
+  DEFAULT_AGENT_COMMAND,
+  resolveAgentType,
   createDefaultUserTianjiConfig,
   parseAgentModelRef,
   getDefaultAgentDefinition,

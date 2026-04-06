@@ -143,6 +143,5 @@ function createDefaultAgentRunner(
 ): AgentRunner {
   return new AgentRunner({
     agentId: context.agent.agentName,
-    entryPath: context.agent.entryPath,
   })
 }

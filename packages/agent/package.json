@@ -9,8 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./dist/acp-entry.js": "./dist/acp-entry.js"
+    }
+  },
+  "bin": {
+    "tianji-agent": "./dist/acp-entry.js"
   },
   "files": ["dist", "src"],
   "scripts": {

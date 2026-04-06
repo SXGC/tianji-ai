@@ -154,6 +154,7 @@ describe('runCli daemon commands', () => {
         },
       }
 
+      vi.resetModules()
       vi.doMock('@tianji/agent', async (importOriginal) => {
         const actual = await importOriginal<typeof import('@tianji/agent')>()
         return {
@@ -220,6 +221,193 @@ describe('runCli daemon commands', () => {
       expect(exitCode).toBe(0)
       expect(runDaemonEntry).toHaveBeenCalledOnce()
     } finally {
+      await cleanup()
+    }
+  })
+
+  it('daemon restart --fg fails when recorded pid does not exit after shutdown', async () => {
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      await writeFile(paths.daemonPortPath, '32123', 'utf8')
+      await writeFile(paths.daemonPidPath, '4321', 'utf8')
+
+      const shutdown = vi.fn(async () => undefined)
+      const close = vi.fn()
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((
+        pid: number,
+        signal?: NodeJS.Signals | number
+      ) => {
+        if (pid === 4321 && signal === 0) {
+          return true
+        }
+
+        return true
+      }) as typeof process.kill)
+
+      vi.resetModules()
+      vi.doMock('@tianji/agent', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@tianji/agent')>()
+        return {
+          ...actual,
+          DaemonClient: vi.fn().mockImplementation(() => ({
+            ping: vi.fn(async () => ({
+              pid: 4321,
+              sessionId: 'session-1',
+              uptime: 10,
+              controlPlane: {
+                enabled: false,
+                status: 'disabled',
+                baseUrl: null,
+                lastSuccessAt: null,
+                lastError: null,
+              },
+            })),
+            shutdown,
+            close,
+          })),
+        }
+      })
+
+      const originalDateNow = Date.now
+      let now = 0
+      vi.spyOn(Date, 'now').mockImplementation(() => {
+        now += 1000
+        return now
+      })
+
+      const { runCli: isolatedRunCli } = await import('../main.js')
+      const exitCode = await isolatedRunCli(['daemon', 'restart', '--fg'], {
+        getUserConfigPaths: () => paths,
+        runDaemonEntry,
+      })
+
+      expect(exitCode).toBe(1)
+      expect(shutdown).toHaveBeenCalledOnce()
+      expect(runDaemonEntry).not.toHaveBeenCalled()
+      Date.now = originalDateNow
+      killSpy.mockRestore()
+    } finally {
+      vi.doUnmock('@tianji/agent')
+      await cleanup()
+    }
+  })
+
+  it('daemon restart --fg starts replacement after recorded pid exits', async () => {
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      await writeFile(paths.daemonPortPath, '32123', 'utf8')
+      await writeFile(paths.daemonPidPath, '4321', 'utf8')
+
+      let processAlive = true
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((
+        pid: number,
+        signal?: NodeJS.Signals | number
+      ) => {
+        if (pid === 4321 && signal === 0 && processAlive) {
+          throw new Error('process still running')
+        }
+
+        return true
+      }) as typeof process.kill)
+
+      vi.resetModules()
+      vi.doMock('@tianji/agent', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@tianji/agent')>()
+        return {
+          ...actual,
+          DaemonClient: vi.fn().mockImplementation(() => ({
+            ping: vi.fn(async () => ({
+              pid: 4321,
+              sessionId: 'session-1',
+              uptime: 10,
+              controlPlane: {
+                enabled: false,
+                status: 'disabled',
+                baseUrl: null,
+                lastSuccessAt: null,
+                lastError: null,
+              },
+            })),
+            shutdown: vi.fn(async () => {
+              setTimeout(() => {
+                processAlive = false
+              }, 50)
+            }),
+            close: vi.fn(),
+          })),
+        }
+      })
+
+      const { runCli: isolatedRunCli } = await import('../main.js')
+      const exitCode = await isolatedRunCli(['daemon', 'restart', '--fg'], {
+        getUserConfigPaths: () => paths,
+        runDaemonEntry,
+      })
+
+      expect(exitCode).toBe(0)
+      expect(runDaemonEntry).toHaveBeenCalledOnce()
+      killSpy.mockRestore()
+    } finally {
+      vi.doUnmock('@tianji/agent')
+      await cleanup()
+    }
+  })
+
+  it('daemon start --fg refuses to start when pid is still alive behind stale port state', async () => {
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      await writeFile(paths.daemonPortPath, '32123', 'utf8')
+      await writeFile(paths.daemonPidPath, '4321', 'utf8')
+
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((
+        pid: number,
+        signal?: NodeJS.Signals | number
+      ) => {
+        if (pid === 4321 && signal === 0) {
+          return true
+        }
+
+        return true
+      }) as typeof process.kill)
+
+      vi.resetModules()
+      vi.doMock('@tianji/agent', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@tianji/agent')>()
+        return {
+          ...actual,
+          DaemonClient: vi.fn().mockImplementation(() => ({
+            ping: vi.fn(async () => {
+              throw new Error('connect ECONNREFUSED')
+            }),
+            close: vi.fn(),
+          })),
+        }
+      })
+
+      const { runCli: isolatedRunCli } = await import('../main.js')
+      const exitCode = await isolatedRunCli(['daemon', 'start', '--fg'], {
+        getUserConfigPaths: () => paths,
+        runDaemonEntry,
+        loadConfig: async () => ({
+          controlPlane: {
+            baseUrl: 'http://localhost:3000',
+            enrollmentToken: 'tok',
+            nodeId: 'n1',
+          },
+        }),
+      })
+
+      expect(exitCode).toBe(1)
+      expect(runDaemonEntry).not.toHaveBeenCalled()
+      killSpy.mockRestore()
+    } finally {
+      vi.doUnmock('@tianji/agent')
       await cleanup()
     }
   })

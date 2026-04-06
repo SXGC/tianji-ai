@@ -1,6 +1,12 @@
 import { hostname, platform } from 'node:os'
 
-import { type AgentInfo, type NodeId, type TianjiConfig, createNodeId } from '@tianji/shared'
+import {
+  type AgentInfo,
+  type NodeId,
+  type TianjiConfig,
+  createNodeId,
+  resolveAgentType,
+} from '@tianji/shared'
 
 /**
  * 持久化存储的 control plane 连接配置。
@@ -86,9 +92,9 @@ export function deriveControlPlaneAgentList(
     throw new Error('Missing agents.items in Tianji config')
   }
 
-  return Object.keys(items).map((agentId) => ({
+  return Object.entries(items).map(([agentId, agentConfig]) => ({
     agentId,
-    type: 'native',
+    type: resolveAgentType(agentConfig) === 'external' ? 'third-party' : 'native',
     name: agentId,
     version: nodeVersion,
   }))

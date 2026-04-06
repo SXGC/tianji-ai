@@ -10,7 +10,7 @@ import {
   loadUserConfigContext,
 } from '../config.js'
 import { runDaemonEntry } from '../daemon-entry.js'
-import { logDebug, logInfo } from '../logger.js'
+import { type CliLogScope, logDebug, logInfo } from '../logger.js'
 import {
   areStoredControlPlaneConfigsEqual,
   buildStoredControlPlaneConfig,
@@ -23,6 +23,8 @@ import type { TianjiConfig } from '@tianji/shared'
 import type { CommandDefinition } from './types.js'
 
 const DAEMON_START_SCOPE = ['cli', 'daemon', 'start'] as const
+const DAEMON_STOP_SCOPE = ['cli', 'daemon', 'stop'] as const
+const DAEMON_RESTART_SCOPE = ['cli', 'daemon', 'restart'] as const
 
 function formatControlPlaneStatusDetails(input: {
   status: string
@@ -80,6 +82,85 @@ async function requireDaemonClient(paths: UserConfigPaths): Promise<DaemonClient
 async function cleanupStaleDaemonFiles(paths: UserConfigPaths): Promise<void> {
   await rm(paths.daemonPortPath, { force: true })
   await rm(paths.daemonPidPath, { force: true })
+}
+
+function isProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function forceKillProcess(pid: number): boolean {
+  try {
+    process.kill(pid, 'SIGKILL')
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function waitForProcessExit(pid: number, timeoutMs = 5000): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (!isProcessAlive(pid)) {
+      return true
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100))
+  }
+
+  return !isProcessAlive(pid)
+}
+
+/**
+ * 尝试优雅停止 daemon，超时后强制终止。
+ * @returns 进程是否已退出
+ */
+async function stopDaemonGracefullyOrForce(
+  paths: UserConfigPaths,
+  scope: CliLogScope
+): Promise<boolean> {
+  const pid = await readDaemonPid(paths)
+  if (pid === undefined) {
+    return true
+  }
+
+  await logDebug(paths, scope, 'Waiting for daemon process to exit', { pid })
+  const exited = await waitForProcessExit(pid, 5000)
+  if (exited) {
+    await logDebug(paths, scope, 'Daemon process exited gracefully', { pid })
+    await cleanupStaleDaemonFiles(paths)
+    return true
+  }
+
+  await logDebug(paths, scope, 'Graceful shutdown timed out, sending SIGKILL', { pid })
+  const killed = forceKillProcess(pid)
+  await logDebug(paths, scope, 'SIGKILL result', { pid, killed })
+
+  if (killed) {
+    const exitedAfterKill = await waitForProcessExit(pid, 3000)
+    await logDebug(paths, scope, 'Process exit after SIGKILL', { pid, exited: exitedAfterKill })
+  }
+
+  await cleanupStaleDaemonFiles(paths)
+  return !isProcessAlive(pid)
+}
+
+async function ensureNoOrphanedDaemon(paths: UserConfigPaths): Promise<boolean> {
+  const pid = await readDaemonPid(paths)
+  if (pid === undefined) {
+    return false
+  }
+
+  if (!isProcessAlive(pid)) {
+    await cleanupStaleDaemonFiles(paths)
+    return false
+  }
+
+  return true
 }
 
 function startDetachedDaemonProcess(): void {
@@ -238,9 +319,21 @@ const daemonStartCommand: CommandDefinition = {
         process.stdout.write(`${i18n.t('daemon.already_running', { pid: ping.pid })}\n`)
         return undefined
       } catch {
+        if (await ensureNoOrphanedDaemon(paths)) {
+          process.stderr.write(
+            'Daemon process is still running but not responding. Stop it before starting a new one.\n'
+          )
+          return 1
+        }
+
         await logDebug(paths, DAEMON_START_SCOPE, 'Removing stale daemon files before start')
         await cleanupStaleDaemonFiles(paths)
       }
+    } else if (await ensureNoOrphanedDaemon(paths)) {
+      process.stderr.write(
+        'Daemon process is still running but state files are inconsistent. Stop it before starting a new one.\n'
+      )
+      return 1
     }
 
     if (options.fg === true) {
@@ -309,8 +402,15 @@ const daemonStopCommand: CommandDefinition = {
 
     try {
       const client = await requireDaemonClient(paths)
+      await logDebug(paths, DAEMON_STOP_SCOPE, 'Sending shutdown request')
       await client.shutdown()
       process.stdout.write(`${i18n.t('daemon.stopped')}\n`)
+
+      const stopped = await stopDaemonGracefullyOrForce(paths, DAEMON_STOP_SCOPE)
+      if (!stopped) {
+        process.stderr.write('Failed to stop daemon process.\n')
+        return 1
+      }
       return 0
     } catch (error) {
       if (error instanceof Error) {
@@ -337,22 +437,39 @@ const daemonRestartCommand: CommandDefinition = {
     const existingClient = await tryCreateDaemonClient(paths)
     if (existingClient !== undefined) {
       try {
+        await logDebug(paths, DAEMON_RESTART_SCOPE, 'Sending shutdown request to existing daemon')
         await existingClient.shutdown()
         process.stdout.write(`${i18n.t('daemon.stopped')}\n`)
       } catch {
-        await cleanupStaleDaemonFiles(paths)
+        await logDebug(paths, DAEMON_RESTART_SCOPE, 'Shutdown request failed, will force kill')
+      }
+
+      const stopped = await stopDaemonGracefullyOrForce(paths, DAEMON_RESTART_SCOPE)
+      if (!stopped) {
+        process.stderr.write('Failed to stop daemon process.\n')
+        return 1
+      }
+    } else if (await ensureNoOrphanedDaemon(paths)) {
+      await logDebug(paths, DAEMON_RESTART_SCOPE, 'Found orphaned daemon, force killing')
+      const stopped = await stopDaemonGracefullyOrForce(paths, DAEMON_RESTART_SCOPE)
+      if (!stopped) {
+        process.stderr.write('Failed to stop orphaned daemon process.\n')
+        return 1
       }
     }
 
     if (options.fg === true) {
+      await logDebug(paths, DAEMON_RESTART_SCOPE, 'Starting new daemon in foreground mode')
       const runDaemonEntryCommand = deps?.runDaemonEntry ?? runDaemonEntry
       await runDaemonEntryCommand()
       return undefined
     }
 
+    await logDebug(paths, DAEMON_RESTART_SCOPE, 'Starting new daemon in background mode')
     startDetachedDaemonProcess()
 
     const { pid, port } = await waitForDaemonReady(paths)
+    await logInfo(paths, DAEMON_RESTART_SCOPE, 'Daemon restarted', { pid, port })
     process.stdout.write(`${i18n.t('daemon.started', { pid, port })}\n`)
   },
 }

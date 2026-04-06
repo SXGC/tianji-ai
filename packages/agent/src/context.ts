@@ -47,7 +47,6 @@ export interface AgentContext {
   readonly providerConfig: TianjiProviderConfig | undefined
   readonly soulPath: string
   readonly soul: string
-  readonly entryPath: string | undefined
 }
 
 export interface LoadedAgentContext {
@@ -128,6 +127,9 @@ export async function loadAgentContext(): Promise<LoadedAgentContext> {
   const paths = await ensureDefaultUserConfig()
   const resolvedConfig = await loadResolvedConfig()
   const { agentName, agent } = getDefaultAgentDefinition(resolvedConfig.config)
+  if (agent.model === undefined) {
+    throw new Error(`Agent "${agentName}" must have a "model" field for native agent execution`)
+  }
   const { provider, modelName } = parseAgentModelRef(agent.model)
   const soulPath = getAgentSoulPath(paths.configDir, agentName)
   const soul = await loadAgentSoul(soulPath)
@@ -143,7 +145,6 @@ export async function loadAgentContext(): Promise<LoadedAgentContext> {
       providerConfig: resolvedConfig.config.providers?.[provider],
       soulPath,
       soul,
-      entryPath: agent.entryPath,
     },
     resolvedEnvVars: resolvedConfig.resolvedEnvVars,
     snapshotStore: new FileSnapshotStore(join(paths.configDir, 'runtime-snapshots')),

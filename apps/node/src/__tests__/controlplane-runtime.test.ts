@@ -21,6 +21,7 @@ function createTestConfig(
     platform: 'linux',
     version: '1.0.0',
     agentList: [],
+    agentConfigs: {},
     ...overrides,
   }
 }
@@ -67,6 +68,9 @@ describe('createControlPlaneRuntime with custom deps', () => {
   })
 
   it('connection onCommand dispatches to taskExecutor.execute', async () => {
+    const fixedNow = Date.now()
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(fixedNow)
+
     const execute = vi.fn(async () => undefined)
     let capturedOnCommand: ((cmd: Command) => void) | undefined
 
@@ -94,6 +98,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
     capturedOnCommand!(cmd)
 
     // execute is called via void (fire-and-forget), wait a tick
+    dateNowSpy.mockRestore()
     await new Promise((resolve) => setTimeout(resolve, 10))
     expect(execute).toHaveBeenCalledWith(cmd)
   })
@@ -296,7 +301,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
 describe('parseAgentArgs (via default TaskExecutor path)', () => {
   // parseAgentArgs is a private function, but we can test it indirectly
   // by creating a runtime without deps.createTaskExecutor and checking
-  // The default TaskExecutor creation path uses resolveAgentEntryPath()
+  // The default TaskExecutor creation path uses agentConfigs
   // to locate the @tianji/agent ACP entry point.
 
   it('creates runtime without deps using default constructors', () => {

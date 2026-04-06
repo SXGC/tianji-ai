@@ -4,6 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { AgentProcessManager } from '../acp/agent-process.js'
 
+type MutableChildProcess = ChildProcess & {
+  exitCode: number | null
+  pid: number
+}
+
 /**
  * 创建一个模拟的 ChildProcess 对象。
  *
@@ -14,36 +19,36 @@ function createMockChildProcess(options?: {
   noStdin?: boolean
 }): ChildProcess {
   const emitter = new EventEmitter()
-  const proc = emitter as unknown as ChildProcess
-  ;(proc as Record<string, unknown>).exitCode = null
-  ;(proc as Record<string, unknown>).pid = 12345
-  ;(proc as Record<string, unknown>).kill = vi.fn((signal?: string) => {
+  const proc = emitter as unknown as MutableChildProcess
+  proc.exitCode = null
+  proc.pid = 12345
+  proc.kill = vi.fn((signal?: number | NodeJS.Signals) => {
     if (signal === 'SIGKILL' || signal === 'SIGTERM') {
-      ;(proc as Record<string, unknown>).exitCode = 1
+      proc.exitCode = 1
       emitter.emit('exit', 1, signal)
     }
     return true
-  })
+  }) as ChildProcess['kill']
 
   if (!options?.noStdout) {
     const { Readable } = require('node:stream')
-    ;(proc as Record<string, unknown>).stdout = new Readable({ read() {} })
+    proc.stdout = new Readable({ read() {} })
   } else {
-    ;(proc as Record<string, unknown>).stdout = null
+    proc.stdout = null
   }
 
   if (!options?.noStdin) {
     const { Writable } = require('node:stream')
-    ;(proc as Record<string, unknown>).stdin = new Writable({
-      write(_c, _e, cb) {
+    proc.stdin = new Writable({
+      write(_c: Buffer | string, _e: BufferEncoding, cb: (error?: Error | null) => void) {
         cb()
       },
     })
   } else {
-    ;(proc as Record<string, unknown>).stdin = null
+    proc.stdin = null
   }
 
-  return proc
+  return proc as ChildProcess
 }
 
 vi.mock('node:child_process', () => ({
@@ -62,7 +67,7 @@ describe('AgentProcessManager', () => {
   it('stores agentId from config', () => {
     const manager = new AgentProcessManager({
       agentId: 'test-agent',
-      entryPath: '/path/to/acp-entry.js',
+      command: 'tianji-agent',
     })
 
     expect(manager.agentId).toBe('test-agent')
@@ -71,20 +76,20 @@ describe('AgentProcessManager', () => {
   it('isRunning returns false before spawn', () => {
     const manager = new AgentProcessManager({
       agentId: 'test-agent',
-      entryPath: '/path/to/acp-entry.js',
+      command: 'tianji-agent',
     })
 
     expect(manager.isRunning).toBe(false)
   })
 
   describe('spawn', () => {
-    it('spawns node with entryPath and returns Web Streams', () => {
+    it('spawns command with args and returns Web Streams', () => {
       const mockProc = createMockChildProcess()
       mockSpawn.mockReturnValue(mockProc)
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
         args: ['--flag'],
         env: { CUSTOM_VAR: 'value' },
       })
@@ -92,8 +97,8 @@ describe('AgentProcessManager', () => {
       const streams = manager.spawn()
 
       expect(mockSpawn).toHaveBeenCalledWith(
-        process.execPath,
-        ['/path/to/acp-entry.js', '--flag'],
+        'tianji-agent',
+        ['--flag'],
         expect.objectContaining({
           stdio: ['pipe', 'pipe', 'inherit'],
         })
@@ -103,22 +108,33 @@ describe('AgentProcessManager', () => {
       expect(manager.isRunning).toBe(true)
     })
 
+    it('spawns external agent command directly', () => {
+      const mockProc = createMockChildProcess()
+      mockSpawn.mockReturnValue(mockProc)
+
+      const manager = new AgentProcessManager({
+        agentId: 'claude',
+        command: 'claude',
+        args: ['--acp'],
+      })
+
+      manager.spawn()
+
+      expect(mockSpawn).toHaveBeenCalledWith('claude', ['--acp'], expect.any(Object))
+    })
+
     it('spawns with empty args when none provided', () => {
       const mockProc = createMockChildProcess()
       mockSpawn.mockReturnValue(mockProc)
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       manager.spawn()
 
-      expect(mockSpawn).toHaveBeenCalledWith(
-        process.execPath,
-        ['/path/to/acp-entry.js'],
-        expect.any(Object)
-      )
+      expect(mockSpawn).toHaveBeenCalledWith('tianji-agent', [], expect.any(Object))
     })
 
     it('throws when agent is already running', () => {
@@ -127,7 +143,7 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       manager.spawn()
@@ -141,7 +157,7 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       expect(() => manager.spawn()).toThrow('Agent test-agent stdio is not available')
@@ -153,7 +169,7 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       expect(() => manager.spawn()).toThrow('Agent test-agent stdio is not available')
@@ -165,12 +181,12 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       manager.spawn()
       expect(manager.isRunning).toBe(true)
-      ;(mockProc as Record<string, unknown>).exitCode = 0
+      ;(mockProc as unknown as MutableChildProcess).exitCode = 0
       ;(mockProc as EventEmitter).emit('exit', 0)
 
       expect(manager.isRunning).toBe(false)
@@ -181,7 +197,7 @@ describe('AgentProcessManager', () => {
     it('resolves immediately when no process is running', async () => {
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       await expect(manager.kill()).resolves.toBeUndefined()
@@ -190,12 +206,12 @@ describe('AgentProcessManager', () => {
     it('sends SIGTERM and resolves on exit', async () => {
       const mockProc = createMockChildProcess()
       const killFn = vi.fn()
-      ;(mockProc as Record<string, unknown>).kill = killFn
+      ;(mockProc as unknown as MutableChildProcess).kill = killFn
       mockSpawn.mockReturnValue(mockProc)
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       manager.spawn()
@@ -214,12 +230,12 @@ describe('AgentProcessManager', () => {
 
       const mockProc = createMockChildProcess()
       const killFn = vi.fn()
-      ;(mockProc as Record<string, unknown>).kill = killFn
+      ;(mockProc as unknown as MutableChildProcess).kill = killFn
       mockSpawn.mockReturnValue(mockProc)
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       manager.spawn()

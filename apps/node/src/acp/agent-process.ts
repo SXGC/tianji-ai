@@ -1,29 +1,19 @@
 /**
  * Agent subprocess manager.
  *
- * 负责 spawn 原生或第三方 ACP agent 子进程，
+ * 负责 spawn ACP agent 子进程（原生或外部 CLI），
  * 管理进程生命周期，提供 stdin/stdout stream 给 ACP 连接使用。
  *
  * @module acp/agent-process
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
-import { createRequire } from 'node:module'
 import { Readable, Writable } from 'node:stream'
-
-/**
- * 解析 @tianji/agent 包的 ACP stdio 入口文件绝对路径。
- * spawn 时以 `node <entryPath>` 方式启动 agent 子进程。
- */
-export function resolveAgentEntryPath(): string {
-  const require = createRequire(import.meta.url)
-  return require.resolve('@tianji/agent/dist/acp-entry.js')
-}
 
 export interface AgentProcessConfig {
   readonly agentId: string
-  /** agent 入口 JS 文件路径，由 `node` 直接执行 */
-  readonly entryPath: string
+  /** 可执行命令，如 `tianji-agent`、`claude`、`codex` */
+  readonly command: string
   readonly args?: readonly string[]
   readonly env?: Record<string, string>
 }
@@ -50,14 +40,10 @@ export class AgentProcessManager {
       throw new Error(`Agent ${this.agentId} is already running`)
     }
 
-    this.#process = spawn(
-      process.execPath,
-      [this.#config.entryPath, ...(this.#config.args ?? [])],
-      {
-        stdio: ['pipe', 'pipe', 'inherit'],
-        env: { ...process.env, ...this.#config.env },
-      }
-    )
+    this.#process = spawn(this.#config.command, [...(this.#config.args ?? [])], {
+      stdio: ['pipe', 'pipe', 'inherit'],
+      env: { ...process.env, ...this.#config.env },
+    })
 
     this.#process.on('exit', () => {
       this.#process = null

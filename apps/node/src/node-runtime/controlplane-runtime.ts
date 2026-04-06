@@ -4,6 +4,7 @@ import type {
   NodeExecutionState,
   NodeId,
   PollCommandResponse,
+  TianjiAgentConfig,
 } from '@tianji/shared'
 
 import { AgentRunner } from '../acp/index.js'
@@ -18,6 +19,7 @@ export interface ControlPlaneRuntimeConfig {
   readonly hostname: string
   readonly platform: string
   readonly version: string
+  readonly agentConfigs: Readonly<Record<string, TianjiAgentConfig>>
   readonly agentList: readonly AgentInfo[]
   readonly onConnectionStateChange?: (event: {
     status:
@@ -139,8 +141,12 @@ export function createControlPlaneRuntime(
       onExecutionStateChange: updateExecutionState,
       logger: config.logger,
       createRunner: async (command) => {
+        const agentConfig = config.agentConfigs[command.payload.agentId]
         return new AgentRunner({
           agentId: command.payload.agentId,
+          command: agentConfig?.command,
+          args: agentConfig?.args,
+          env: agentConfig?.env,
         })
       },
       openEventStream: async (taskId) => {

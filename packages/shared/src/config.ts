@@ -281,13 +281,39 @@ export type AgentModelRef = z.infer<typeof AgentModelRefSchema>
 
 /**
  * Schema for a single agent configuration.
+ *
+ * - 原生 agent：至少需要 `model`，`command` 默认为 `tianji-agent`
+ * - 外部 agent：至少需要 `command`（如 `claude`、`codex`），`model` 可选
  */
-export const TianjiAgentConfigSchema = z.object({
-  model: AgentModelRefSchema,
-  entryPath: z.string().optional(),
-})
+export const TianjiAgentConfigSchema = z
+  .object({
+    model: AgentModelRefSchema.optional(),
+    command: z.string().optional(),
+    args: z.array(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
+  })
+  .refine((data) => data.model !== undefined || data.command !== undefined, {
+    message: 'Agent must have at least one of "model" or "command"',
+  })
 
 export type TianjiAgentConfig = z.infer<typeof TianjiAgentConfigSchema>
+
+/**
+ * 默认原生 agent 的 command 名称。
+ * 对应 @tianji/agent 包的 bin 入口。
+ */
+export const DEFAULT_AGENT_COMMAND = 'tianji-agent'
+
+/**
+ * 判断 agent 配置的类型。
+ * 有 command 且不是 tianji-agent 则为 external，否则为 native。
+ */
+export function resolveAgentType(config: TianjiAgentConfig): 'native' | 'external' {
+  if (config.command !== undefined && config.command !== DEFAULT_AGENT_COMMAND) {
+    return 'external'
+  }
+  return 'native'
+}
 
 /**
  * Schema for the agent configuration collection.
@@ -514,6 +540,7 @@ export const DEFAULT_PROVIDERS_CONFIG: TianjiProvidersConfig = {
  */
 export const DEFAULT_AGENT_CONFIG: TianjiAgentConfig = {
   model: 'openai/gpt-4.1',
+  command: DEFAULT_AGENT_COMMAND,
 }
 
 /**

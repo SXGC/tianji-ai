@@ -11,7 +11,7 @@ describe('AgentProcessManager', () => {
   it('should store agent config on construction', () => {
     const config: AgentProcessConfig = {
       agentId: 'default',
-      entryPath: '/path/to/acp-entry.js',
+      command: 'tianji-agent',
       args: [],
     }
 
@@ -24,7 +24,7 @@ describe('AgentProcessManager', () => {
   it('should report not running before spawn', () => {
     const config: AgentProcessConfig = {
       agentId: 'default',
-      entryPath: '/path/to/acp-entry.js',
+      command: 'tianji-agent',
       args: [],
     }
 

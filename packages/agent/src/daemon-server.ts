@@ -97,13 +97,14 @@ export class DaemonServer {
     await this.#deleteStateFiles()
   }
 
-  #waitForChat(): Promise<void> {
+  #waitForChat(timeoutMs = 10_000): Promise<void> {
     if (!this.#chatInProgress) {
       return Promise.resolve()
     }
     return new Promise<void>((resolve) => {
+      const deadline = Date.now() + timeoutMs
       const interval = setInterval(() => {
-        if (!this.#chatInProgress) {
+        if (!this.#chatInProgress || Date.now() >= deadline) {
           clearInterval(interval)
           resolve()
         }

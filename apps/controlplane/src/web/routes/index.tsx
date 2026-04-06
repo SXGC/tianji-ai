@@ -121,8 +121,20 @@ export function IndexRouteComponent() {
             fillEmptyMessage(current, assistantId, '任务已完成，但当前没有可显示的文本输出。')
           )
         },
-        onError: () => {
+        onError: (errorMessage) => {
           setSending(false)
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantId
+                ? {
+                    ...message,
+                    text:
+                      errorMessage ??
+                      (message.text.trim().length > 0 ? message.text : '任务执行失败。'),
+                  }
+                : message
+            )
+          )
         },
       })
     } catch (submitError) {

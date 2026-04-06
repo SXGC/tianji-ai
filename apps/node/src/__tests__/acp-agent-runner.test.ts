@@ -64,7 +64,7 @@ describe('AgentRunner', () => {
     const AgentRunner = await importRunner()
     const runner = new AgentRunner({
       agentId: 'test-agent',
-      entryPath: '/path/to/acp-entry.js',
+      command: 'tianji-agent',
     })
 
     expect(runner.agentId).toBe('test-agent')
@@ -75,7 +75,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
         args: ['--flag'],
         env: { KEY: 'val' },
       })
@@ -92,6 +92,26 @@ describe('AgentRunner', () => {
         mcpServers: [],
       })
     })
+
+    it('passes custom command and args to AgentProcessManager', async () => {
+      const { AgentProcessManager } = await import('../acp/agent-process.js')
+      const AgentRunner = await importRunner()
+      const runner = new AgentRunner({
+        agentId: 'claude',
+        command: 'claude',
+        args: ['--acp'],
+      })
+
+      await runner.connect()
+
+      expect(AgentProcessManager).toHaveBeenCalledWith(
+        expect.objectContaining({
+          agentId: 'claude',
+          command: 'claude',
+          args: ['--acp'],
+        })
+      )
+    })
   })
 
   describe('chat', () => {
@@ -99,7 +119,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       const iter = runner.chat('hello')
@@ -166,7 +186,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       await runner.connect()
@@ -194,7 +214,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       await runner.connect()
@@ -216,7 +236,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       await runner.connect()
@@ -237,7 +257,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       await runner.connect()
@@ -258,7 +278,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       await runner.connect()
@@ -271,7 +291,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        entryPath: '/path/to/acp-entry.js',
+        command: 'tianji-agent',
       })
 
       await expect(runner.disconnect()).resolves.toBeUndefined()

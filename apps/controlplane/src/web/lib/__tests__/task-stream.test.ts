@@ -70,4 +70,53 @@ describe('streamTask', () => {
 
     expect(onMessageDelta).toHaveBeenCalledWith('Hi')
   })
+
+  it('forwards task failed lifecycle errors', () => {
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+
+    const onError = vi.fn()
+
+    streamTask('task-1', {
+      onSessionAttached: vi.fn(),
+      onMessageDelta: vi.fn(),
+      onDone: vi.fn(),
+      onError,
+    })
+
+    const source = MockEventSource.instances[0]
+    expect(source).toBeDefined()
+
+    source?.emit('task.lifecycle', {
+      payload: {
+        type: 'task.failed',
+        error: 'executor failed',
+      },
+    })
+
+    expect(onError).toHaveBeenCalledWith('executor failed')
+  })
+
+  it('forwards task cancelled lifecycle errors', () => {
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource)
+
+    const onError = vi.fn()
+
+    streamTask('task-1', {
+      onSessionAttached: vi.fn(),
+      onMessageDelta: vi.fn(),
+      onDone: vi.fn(),
+      onError,
+    })
+
+    const source = MockEventSource.instances[0]
+    expect(source).toBeDefined()
+
+    source?.emit('task.lifecycle', {
+      payload: {
+        type: 'task.cancelled',
+      },
+    })
+
+    expect(onError).toHaveBeenCalledWith('任务已取消。')
+  })
 })
