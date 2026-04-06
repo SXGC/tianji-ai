@@ -7,7 +7,7 @@ import { execFile } from 'node:child_process'
  * 之间的集成行为，不 mock 内部 daemon 协议。
  */
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
@@ -230,16 +230,28 @@ describe('daemon start/status/stop', () => {
 
   it('returns promptly after background daemon start completes', async () => {
     const { paths, cleanup } = await createTempCliPaths()
+    const homeDir = join(paths.configDir, 'home')
+    const xdgConfigHome = join(homeDir, '.config')
+    const runtimeConfigDir = join(xdgConfigHome, 'tianji-ai')
 
     try {
       await execFileAsync('pnpm', ['build'], {
         cwd: fileURLToPath(new URL('../..', import.meta.url)),
       })
 
-      await mkdir(dirname(paths.configFilePath), { recursive: true })
+      const cliEntryPath = fileURLToPath(new URL('../../bin/tianji.mjs', import.meta.url))
+      await mkdir(runtimeConfigDir, { recursive: true })
       await writeFile(
-        paths.configFilePath,
+        join(runtimeConfigDir, 'tianji.json'),
         JSON.stringify({
+          agents: {
+            defaultAgent: 'default',
+            items: {
+              default: {
+                model: 'openai/gpt-4.1',
+              },
+            },
+          },
           controlPlane: {
             baseUrl: 'http://127.0.0.1:3000',
             enrollmentToken: 'test-token',
@@ -249,13 +261,12 @@ describe('daemon start/status/stop', () => {
         'utf8'
       )
 
-      const cliEntryPath = fileURLToPath(new URL('../../bin/tianji.mjs', import.meta.url))
       const child = spawn(process.execPath, [cliEntryPath, 'daemon', 'start'], {
         cwd: new URL('../..', import.meta.url),
         env: {
           ...process.env,
-          HOME: dirname(paths.configDir),
-          XDG_CONFIG_HOME: dirname(paths.configDir),
+          HOME: homeDir,
+          XDG_CONFIG_HOME: xdgConfigHome,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       })
@@ -285,7 +296,7 @@ describe('daemon start/status/stop', () => {
       const stdout = Buffer.concat(stdoutChunks).toString('utf8')
       const stderr = Buffer.concat(stderrChunks).toString('utf8')
 
-      expect(exitCode).toBe(0)
+      expect(exitCode, `stdout:\n${stdout}\nstderr:\n${stderr}`).toBe(0)
       expect(stderr).toBe('')
       expect(stdout.length).toBeGreaterThan(0)
     } finally {

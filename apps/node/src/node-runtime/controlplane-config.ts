@@ -1,6 +1,6 @@
 import { hostname, platform } from 'node:os'
 
-import { type NodeId, type TianjiConfig, createNodeId } from '@tianji/shared'
+import { type AgentInfo, type NodeId, type TianjiConfig, createNodeId } from '@tianji/shared'
 
 /**
  * 持久化存储的 control plane 连接配置。
@@ -68,4 +68,28 @@ export function readStoredControlPlaneConfig(
     platform: cp.platform ?? platform(),
     version: cp.version ?? '0.0.1',
   }
+}
+
+/**
+ * 从最终配置中的 agents.items 派生 controlplane 注册使用的 agent 列表。
+ *
+ * @param config - 已加载的 Tianji 配置
+ * @param nodeVersion - 当前 node 版本，用于填充 agent version
+ * @returns 可注册到 controlplane 的 agent 列表
+ */
+export function deriveControlPlaneAgentList(
+  config: Partial<TianjiConfig>,
+  nodeVersion: string
+): readonly AgentInfo[] {
+  const items = config.agents?.items
+  if (items === undefined) {
+    throw new Error('Missing agents.items in Tianji config')
+  }
+
+  return Object.keys(items).map((agentId) => ({
+    agentId,
+    type: 'native',
+    name: agentId,
+    version: nodeVersion,
+  }))
 }

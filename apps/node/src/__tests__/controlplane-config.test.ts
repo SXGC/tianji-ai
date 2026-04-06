@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import {
   areStoredControlPlaneConfigsEqual,
   buildStoredControlPlaneConfig,
+  deriveControlPlaneAgentList,
   readStoredControlPlaneConfig,
 } from '../node-runtime/controlplane-config.js'
 
@@ -61,13 +62,17 @@ describe('readStoredControlPlaneConfig', () => {
 
   it('returns null when baseUrl is empty', () => {
     expect(
-      readStoredControlPlaneConfig({ controlPlane: { baseUrl: '', enrollmentToken: 'tok' } })
+      readStoredControlPlaneConfig({
+        controlPlane: { baseUrl: '', enrollmentToken: 'tok', nodeId: 'node-1' },
+      })
     ).toBeNull()
   })
 
   it('returns null when enrollmentToken is missing', () => {
     expect(
-      readStoredControlPlaneConfig({ controlPlane: { baseUrl: 'http://a', enrollmentToken: '' } })
+      readStoredControlPlaneConfig({
+        controlPlane: { baseUrl: 'http://a', enrollmentToken: '', nodeId: 'node-1' },
+      })
     ).toBeNull()
   })
 
@@ -76,12 +81,14 @@ describe('readStoredControlPlaneConfig', () => {
       controlPlane: {
         baseUrl: 'http://a',
         enrollmentToken: 'tok',
+        nodeId: 'node-1',
       },
     })
 
     expect(result).not.toBeNull()
     expect(result!.baseUrl).toBe('http://a')
     expect(result!.enrollmentToken).toBe('tok')
+    expect(result!.nodeId).toEqual(createNodeId('node-1'))
     expect(result!.hostname).toBe(hostname())
     expect(result!.platform).toBe(platform())
     expect(result!.version).toBe('0.0.1')
@@ -104,5 +111,43 @@ describe('readStoredControlPlaneConfig', () => {
     expect(result!.hostname).toBe('my-host')
     expect(result!.platform).toBe('linux')
     expect(result!.version).toBe('1.2.3')
+  })
+})
+
+describe('deriveControlPlaneAgentList', () => {
+  it('throws when agents.items is missing', () => {
+    expect(() => deriveControlPlaneAgentList({}, '1.0.0')).toThrow(
+      'Missing agents.items in Tianji config'
+    )
+  })
+
+  it('derives registered agents from config agents.items', () => {
+    expect(
+      deriveControlPlaneAgentList(
+        {
+          agents: {
+            defaultAgent: 'default',
+            items: {
+              default: { model: 'openai/gpt-4.1' },
+              worker: { model: 'openai/gpt-4.1-mini' },
+            },
+          },
+        },
+        '1.2.3'
+      )
+    ).toEqual([
+      {
+        agentId: 'default',
+        type: 'native',
+        name: 'default',
+        version: '1.2.3',
+      },
+      {
+        agentId: 'worker',
+        type: 'native',
+        name: 'worker',
+        version: '1.2.3',
+      },
+    ])
   })
 })

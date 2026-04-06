@@ -4,7 +4,11 @@ import { DaemonServer, createAgentSession } from '@tianji/agent'
 
 import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
-import { readStoredControlPlaneConfig } from './node-runtime/controlplane-config.js'
+import { logError, logInfo } from './logger.js'
+import {
+  deriveControlPlaneAgentList,
+  readStoredControlPlaneConfig,
+} from './node-runtime/controlplane-config.js'
 import {
   type ControlPlaneRuntimeHandle,
   createControlPlaneRuntime,
@@ -22,6 +26,9 @@ export async function runDaemonEntry(): Promise<void> {
     },
   })
   await server.listen(0)
+  await logInfo(context.paths, ['daemon'], 'Daemon server listening', {
+    port: server.port,
+  })
 
   process.stdout.write(`${i18n.t('daemon.listening', { port: server.port })}\n`)
 
@@ -31,23 +38,43 @@ export async function runDaemonEntry(): Promise<void> {
   if (controlPlaneConfig) {
     const runtime = createControlPlaneRuntime({
       ...controlPlaneConfig,
-      agentList: [],
+      agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
     })
     try {
       await runtime.connection.start()
       controlPlaneHandle = runtime
-    } catch {
+      await logInfo(
+        context.paths,
+        ['daemon', 'controlplane'],
+        'Control plane connection established',
+        {
+          baseUrl: controlPlaneConfig.baseUrl,
+          nodeId: controlPlaneConfig.nodeId,
+        }
+      )
+    } catch (error) {
+      await logError(context.paths, ['daemon', 'controlplane'], 'Control plane connection failed', {
+        baseUrl: controlPlaneConfig.baseUrl,
+        error: error instanceof Error ? error.message : String(error),
+      })
       // controlplane 连接失败时 daemon 继续以本地模式运行
       process.stderr.write('Warning: controlplane connection failed, running in local-only mode\n')
     }
   }
 
-  const shutdown = () => {
+  const shutdown = async (signal: NodeJS.Signals) => {
+    await logInfo(context.paths, ['daemon'], 'Daemon shutdown signal received', {
+      signal,
+    })
     controlPlaneHandle?.connection.stop()
     void server.shutdown().finally(() => process.exit(0))
   }
-  process.on('SIGTERM', shutdown)
-  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', () => {
+    void shutdown('SIGTERM')
+  })
+  process.on('SIGINT', () => {
+    void shutdown('SIGINT')
+  })
 }
 
 // 作为独立子进程被 fork 时，直接执行守护进程逻辑
