@@ -257,6 +257,40 @@ describe('createControlPlaneRuntime with custom deps', () => {
     expect(setExecutionState).toHaveBeenNthCalledWith(2, 'idle')
     expect(setExecutionState).toHaveBeenNthCalledWith(3, 'busy')
   })
+
+  it('passes through connection state callback to connection config', () => {
+    const onConnectionStateChange = vi.fn()
+    let capturedCallback: ((event: { status: string; error?: string }) => void) | undefined
+
+    const deps: ControlPlaneRuntimeDeps = {
+      createConnection: (config) => {
+        capturedCallback = config.onConnectionStateChange as typeof capturedCallback
+        return {
+          start: vi.fn(async () => undefined),
+          stop: vi.fn(),
+          setExecutionState: vi.fn(),
+        }
+      },
+      createTaskExecutor: () => ({
+        executionState: 'idle',
+        currentTaskId: null,
+        execute: vi.fn(async () => undefined),
+      }),
+    }
+
+    createControlPlaneRuntime(
+      createTestConfig({
+        onConnectionStateChange,
+      } as Partial<ControlPlaneRuntimeConfig>),
+      deps
+    )
+
+    capturedCallback?.({ status: 'heartbeat_failed', error: 'fetch failed' })
+    expect(onConnectionStateChange).toHaveBeenCalledWith({
+      status: 'heartbeat_failed',
+      error: 'fetch failed',
+    })
+  })
 })
 
 describe('parseAgentArgs (via default TaskExecutor path)', () => {

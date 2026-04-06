@@ -8,9 +8,12 @@ export {
   type LoadedAgentContext,
 } from './context.js'
 export {
+  DEFAULT_CONTROL_PLANE_STATUS,
   DAEMON_SSE_EVENT_NAME,
   DAEMON_SSE_DONE_NAME,
   DAEMON_SSE_ERROR_NAME,
+  type ControlPlaneConnectionStatus,
+  type ControlPlaneStatusSnapshot,
   encodeSseMessage,
   type ChatRequestBody,
   type ChatDoneSseMessage,

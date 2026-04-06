@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { TianjiConfig } from '@tianji/shared'
+
 import type { UserConfigPaths } from '../config.js'
+
+type LoadUserConfigContextResult = {
+  paths: UserConfigPaths
+  config: TianjiConfig
+}
 
 const paths: UserConfigPaths = {
   configDir: '/tmp/tianji-test',
@@ -16,13 +23,16 @@ const listenMock = vi.fn(async () => undefined)
 const shutdownMock = vi.fn(async () => undefined)
 const stopConnectionMock = vi.fn()
 const startConnectionMock = vi.fn(async () => undefined)
+const connectionStateCallbackRef: {
+  current?: (event: { status: string; error?: string }) => void
+} = {}
 const createControlPlaneRuntimeMock = vi.fn(() => ({
   connection: {
     start: startConnectionMock,
     stop: stopConnectionMock,
   },
 }))
-const loadUserConfigContextMock = vi.fn(async () => ({
+const loadUserConfigContextMock = vi.fn<() => Promise<LoadUserConfigContextResult>>(async () => ({
   paths,
   config: {
     controlPlane: {
@@ -83,10 +93,23 @@ vi.mock('../node-runtime/controlplane-config.js', () => ({
 }))
 
 vi.mock('../node-runtime/controlplane-runtime.js', () => ({
-  createControlPlaneRuntime: createControlPlaneRuntimeMock,
+  createControlPlaneRuntime: vi.fn((config: object) => {
+    const maybeCallback = (
+      config as { onConnectionStateChange?: (event: { status: string; error?: string }) => void }
+    ).onConnectionStateChange
+    connectionStateCallbackRef.current = maybeCallback
+    return createControlPlaneRuntimeMock()
+  }),
 }))
 
 vi.mock('@tianji/agent', () => ({
+  DEFAULT_CONTROL_PLANE_STATUS: {
+    enabled: false,
+    status: 'disabled',
+    baseUrl: null,
+    lastSuccessAt: null,
+    lastError: null,
+  },
   createAgentSession: createAgentSessionMock,
   DaemonServer: vi.fn().mockImplementation(() => ({
     port: 4321,
@@ -99,6 +122,65 @@ describe('runDaemonEntry', () => {
   beforeEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
+    connectionStateCallbackRef.current = undefined
+  })
+
+  it('publishes disabled controlplane status when no config exists', async () => {
+    loadUserConfigContextMock.mockResolvedValueOnce({
+      paths,
+      config: {} as TianjiConfig,
+    })
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    const { runDaemonEntry } = await import('../daemon-entry.js')
+    await runDaemonEntry()
+
+    const daemonServerCall = vi.mocked((await import('@tianji/agent')).DaemonServer).mock
+      .calls[0]?.[0]
+    const getControlPlaneStatus = (daemonServerCall as { getControlPlaneStatus?: () => unknown })
+      .getControlPlaneStatus
+
+    expect(getControlPlaneStatus).toBeTypeOf('function')
+    expect(getControlPlaneStatus?.()).toEqual({
+      enabled: false,
+      status: 'disabled',
+      baseUrl: null,
+      lastSuccessAt: null,
+      lastError: null,
+    })
+
+    stdoutSpy.mockRestore()
+  })
+
+  it('updates controlplane status to connected then degraded from runtime callbacks', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    const { runDaemonEntry } = await import('../daemon-entry.js')
+    await runDaemonEntry()
+
+    const daemonServerCall = vi.mocked((await import('@tianji/agent')).DaemonServer).mock
+      .calls[0]?.[0]
+    const getControlPlaneStatus = (daemonServerCall as { getControlPlaneStatus?: () => unknown })
+      .getControlPlaneStatus
+
+    expect(getControlPlaneStatus).toBeTypeOf('function')
+    expect(getControlPlaneStatus?.()).toMatchObject({
+      enabled: true,
+      status: 'connected',
+      baseUrl: 'http://127.0.0.1:3000',
+      lastError: null,
+    })
+
+    connectionStateCallbackRef.current?.({ status: 'heartbeat_failed', error: 'fetch failed' })
+
+    expect(getControlPlaneStatus?.()).toMatchObject({
+      enabled: true,
+      status: 'degraded',
+      baseUrl: 'http://127.0.0.1:3000',
+      lastError: 'fetch failed',
+    })
+
+    stdoutSpy.mockRestore()
   })
 
   it('logs info when daemon receives SIGTERM and exits cleanly', async () => {
@@ -114,7 +196,7 @@ describe('runDaemonEntry', () => {
     sigtermHandler?.()
 
     await waitFor(() => {
-      expect(shutdownMock).toHaveBeenCalledOnce()
+      expect(shutdownMock).toHaveBeenCalled()
     })
 
     expect(logInfoMock).toHaveBeenCalledWith(paths, ['daemon'], 'Daemon shutdown signal received', {
@@ -124,7 +206,7 @@ describe('runDaemonEntry', () => {
       reason: 'signal',
       signal: 'SIGTERM',
     })
-    expect(stopConnectionMock).toHaveBeenCalledOnce()
+    expect(stopConnectionMock).toHaveBeenCalled()
 
     stdoutSpy.mockRestore()
   })

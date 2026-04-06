@@ -20,6 +20,15 @@ export interface ControlPlaneConnectionConfig {
   readonly heartbeatIntervalMs?: number
   readonly emptyPollBackoffMs?: number
   readonly onCommand: (command: PollCommandResponse) => void
+  readonly onConnectionStateChange?: (event: {
+    status:
+      | 'connecting'
+      | 'connected'
+      | 'heartbeat_succeeded'
+      | 'heartbeat_failed'
+      | 'register_failed'
+    error?: string
+  }) => void
   readonly logger?: RuntimeLogger
 }
 
@@ -50,8 +59,10 @@ export class ControlPlaneConnection {
 
   async start(): Promise<void> {
     this.#running = true
+    this.#config.onConnectionStateChange?.({ status: 'connecting' })
 
     await this.#register()
+    this.#config.onConnectionStateChange?.({ status: 'connected' })
     this.#startHeartbeat()
     void this.#pollLoop()
   }
@@ -92,11 +103,16 @@ export class ControlPlaneConnection {
     })
     try {
       await this.#client.heartbeat(this.#executionState)
+      this.#config.onConnectionStateChange?.({ status: 'heartbeat_succeeded' })
       await this.#config.logger?.logDebug(this.#scope, 'Control plane heartbeat sent', {
         nodeId: this.#config.nodeId,
         executionState: this.#executionState,
       })
     } catch (error) {
+      this.#config.onConnectionStateChange?.({
+        status: 'heartbeat_failed',
+        error: error instanceof Error ? error.message : String(error),
+      })
       await this.#config.logger?.logError(this.#scope, 'Control plane heartbeat failed', {
         nodeId: this.#config.nodeId,
         executionState: this.#executionState,
@@ -146,7 +162,9 @@ export class ControlPlaneConnection {
   async #reRegister(): Promise<void> {
     try {
       await this.#register()
+      this.#config.onConnectionStateChange?.({ status: 'connected' })
     } catch {
+      this.#config.onConnectionStateChange?.({ status: 'register_failed' })
       await sleep(1000)
     }
   }

@@ -6,7 +6,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import type { RuntimeEvent } from '@tianji/shared'
 
-import { DAEMON_SSE_DONE_NAME, DAEMON_SSE_EVENT_NAME } from '../daemon-protocol.js'
+import {
+  type ControlPlaneStatusSnapshot,
+  DAEMON_SSE_DONE_NAME,
+  DAEMON_SSE_EVENT_NAME,
+} from '../daemon-protocol.js'
 import type { ChatDoneSseMessage, ChatErrorSseMessage, PingResponse } from '../daemon-protocol.js'
 import { DaemonServer, type DaemonServerOptions } from '../daemon-server.js'
 import type { AgentSession } from '../session.js'
@@ -80,6 +84,35 @@ describe('DaemonServer', () => {
     expect(typeof body.pid).toBe('number')
     expect(typeof body.uptime).toBe('number')
     expect(body.uptime).toBeGreaterThanOrEqual(0)
+    expect(body.controlPlane).toEqual({
+      enabled: false,
+      status: 'disabled',
+      baseUrl: null,
+      lastSuccessAt: null,
+      lastError: null,
+    } satisfies ControlPlaneStatusSnapshot)
+  })
+
+  it('GET /ping returns controlplane snapshot from getter', async () => {
+    const session = createStubSession()
+    const controlPlane: ControlPlaneStatusSnapshot = {
+      enabled: true,
+      status: 'degraded',
+      baseUrl: 'http://127.0.0.1:3000',
+      lastSuccessAt: 123,
+      lastError: 'fetch failed',
+    }
+    server = new DaemonServer({
+      session,
+      getControlPlaneStatus: () => controlPlane,
+    })
+    await server.listen(0)
+
+    const res = await fetch(`${baseUrl(server)}/ping`)
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as PingResponse
+    expect(body.controlPlane).toEqual(controlPlane)
   })
 
   it('POST /chat streams chat events and terminates with chat.done', async () => {

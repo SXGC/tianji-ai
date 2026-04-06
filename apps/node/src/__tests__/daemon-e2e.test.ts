@@ -186,6 +186,7 @@ describe('daemon start/status/stop', () => {
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toContain('Daemon running')
       expect(result.stdout).toContain('sessionId=')
+      expect(result.stdout).toContain('controlplane=disabled')
     } finally {
       await live.cleanup()
     }

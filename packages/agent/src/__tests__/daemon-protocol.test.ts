@@ -8,6 +8,7 @@ import {
   DAEMON_SSE_DONE_NAME,
   DAEMON_SSE_ERROR_NAME,
   DAEMON_SSE_EVENT_NAME,
+  DEFAULT_CONTROL_PLANE_STATUS,
   type PingResponse,
   type ShutdownResponse,
   encodeSseMessage,
@@ -27,7 +28,7 @@ describe('encodeSseMessage', () => {
       type: 'chat.event',
       event: {
         type: 'message.delta',
-        runId: 'run-123',
+        runId: 'run-123' as never,
         messageId: 'msg-1',
         sequence: 0,
         channel: 'text',
@@ -81,10 +82,16 @@ describe('protocol type shapes', () => {
   })
 
   it('PingResponse has sessionId, uptime, and pid', () => {
-    const response: PingResponse = { sessionId: 'sess-1', uptime: 42, pid: 1234 }
+    const response: PingResponse = {
+      sessionId: 'sess-1',
+      uptime: 42,
+      pid: 1234,
+      controlPlane: DEFAULT_CONTROL_PLANE_STATUS,
+    }
     expect(response.sessionId).toBe('sess-1')
     expect(response.uptime).toBe(42)
     expect(response.pid).toBe(1234)
+    expect(response.controlPlane.status).toBe('disabled')
   })
 
   it('ShutdownResponse has ok true', () => {

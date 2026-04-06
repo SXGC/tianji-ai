@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, writeFile } from 'node:fs/promises'
 
 import { describe, expect, it, vi } from 'vitest'
 import { parseCliArgs, runCli } from '../main.js'
@@ -133,6 +133,54 @@ describe('runCli daemon commands', () => {
       }),
     })
     expect(exitCode).toBe(1)
+  })
+
+  it('prints controlplane status details in daemon status output', async () => {
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      await writeFile(paths.daemonPortPath, '32123', 'utf8')
+
+      const ping = {
+        pid: 4321,
+        sessionId: 'session-1',
+        uptime: 684,
+        controlPlane: {
+          enabled: true,
+          status: 'degraded',
+          baseUrl: 'http://127.0.0.1:3000',
+          lastSuccessAt: 123,
+          lastError: 'fetch failed',
+        },
+      }
+
+      vi.doMock('@tianji/agent', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@tianji/agent')>()
+        return {
+          ...actual,
+          DaemonClient: vi.fn().mockImplementation(() => ({
+            ping: vi.fn(async () => ping),
+            close: vi.fn(),
+          })),
+        }
+      })
+
+      const { runCli: isolatedRunCli } = await import('../main.js')
+      const output = await captureStdout(async () => {
+        const exitCode = await isolatedRunCli(['daemon', 'status'], {
+          getUserConfigPaths: () => paths,
+        })
+        expect(exitCode).toBe(0)
+      })
+
+      expect(output).toContain('Daemon running')
+      expect(output).toContain('controlplane=degraded')
+      expect(output).toContain('controlplaneUrl=http://127.0.0.1:3000')
+      expect(output).toContain('controlplaneError=fetch failed')
+    } finally {
+      vi.doUnmock('@tianji/agent')
+      await cleanup()
+    }
   })
 
   it('runs daemon start --fg through injected daemon entry', async () => {

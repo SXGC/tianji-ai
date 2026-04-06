@@ -6,9 +6,11 @@ import {
   type ChatErrorSseMessage,
   type ChatRequestBody,
   type ChatSseMessage,
+  type ControlPlaneStatusSnapshot,
   DAEMON_SSE_DONE_NAME,
   DAEMON_SSE_ERROR_NAME,
   DAEMON_SSE_EVENT_NAME,
+  DEFAULT_CONTROL_PLANE_STATUS,
   type PingResponse,
   type ShutdownResponse,
   encodeSseMessage,
@@ -18,6 +20,7 @@ import type { AgentSession } from './session.js'
 export interface DaemonServerOptions {
   readonly session: AgentSession
   readonly paths?: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'>
+  readonly getControlPlaneStatus?: () => ControlPlaneStatusSnapshot
 }
 
 async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
@@ -32,6 +35,7 @@ export class DaemonServer {
   readonly #session: AgentSession
   readonly #paths: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'> | undefined
   readonly #server: Server
+  readonly #getControlPlaneStatus: (() => ControlPlaneStatusSnapshot) | undefined
   #startedAt: number
   #chatInProgress: boolean
   #shutdownPromise: Promise<void> | undefined
@@ -39,6 +43,7 @@ export class DaemonServer {
   constructor(options: DaemonServerOptions) {
     this.#session = options.session
     this.#paths = options.paths
+    this.#getControlPlaneStatus = options.getControlPlaneStatus
     this.#server = createServer((req, res) => {
       void this.#handleRequest(req, res)
     })
@@ -130,6 +135,7 @@ export class DaemonServer {
       sessionId: this.#session.sessionId as string,
       uptime: Math.floor((Date.now() - this.#startedAt) / 1000),
       pid: process.pid,
+      controlPlane: this.#getControlPlaneStatus?.() ?? DEFAULT_CONTROL_PLANE_STATUS,
     }
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify(body))

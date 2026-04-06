@@ -24,6 +24,21 @@ import type { CommandDefinition } from './types.js'
 
 const DAEMON_START_SCOPE = ['cli', 'daemon', 'start'] as const
 
+function formatControlPlaneStatusDetails(input: {
+  status: string
+  baseUrl: string | null
+  lastError: string | null
+}): string {
+  let suffix = `, controlplane=${input.status}`
+  if (input.baseUrl) {
+    suffix += `, controlplaneUrl=${input.baseUrl}`
+  }
+  if (input.lastError) {
+    suffix += `, controlplaneError=${input.lastError}`
+  }
+  return suffix
+}
+
 async function readDaemonPort(paths: UserConfigPaths): Promise<number | undefined> {
   try {
     const content = await readFile(paths.daemonPortPath, 'utf8')
@@ -264,6 +279,10 @@ const daemonStatusCommand: CommandDefinition = {
           port: port ?? 0,
           sessionId: ping.sessionId ?? '',
           uptime: ping.uptime ?? 0,
+        })}${formatControlPlaneStatusDetails({
+          status: ping.controlPlane.status,
+          baseUrl: ping.controlPlane.baseUrl,
+          lastError: ping.controlPlane.lastError,
         })}\n`
       )
       return 0

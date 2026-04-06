@@ -8,10 +8,29 @@ export interface ChatRequestBody {
   readonly prompt: string
 }
 
+export type ControlPlaneConnectionStatus = 'disabled' | 'connecting' | 'connected' | 'degraded'
+
+export interface ControlPlaneStatusSnapshot {
+  readonly enabled: boolean
+  readonly status: ControlPlaneConnectionStatus
+  readonly baseUrl: string | null
+  readonly lastSuccessAt: number | null
+  readonly lastError: string | null
+}
+
+export const DEFAULT_CONTROL_PLANE_STATUS: ControlPlaneStatusSnapshot = {
+  enabled: false,
+  status: 'disabled',
+  baseUrl: null,
+  lastSuccessAt: null,
+  lastError: null,
+}
+
 export interface PingResponse {
   readonly sessionId: string
   readonly uptime: number
   readonly pid: number
+  readonly controlPlane: ControlPlaneStatusSnapshot
 }
 
 export interface ShutdownResponse {

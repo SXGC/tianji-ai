@@ -19,6 +19,15 @@ export interface ControlPlaneRuntimeConfig {
   readonly platform: string
   readonly version: string
   readonly agentList: readonly AgentInfo[]
+  readonly onConnectionStateChange?: (event: {
+    status:
+      | 'connecting'
+      | 'connected'
+      | 'heartbeat_succeeded'
+      | 'heartbeat_failed'
+      | 'register_failed'
+    error?: string
+  }) => void
   readonly logger?: RuntimeLogger
 }
 
@@ -104,6 +113,7 @@ export function createControlPlaneRuntime(
       agentList: config.agentList,
       logger: config.logger,
       onCommand: executePolledCommand,
+      onConnectionStateChange: config.onConnectionStateChange,
     }) ??
     new ControlPlaneConnection({
       baseUrl: config.baseUrl,
@@ -115,6 +125,7 @@ export function createControlPlaneRuntime(
       agentList: config.agentList,
       logger: config.logger,
       onCommand: executePolledCommand,
+      onConnectionStateChange: config.onConnectionStateChange,
     })
 
   currentConnection = connection

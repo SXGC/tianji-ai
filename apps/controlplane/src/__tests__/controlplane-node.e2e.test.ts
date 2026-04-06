@@ -31,7 +31,7 @@ describe('controlplane <-> node e2e', () => {
     )
   })
 
-  it('shows node in ui after successful registration', async () => {
+  it('shows node and derived agents in ui after successful daemon registration', async () => {
     const env = await setupTestEnv('node-e2e-001')
 
     try {
@@ -39,8 +39,20 @@ describe('controlplane <-> node e2e', () => {
       await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-001')
 
       const response = await fetch(`${env.baseUrl}/api/ui/nodes`)
-      const nodes = (await response.json()) as Array<{ nodeId: string; status: string }>
+      const nodes = (await response.json()) as Array<{
+        nodeId: string
+        status: string
+        agents: Array<{ agentId: string; name: string }>
+      }>
       expect(nodes.some((node) => node.nodeId === 'node-e2e-001')).toBe(true)
+      expect(nodes.find((node) => node.nodeId === 'node-e2e-001')?.agents).toEqual([
+        {
+          agentId: 'default',
+          type: 'native',
+          name: 'default',
+          version: '0.0.1',
+        },
+      ])
     } finally {
       await stopProcess(nodeProcess)
       nodeProcess = null
@@ -189,26 +201,37 @@ async function setupTestEnv(nodeId: string): Promise<{
 
   const registerUrl = `http://127.0.0.1:${port}/register?enrollment-token=e2e-token`
 
-  const nodeProcess = spawn('/usr/bin/env', ['node', nodeDistBinPath, 'register', registerUrl], {
-    cwd: nodeAppDir,
-    env: {
-      ...process.env,
-      HOME: homeDir,
-      XDG_CONFIG_HOME: join(baseDir, 'config'),
-      TIANJI_NODE_ID: nodeId,
-      TIANJI_AGENT_BIN: '/usr/bin/env',
-      TIANJI_AGENT_ARGS: JSON.stringify(['node', fakeAcpAgentPath]),
-      TIANJI_NODE_AGENT_LIST: JSON.stringify([
-        {
-          agentId: 'default',
-          type: 'native',
-          name: 'Default Agent',
-          version: '0.0.1',
+  await writeFile(
+    join(configDir, 'tianji.json'),
+    JSON.stringify({
+      agents: {
+        defaultAgent: 'default',
+        items: {
+          default: {
+            model: 'openai/gpt-4.1',
+          },
         },
-      ]),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+      },
+    }),
+    'utf8'
+  )
+
+  const nodeProcess = spawn(
+    '/usr/bin/env',
+    ['node', nodeDistBinPath, 'daemon', 'start', '--fg', '--register', registerUrl],
+    {
+      cwd: nodeAppDir,
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        XDG_CONFIG_HOME: join(baseDir, 'config'),
+        TIANJI_NODE_ID: nodeId,
+        TIANJI_AGENT_BIN: '/usr/bin/env',
+        TIANJI_AGENT_ARGS: JSON.stringify(['node', fakeAcpAgentPath]),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    }
+  )
 
   const stdoutChunks: Buffer[] = []
   const stderrChunks: Buffer[] = []

@@ -1,6 +1,11 @@
 import { pathToFileURL } from 'node:url'
 
-import { DaemonServer, createAgentSession } from '@tianji/agent'
+import {
+  type ControlPlaneStatusSnapshot,
+  DEFAULT_CONTROL_PLANE_STATUS,
+  DaemonServer,
+  createAgentSession,
+} from '@tianji/agent'
 
 import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
@@ -28,8 +33,21 @@ export async function runDaemonEntry(): Promise<void> {
   const i18n = createI18n(detectLocale(context.config))
   const logger = getCliLogger(context.paths)
   const session = createAgentSession(context)
+  let controlPlaneStatus: ControlPlaneStatusSnapshot = DEFAULT_CONTROL_PLANE_STATUS
+
+  const updateControlPlaneStatus = (
+    patch: Partial<ControlPlaneStatusSnapshot>
+  ): ControlPlaneStatusSnapshot => {
+    controlPlaneStatus = {
+      ...controlPlaneStatus,
+      ...patch,
+    }
+    return controlPlaneStatus
+  }
+
   const server = new DaemonServer({
     session,
+    getControlPlaneStatus: () => controlPlaneStatus,
     paths: {
       daemonPortPath: context.paths.daemonPortPath,
       daemonPidPath: context.paths.daemonPidPath,
@@ -46,6 +64,13 @@ export async function runDaemonEntry(): Promise<void> {
   const controlPlaneConfig = readStoredControlPlaneConfig(context.config)
   let controlPlaneHandle: ControlPlaneRuntimeHandle | null = null
   if (controlPlaneConfig) {
+    updateControlPlaneStatus({
+      enabled: true,
+      status: 'connecting',
+      baseUrl: controlPlaneConfig.baseUrl,
+      lastSuccessAt: null,
+      lastError: null,
+    })
     await logDebug(context.paths, ['daemon', 'controlplane'], 'Loaded control plane config', {
       baseUrl: controlPlaneConfig.baseUrl,
       nodeId: controlPlaneConfig.nodeId,
@@ -54,10 +79,46 @@ export async function runDaemonEntry(): Promise<void> {
       ...controlPlaneConfig,
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
       logger,
+      onConnectionStateChange: (event) => {
+        if (event.status === 'connecting') {
+          updateControlPlaneStatus({
+            enabled: true,
+            status: 'connecting',
+            baseUrl: controlPlaneConfig.baseUrl,
+            lastError: null,
+          })
+          return
+        }
+
+        if (event.status === 'connected' || event.status === 'heartbeat_succeeded') {
+          updateControlPlaneStatus({
+            enabled: true,
+            status: 'connected',
+            baseUrl: controlPlaneConfig.baseUrl,
+            lastSuccessAt: Date.now(),
+            lastError: null,
+          })
+          return
+        }
+
+        updateControlPlaneStatus({
+          enabled: true,
+          status: 'degraded',
+          baseUrl: controlPlaneConfig.baseUrl,
+          lastError: event.error ?? 'controlplane unavailable',
+        })
+      },
     })
     try {
       await runtime.connection.start()
       controlPlaneHandle = runtime
+      updateControlPlaneStatus({
+        enabled: true,
+        status: 'connected',
+        baseUrl: controlPlaneConfig.baseUrl,
+        lastSuccessAt: Date.now(),
+        lastError: null,
+      })
       await logInfo(
         context.paths,
         ['daemon', 'controlplane'],
@@ -68,6 +129,12 @@ export async function runDaemonEntry(): Promise<void> {
         }
       )
     } catch (error) {
+      updateControlPlaneStatus({
+        enabled: true,
+        status: 'degraded',
+        baseUrl: controlPlaneConfig.baseUrl,
+        lastError: error instanceof Error ? error.message : String(error),
+      })
       await logError(context.paths, ['daemon', 'controlplane'], 'Control plane connection failed', {
         baseUrl: controlPlaneConfig.baseUrl,
         nodeId: controlPlaneConfig.nodeId,
