@@ -48,9 +48,15 @@ describe('POST /api/nodes/register', () => {
     expect(data.accessToken).toBeDefined()
     expect(data.expiresAt).toBeGreaterThan(Date.now())
 
-    expect(
-      sink.entries.some((e) => e.level === 'info' && e.message === 'New node registered')
-    ).toBe(true)
+    const infoLogs = sink.entries.filter((e) => e.level === 'info')
+    expect(infoLogs).toHaveLength(1)
+    expect(infoLogs[0].message).toBe('New node registered')
+    expect(infoLogs[0].data).toMatchObject({
+      nodeId: 'node-001',
+      hostname: 'dev-machine',
+      platform: 'linux',
+      agentCount: 1,
+    })
   })
 
   it('should reject invalid enrollment token', async () => {
@@ -113,8 +119,10 @@ describe('POST /api/nodes/register', () => {
     expect(node.hostname).toBe('dev-1-updated')
     expect(node.version).toBe('3.1.0')
 
-    expect(sink.entries.some((e) => e.level === 'info' && e.message === 'Node re-registered')).toBe(
-      true
+    const reRegLogs = sink.entries.filter(
+      (e) => e.level === 'info' && e.message === 'Node re-registered'
     )
+    expect(reRegLogs).toHaveLength(1)
+    expect(reRegLogs[0].data).toMatchObject({ nodeId: 'node-001' })
   })
 })

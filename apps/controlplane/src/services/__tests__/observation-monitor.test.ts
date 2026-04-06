@@ -47,8 +47,8 @@ describe('ObservationMonitor', () => {
       .run(now, now)
 
     db.raw
-      .prepare('UPDATE nodes SET last_heartbeat_at = ?, status = ? WHERE node_id = ?')
-      .run(now - 120_000, 'offline', 'n1')
+      .prepare('UPDATE nodes SET last_heartbeat_at = ? WHERE node_id = ?')
+      .run(now - 120_000, 'n1')
 
     const monitor = new ObservationMonitor(db, logger)
     monitor.checkOfflineNodes()
@@ -59,11 +59,9 @@ describe('ObservationMonitor', () => {
     expect(task.status).toBe('observation_lost')
     expect(task.failure_reason).toBe('observation_lost')
 
-    expect(
-      sink.entries.some(
-        (e) => e.level === 'warn' && e.message === 'Tasks marked as observation_lost'
-      )
-    ).toBe(true)
+    const warnLogs = sink.entries.filter((e) => e.level === 'warn')
+    expect(warnLogs.some((e) => e.message === 'Node marked offline')).toBe(true)
+    expect(warnLogs.some((e) => e.message === 'Tasks marked as observation_lost')).toBe(true)
   })
 
   it('should not affect tasks in terminal states', () => {
@@ -77,8 +75,8 @@ describe('ObservationMonitor', () => {
       .run(now, now)
 
     db.raw
-      .prepare('UPDATE nodes SET last_heartbeat_at = ?, status = ? WHERE node_id = ?')
-      .run(now - 120_000, 'offline', 'n1')
+      .prepare('UPDATE nodes SET last_heartbeat_at = ? WHERE node_id = ?')
+      .run(now - 120_000, 'n1')
 
     const monitor = new ObservationMonitor(db, logger)
     monitor.checkOfflineNodes()
