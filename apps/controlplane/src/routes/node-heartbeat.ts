@@ -47,11 +47,12 @@ export function createNodeHeartbeatRoute(
         `UPDATE nodes SET
           status = 'online',
           execution_state = ?,
+          pid = ?,
           last_heartbeat_at = ?,
           updated_at = ?
         WHERE node_id = ?`
       )
-      .run(body.executionState, now, now, nodeId)
+      .run(body.executionState, body.pid ?? null, now, now, nodeId)
 
     if (body.agentList !== undefined) {
       updateAgentList(db, nodeId, body.agentList, now)
@@ -60,6 +61,7 @@ export function createNodeHeartbeatRoute(
     await logger.debug(SCOPE_HEARTBEAT, 'Heartbeat received', {
       nodeId,
       executionState: body.executionState,
+      pid: body.pid ?? null,
     })
 
     return c.body(null, 204)

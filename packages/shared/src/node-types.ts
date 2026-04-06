@@ -30,6 +30,7 @@ export interface NodeRegisterRequest {
   readonly platform: string
   readonly version: string
   readonly agentList: readonly AgentInfo[]
+  readonly pid?: number
 }
 
 /** Node 注册响应 */
@@ -44,4 +45,5 @@ export interface NodeHeartbeatRequest {
   readonly executionState: NodeExecutionState
   /** 仅在本地 agent 配置变更时携带全量快照 */
   readonly agentList?: readonly AgentInfo[]
+  readonly pid?: number
 }

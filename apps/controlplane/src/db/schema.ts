@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS nodes (
   access_token_hash TEXT NOT NULL,
   access_token_expires_at INTEGER NOT NULL,
   enrollment_token TEXT NOT NULL REFERENCES enrollment_tokens(token),
+  pid INTEGER,
   last_heartbeat_at INTEGER,
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL

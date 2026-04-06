@@ -41,8 +41,8 @@ export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogg
           `INSERT INTO nodes (
             node_id, hostname, platform, version, status,
             execution_state, access_token_hash, access_token_expires_at,
-            enrollment_token, last_heartbeat_at, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, 'online', 'idle', ?, ?, ?, ?, ?, ?)`
+            enrollment_token, pid, last_heartbeat_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, 'online', 'idle', ?, ?, ?, ?, ?, ?, ?)`
         )
         .run(
           body.nodeId,
@@ -52,6 +52,7 @@ export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogg
           accessTokenHash,
           expiresAt,
           body.enrollmentToken,
+          body.pid ?? null,
           now,
           now,
           now
@@ -60,6 +61,7 @@ export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogg
         nodeId: body.nodeId,
         hostname: body.hostname,
         platform: body.platform,
+        pid: body.pid ?? null,
         agentCount: body.agentList.length,
       })
     } else {
@@ -72,6 +74,7 @@ export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogg
             status = 'online',
             access_token_hash = ?,
             access_token_expires_at = ?,
+            pid = ?,
             last_heartbeat_at = ?,
             updated_at = ?
           WHERE node_id = ?`
@@ -82,6 +85,7 @@ export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogg
           body.version,
           accessTokenHash,
           expiresAt,
+          body.pid ?? null,
           now,
           now,
           body.nodeId
@@ -90,6 +94,7 @@ export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogg
         nodeId: body.nodeId,
         hostname: body.hostname,
         platform: body.platform,
+        pid: body.pid ?? null,
         agentCount: body.agentList.length,
       })
     }

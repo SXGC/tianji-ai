@@ -11,14 +11,6 @@
       "default": {
         "model": "openai/glm-latest",
         "command": "tianji-agent"
-      },
-      "claude": {
-        "command": "claude",
-        "args": ["--acp"]
-      },
-      "codex": {
-        "command": "codex",
-        "args": ["--acp", "--model", "o3"]
       }
     }
   },

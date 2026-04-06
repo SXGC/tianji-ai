@@ -44,6 +44,8 @@
   "error.run_failed": "执行失败: {message}",
   "error.run_help_hint": "执行 'tianji --help' 查看用法。",
   "error.run_command_help_hint": "执行 'tianji {command} --help' 查看用法。",
+  "daemon.controlplane.connected": "controlplane 注册成功。",
+  "daemon.controlplane.failed": "controlplane 注册失败: {error}",
   "daemon.register.no_config": "未找到 controlplane 配置。请使用 --register 提供注册 URL。",
   "daemon.register.confirm_overwrite": "已存储的 controlplane 配置与提供的注册 URL 不一致，是否覆盖？",
   "daemon.register.saved": "controlplane 配置已保存。",

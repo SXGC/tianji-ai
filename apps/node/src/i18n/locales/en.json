@@ -44,6 +44,8 @@
   "error.run_failed": "Run failed: {message}",
   "error.run_help_hint": "Run 'tianji --help' for usage.",
   "error.run_command_help_hint": "Run 'tianji {command} --help' for usage.",
+  "daemon.controlplane.connected": "Controlplane registered successfully.",
+  "daemon.controlplane.failed": "Controlplane registration failed: {error}",
   "daemon.register.no_config": "No controlplane configuration found. Use --register to provide a register URL.",
   "daemon.register.confirm_overwrite": "Stored controlplane config differs from the provided register URL. Overwrite?",
   "daemon.register.saved": "Controlplane configuration saved.",

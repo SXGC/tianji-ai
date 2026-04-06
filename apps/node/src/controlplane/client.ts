@@ -53,9 +53,10 @@ export class ControlPlaneClient {
 
   async heartbeat(
     executionState: NodeExecutionState,
-    agentList?: readonly AgentInfo[]
+    agentList?: readonly AgentInfo[],
+    pid?: number
   ): Promise<void> {
-    const body: NodeHeartbeatRequest = { executionState, agentList }
+    const body: NodeHeartbeatRequest = { executionState, agentList, pid }
     const response = await this.#fetchAuth(`/api/nodes/${this.#nodeId}/heartbeat`, {
       method: 'POST',
       body: JSON.stringify(body),

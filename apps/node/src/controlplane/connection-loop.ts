@@ -85,6 +85,7 @@ export class ControlPlaneConnection {
       platform: this.#config.platform,
       version: this.#config.version,
       agentList: this.#config.agentList,
+      pid: process.pid,
     })
   }
 
@@ -102,7 +103,7 @@ export class ControlPlaneConnection {
       baseUrl: this.#config.baseUrl,
     })
     try {
-      await this.#client.heartbeat(this.#executionState)
+      await this.#client.heartbeat(this.#executionState, undefined, process.pid)
       this.#config.onConnectionStateChange?.({ status: 'heartbeat_succeeded' })
       await this.#config.logger?.logDebug(this.#scope, 'Control plane heartbeat sent', {
         nodeId: this.#config.nodeId,
