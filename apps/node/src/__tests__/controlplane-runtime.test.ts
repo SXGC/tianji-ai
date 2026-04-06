@@ -98,6 +98,58 @@ describe('createControlPlaneRuntime with custom deps', () => {
     expect(execute).toHaveBeenCalledWith(cmd)
   })
 
+  it('logs fire-and-forget execution failures from connection callbacks', async () => {
+    const execute = vi.fn(async () => {
+      throw new Error('executor failed')
+    })
+    const logError = vi.fn(async () => undefined)
+    let capturedOnCommand: ((cmd: Command) => void) | undefined
+
+    const deps: ControlPlaneRuntimeDeps = {
+      createConnection: (config) => {
+        capturedOnCommand = config.onCommand as (cmd: Command) => void
+        return {
+          start: vi.fn(async () => undefined),
+          stop: vi.fn(),
+          setExecutionState: vi.fn(),
+        }
+      },
+      createTaskExecutor: () => ({
+        executionState: 'idle',
+        currentTaskId: null,
+        execute,
+      }),
+    }
+
+    createControlPlaneRuntime(
+      createTestConfig({
+        logger: {
+          logDebug: vi.fn(async () => undefined),
+          logInfo: vi.fn(async () => undefined),
+          logWarn: vi.fn(async () => undefined),
+          logError,
+        },
+      }),
+      deps
+    )
+
+    const cmd = createTestCommand()
+    capturedOnCommand?.(cmd)
+
+    await new Promise((resolve) => setTimeout(resolve, 10))
+
+    expect(logError).toHaveBeenCalledWith(
+      ['daemon', 'controlplane'],
+      'Failed to execute task command',
+      expect.objectContaining({
+        commandId: cmd.commandId,
+        taskId: cmd.payload.taskId,
+        agentId: cmd.payload.agentId,
+        error: 'executor failed',
+      })
+    )
+  })
+
   it('onCommand handler on the runtime handle calls taskExecutor.execute', async () => {
     const execute = vi.fn(async () => undefined)
 

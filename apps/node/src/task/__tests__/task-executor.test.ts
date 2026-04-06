@@ -147,4 +147,54 @@ describe('TaskExecutorConfig', () => {
       )
     ).toBe(true)
   })
+
+  it('writes task.failed lifecycle event when runner chat throws', async () => {
+    const module = await import('../task-executor.js')
+    const writes: string[] = []
+    const failure = new Error('runner exploded')
+
+    const executor = new module.TaskExecutor({
+      nodeId: createNodeId('node-001'),
+      onExecutionStateChange: () => undefined,
+      createRunner: async () =>
+        ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *chat() {
+            yield undefined as never
+            throw failure
+          },
+        }) as unknown as AgentRunner,
+      openEventStream: async () => ({
+        write: async (json: string) => {
+          writes.push(json)
+        },
+        writeKeepalive: async () => undefined,
+        close: async () => undefined,
+        abort: () => undefined,
+      }),
+    })
+
+    await expect(executor.execute(createCommand(createTaskId('task-001'), 'boom'))).rejects.toThrow(
+      'runner exploded'
+    )
+
+    expect(writes).toHaveLength(3)
+    expect(JSON.parse(writes[0] ?? 'null')).toMatchObject({
+      kind: 'lifecycle',
+      sequence: 1,
+      type: 'task.started',
+    })
+    expect(JSON.parse(writes[1] ?? 'null')).toMatchObject({
+      kind: 'agent',
+      sequence: 2,
+    })
+    expect(JSON.parse(writes[2] ?? 'null')).toMatchObject({
+      kind: 'lifecycle',
+      sequence: 3,
+      type: 'task.failed',
+      error: 'runner exploded',
+    })
+  })
 })

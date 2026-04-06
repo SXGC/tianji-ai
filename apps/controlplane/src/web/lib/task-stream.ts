@@ -30,14 +30,16 @@ export function streamTask(taskId: string, handlers: TaskStreamHandlers): () => 
   eventSource.addEventListener('agent.message.delta', (event) => {
     const data = JSON.parse((event as MessageEvent).data) as {
       payload?: {
-        payload?: {
-          content?: string
+        event?: {
+          payload?: {
+            content?: string
+          }
         }
       }
     }
 
-    if (typeof data.payload?.payload?.content === 'string') {
-      handlers.onMessageDelta(data.payload.payload.content)
+    if (typeof data.payload?.event?.payload?.content === 'string') {
+      handlers.onMessageDelta(data.payload.event.payload.content)
     }
   })
 

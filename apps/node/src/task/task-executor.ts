@@ -65,6 +65,7 @@ export class TaskExecutor {
     await this.#config.logger?.logDebug(this.#scope, 'Opened task event stream', {
       taskId,
     })
+    let sequence = 2
 
     try {
       await this.#config.logger?.logDebug(this.#scope, 'Writing task started lifecycle event', {
@@ -83,7 +84,6 @@ export class TaskExecutor {
       await this.#config.logger?.logDebug(this.#scope, 'Connected task runner', {
         taskId,
       })
-      let sequence = 2
       for await (const event of runner.chat(command.payload.goal)) {
         await this.#config.logger?.logDebug(this.#scope, 'Forwarding task runtime event', {
           taskId,
@@ -115,10 +115,28 @@ export class TaskExecutor {
         taskId,
       })
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error)
       await this.#config.logger?.logError(this.#scope, 'Task execution failed', {
         taskId,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       })
+
+      try {
+        await eventStream.write(
+          JSON.stringify({
+            kind: 'lifecycle',
+            sequence,
+            type: 'task.failed',
+            error: errorMessage,
+          })
+        )
+      } catch (streamError) {
+        await this.#config.logger?.logError(this.#scope, 'Failed to write task failure event', {
+          taskId,
+          error: streamError instanceof Error ? streamError.message : String(streamError),
+        })
+      }
+
       throw error
     } finally {
       await this.#config.logger?.logDebug(this.#scope, 'Cleaning up task execution resources', {

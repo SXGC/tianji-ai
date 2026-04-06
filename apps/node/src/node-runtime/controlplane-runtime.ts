@@ -77,6 +77,22 @@ export function createControlPlaneRuntime(
     createdAt: Date.now(),
   })
 
+  const executePolledCommand = (command: PollCommandResponse): void => {
+    if (taskExecutorRef === null) {
+      return
+    }
+
+    const taskCommand = toCommand(command)
+    void taskExecutorRef.execute(taskCommand).catch((error) => {
+      void config.logger?.logError(['daemon', 'controlplane'], 'Failed to execute task command', {
+        commandId: taskCommand.commandId,
+        taskId: taskCommand.payload.taskId,
+        agentId: taskCommand.payload.agentId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+  }
+
   const connection =
     deps.createConnection?.({
       baseUrl: config.baseUrl,
@@ -87,11 +103,7 @@ export function createControlPlaneRuntime(
       version: config.version,
       agentList: config.agentList,
       logger: config.logger,
-      onCommand: (command) => {
-        if (taskExecutorRef !== null) {
-          void taskExecutorRef.execute(toCommand(command))
-        }
-      },
+      onCommand: executePolledCommand,
     }) ??
     new ControlPlaneConnection({
       baseUrl: config.baseUrl,
@@ -102,11 +114,7 @@ export function createControlPlaneRuntime(
       version: config.version,
       agentList: config.agentList,
       logger: config.logger,
-      onCommand: (command) => {
-        if (taskExecutorRef !== null) {
-          void taskExecutorRef.execute(toCommand(command))
-        }
-      },
+      onCommand: executePolledCommand,
     })
 
   currentConnection = connection

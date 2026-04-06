@@ -5,6 +5,8 @@ import { streamSSE } from 'hono/streaming'
 import type { ControlPlaneDb } from '../db/index.js'
 import { EventStore } from '../services/event-store.js'
 
+const POLL_INTERVAL_MS = 500
+
 /**
  * 创建 task SSE 推送路由。
  */
@@ -25,34 +27,40 @@ export function createTaskStreamRoute(db: ControlPlaneDb): Hono {
     }
 
     return streamSSE(c, async (stream) => {
-      const events = eventStore.getEvents(taskId, lastSequence, 1000)
+      while (!c.req.raw.signal.aborted) {
+        const events = eventStore.getEvents(taskId, lastSequence, 1000)
 
-      for (const event of events) {
-        const sseEventType =
-          event.kind === 'lifecycle'
-            ? 'task.lifecycle'
-            : `agent.${extractAgentEventType(event.payload)}`
+        for (const event of events) {
+          const sseEventType =
+            event.kind === 'lifecycle'
+              ? 'task.lifecycle'
+              : `agent.${extractAgentEventType(event.payload)}`
 
-        await stream.writeSSE({
-          event: sseEventType,
-          data: JSON.stringify({
-            sequence: event.sequence,
-            kind: event.kind,
-            payload: JSON.parse(event.payload),
-            receivedAt: event.receivedAt,
-          }),
-          id: `${taskId}:${event.sequence}`,
-        })
+          await stream.writeSSE({
+            event: sseEventType,
+            data: JSON.stringify({
+              sequence: event.sequence,
+              kind: event.kind,
+              payload: JSON.parse(event.payload),
+              receivedAt: event.receivedAt,
+            }),
+            id: `${taskId}:${event.sequence}`,
+          })
 
-        lastSequence = event.sequence
-      }
+          lastSequence = event.sequence
+        }
 
-      const task = db.raw.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId) as
-        | { status: string }
-        | undefined
+        const task = db.raw.prepare('SELECT status FROM tasks WHERE task_id = ?').get(taskId) as
+          | { status: string }
+          | undefined
 
-      if (task !== undefined && isTerminalTaskStatus(task.status as never)) {
-        await stream.writeSSE({ event: 'done', data: '{}' })
+        const hasMoreEvents = eventStore.getEvents(taskId, lastSequence, 1).length > 0
+        if (task !== undefined && isTerminalTaskStatus(task.status as never) && !hasMoreEvents) {
+          await stream.writeSSE({ event: 'done', data: '{}' })
+          break
+        }
+
+        await stream.sleep(POLL_INTERVAL_MS)
       }
     })
   })
