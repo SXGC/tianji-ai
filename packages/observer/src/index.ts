@@ -7,11 +7,17 @@ export type {
 } from './types.js'
 
 export {
+  createJsonlFileSink,
   createObserverLogger,
   createMemorySink,
+  createStdoutSink,
   getDefaultObserverSensitiveKeys,
   sanitizeObserverLogData,
 } from './logger/index.js'
+
+export type { CreateJsonlFileSinkOptions } from './logger/index.js'
+export type { ObserverMemorySink } from './logger/index.js'
+export type { CreateStdoutSinkOptions } from './logger/index.js'
 
 export type {
   ObserverLlmCallSpanInput,
