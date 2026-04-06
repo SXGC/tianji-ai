@@ -16,6 +16,7 @@ const dbPath = `${dataDir}/controlplane.db`
 const logFilePath = join(homedir(), '.config', 'tianji-ai', 'logs', 'tianji.log')
 
 mkdirSync(dataDir, { recursive: true })
+mkdirSync(join(homedir(), '.config', 'tianji-ai', 'logs'), { recursive: true })
 
 const db = createDatabase(dbPath)
 const logger = createObserverLogger({
