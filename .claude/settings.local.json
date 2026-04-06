@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(ts|mjs|js\\)$\")",
+      "WebFetch(domain:agentclientprotocol.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:block.github.io)",
+      "WebFetch(domain:lzw.me)",
+      "WebSearch",
+      "Bash(grep -E \"\\\\.\\(ts|js\\)$\")",
+      "Bash(grep -r \"enrollmentToken\\\\|nodeId\\\\|nodeSecret\" /workspaces/dev_docker/tianji-ai/docs --include=*.md)",
+      "Bash(grep -E \"\\\\.ts$|\\\\.d\\\\.ts$\")",
+      "Bash(grep -r \"react\\\\|vue\\\\|svelte\\\\|next\\\\|nuxt\" /workspaces/dev_docker/tianji-ai/package.json /workspaces/dev_docker/tianji-ai/packages/*/package.json /workspaces/dev_docker/tianji-ai/apps/*/package.json)"
+    ]
+  }
+}

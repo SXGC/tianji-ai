@@ -1,13 +1,11 @@
 import { chatCommand } from './chat.js'
 import { daemonCommand } from './daemon.js'
 import { logCommand } from './log.js'
-import { registerCommand } from './register.js'
 import { runCommand } from './run.js'
 import type { CommandDefinition } from './types.js'
 
 export const COMMAND_REGISTRY: readonly CommandDefinition[] = [
   runCommand,
-  registerCommand,
   logCommand,
   daemonCommand,
   chatCommand,

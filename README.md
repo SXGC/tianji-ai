@@ -19,13 +19,13 @@ pnpm --filter @tianji/controlplane start
 # 生成 enrollment token
 pnpm --filter @tianji/controlplane token:create
 
-# 让 node 注册到 controlplane
-pnpm tianji register "http://127.0.0.1:3000/register?enrollment-token=<enrollment-token>"
+# 首次启动并注册 node 到 controlplane
+pnpm tianji daemon start --register "http://127.0.0.1:3000/register?enrollment-token=<enrollment-token>"
 ```
 
 启动 controlplane 后，默认访问 `http://127.0.0.1:3000/`。
 
-如果没有执行 `tianji register "<url>"`，controlplane 页面不会出现可用节点。
+如果没有先执行 `tianji daemon start --register "<url>"` 完成注册，controlplane 页面不会出现可用节点。
 
 注意：`pnpm tianji run "hello"` 只会执行本地 CLI 请求，不会把 node 注册到 controlplane。
 
@@ -123,7 +123,7 @@ agent 装配层，负责把配置解析结果、默认 agent、`SOUL.md`、provi
 
 ### `@tianji/node`
 
-节点命令行应用，提供 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon`、`tianji chat`、`tianji status`、`tianji stop` 和 `tianji help` 七个命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。当前 `run` 命令仍通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；后续会逐步迁移为 ACP 管理的 node 架构。日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。使用说明见 [`docs/usage/node.md`](./docs/usage/node.md)。
+节点命令行应用，提供 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon start|status|stop|restart`、`tianji chat` 和 `tianji help` 等命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。当前 `run` 命令仍通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；后续会逐步迁移为 ACP 管理的 node 架构。日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。使用说明见 [`docs/usage/node.md`](./docs/usage/node.md)。
 
 ## 开发命令
 
@@ -152,10 +152,10 @@ pnpm tianji run "hello"
 pnpm tianji log -f
 
 # 启动后台守护进程
-pnpm tianji daemon
+pnpm tianji daemon start
 
 # 以前台模式启动守护进程（调试用）
-pnpm tianji daemon --fg
+pnpm tianji daemon start --fg
 
 # 连接守护进程进行多轮对话
 pnpm tianji chat

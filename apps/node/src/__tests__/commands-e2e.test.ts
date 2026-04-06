@@ -27,7 +27,6 @@ describe('command dispatch e2e', () => {
     const { exitCode, stdout } = await runCommand(['--help'], deps)
     expect(exitCode).toBe(0)
     expect(stdout).toContain('tianji run <prompt>')
-    expect(stdout).toContain('tianji register <url>')
     expect(stdout).toContain('tianji daemon <subcommand>')
     expect(stdout).toContain('tianji log')
     expect(stdout).toContain('tianji chat')
@@ -67,6 +66,7 @@ describe('command dispatch e2e', () => {
     expect(stdout).toContain('stop')
     expect(stdout).toContain('restart')
     expect(stdout).toContain('--fg')
+    expect(stdout).toContain('--register')
   })
 
   it('tianji log --help shows --follow and --lines', async () => {
@@ -76,11 +76,12 @@ describe('command dispatch e2e', () => {
     expect(stdout).toContain('--lines')
   })
 
-  it('tianji register --help shows register usage', async () => {
-    const { exitCode, stdout } = await runCommand(['register', '--help'], deps)
-    expect(exitCode).toBe(0)
-    expect(stdout).toContain('tianji register <url>')
-    expect(stdout).toContain('<url>')
+  it('tianji register --help reports unknown command', async () => {
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const exitCode = await runCli(['register', '--help'], deps)
+    expect(exitCode).toBe(2)
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/Unknown command "register"/))
+    stderrSpy.mockRestore()
   })
 
   it('tianji help daemon is equivalent to daemon --help', async () => {
@@ -131,11 +132,11 @@ describe('command dispatch e2e', () => {
     stderrSpy.mockRestore()
   })
 
-  it('register without url exits 2', async () => {
+  it('register without url exits 2 as unknown command', async () => {
     const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
     const exitCode = await runCli(['register'], deps)
     expect(exitCode).toBe(2)
-    expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/Missing required argument/))
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/Unknown command "register"/))
     stderrSpy.mockRestore()
   })
 })

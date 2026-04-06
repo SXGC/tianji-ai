@@ -33,8 +33,13 @@ export async function runDaemonEntry(): Promise<void> {
       ...controlPlaneConfig,
       agentList: [],
     })
-    await runtime.connection.start()
-    controlPlaneHandle = runtime
+    try {
+      await runtime.connection.start()
+      controlPlaneHandle = runtime
+    } catch {
+      // controlplane 连接失败时 daemon 继续以本地模式运行
+      process.stderr.write('Warning: controlplane connection failed, running in local-only mode\n')
+    }
   }
 
   const shutdown = () => {

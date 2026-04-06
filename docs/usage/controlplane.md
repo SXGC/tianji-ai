@@ -110,10 +110,10 @@ pnpm --filter @tianji/controlplane token:create dev-token
 ~/.config/tianji-ai/controlplane/controlplane.db
 ```
 
-插入后，node 可使用下面的 URL 注册：
+插入后，node 可使用下面的命令完成首次注册并启动 daemon：
 
 ```bash
-pnpm tianji register "http://127.0.0.1:3000/register?enrollment-token=dev-token"
+pnpm tianji daemon start --register "http://127.0.0.1:3000/register?enrollment-token=dev-token"
 ```
 
 如果 token 不存在，controlplane 会返回 `403 Invalid enrollment token`。

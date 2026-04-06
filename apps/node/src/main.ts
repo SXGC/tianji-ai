@@ -13,6 +13,7 @@ export interface DaemonCommand {
   readonly kind: 'daemon'
   readonly subcommand: DaemonSubcommand
   readonly foreground: boolean
+  readonly registerUrl?: string
 }
 
 export interface ChatCommand {
@@ -22,11 +23,6 @@ export interface ChatCommand {
 export interface RunCommand {
   readonly kind: 'run'
   readonly prompt: string
-}
-
-export interface RegisterCommand {
-  readonly kind: 'register'
-  readonly url: string
 }
 
 export interface LogFollowCommand {
@@ -40,7 +36,6 @@ export interface HelpCommand {
 
 export type TianjiCliCommand =
   | RunCommand
-  | RegisterCommand
   | LogFollowCommand
   | HelpCommand
   | DaemonCommand
@@ -68,9 +63,6 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
   if (parsed.command.name === 'run') {
     return { kind: 'run', prompt: parsed.context.args.prompt }
   }
-  if (parsed.command.name === 'register') {
-    return { kind: 'register', url: parsed.context.args.url }
-  }
   if (parsed.command.name === 'log') {
     return { kind: 'log-follow', lines: parsed.context.options.lines as number }
   }
@@ -79,10 +71,12 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
   }
 
   const foreground = parsed.context.options.fg === true
+  const registerUrl = parsed.context.options.register as string | undefined
   return {
     kind: 'daemon',
     subcommand: parsed.command.name as DaemonSubcommand,
     foreground,
+    registerUrl,
   }
 }
 

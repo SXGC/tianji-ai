@@ -48,16 +48,21 @@ describe('parseCommand', () => {
     })
   })
 
-  it('parses register url positional argument', () => {
+  it('parses daemon start register option', () => {
     const result = parseCommand(
-      ['register', 'http://127.0.0.1:3000/register?enrollment-token=test-token'],
+      [
+        'daemon',
+        'start',
+        '--register',
+        'http://127.0.0.1:3000/register?enrollment-token=test-token',
+      ],
       COMMAND_REGISTRY,
       createI18n('en')
     )
 
-    expect(result.command.name).toBe('register')
-    expect(result.context.args).toEqual({
-      url: 'http://127.0.0.1:3000/register?enrollment-token=test-token',
+    expect(result.command.name).toBe('start')
+    expect(result.context.options).toEqual({
+      register: 'http://127.0.0.1:3000/register?enrollment-token=test-token',
     })
   })
 

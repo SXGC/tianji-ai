@@ -214,6 +214,9 @@ describe('daemon start/status/stop', () => {
       const result = await runCommand(['daemon', 'start', '--fg'], {
         getUserConfigPaths: () => live.paths,
         runDaemonEntry: vi.fn(async () => undefined),
+        loadConfig: async () => ({
+          controlPlane: { baseUrl: 'http://localhost:3000', enrollmentToken: 'tok', nodeId: 'n1' },
+        }),
       })
 
       // daemon start 发现 ping 成功，应打印 "already running" 并返回 0，不调用 runDaemonEntry
@@ -234,7 +237,17 @@ describe('daemon start/status/stop', () => {
       })
 
       await mkdir(dirname(paths.configFilePath), { recursive: true })
-      await writeFile(paths.configFilePath, '{}', 'utf8')
+      await writeFile(
+        paths.configFilePath,
+        JSON.stringify({
+          controlPlane: {
+            baseUrl: 'http://127.0.0.1:3000',
+            enrollmentToken: 'test-token',
+            nodeId: 'test-node',
+          },
+        }),
+        'utf8'
+      )
 
       const cliEntryPath = fileURLToPath(new URL('../../bin/tianji.mjs', import.meta.url))
       const child = spawn(process.execPath, [cliEntryPath, 'daemon', 'start'], {
@@ -341,6 +354,9 @@ describe('daemon restart', () => {
       const result = await runCommand(['daemon', 'start', '--fg'], {
         getUserConfigPaths: () => paths,
         runDaemonEntry,
+        loadConfig: async () => ({
+          controlPlane: { baseUrl: 'http://localhost:3000', enrollmentToken: 'tok', nodeId: 'n1' },
+        }),
       })
 
       expect(result.exitCode).toBe(0)

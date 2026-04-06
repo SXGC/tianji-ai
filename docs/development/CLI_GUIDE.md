@@ -27,7 +27,7 @@ pnpm tianji <command>
 |------|------|
 | `tianji run "<prompt>"` | 向默认 agent 发送单次 prompt |
 | `tianji log -f [--lines <n>]` | 实时跟踪 CLI 日志并回放最近条目 |
-| `tianji daemon start [--fg]` | 启动后台守护进程 |
+| `tianji daemon start [--fg] [--register <url>]` | 启动后台守护进程 |
 | `tianji daemon status` | 查看守护进程状态 |
 | `tianji daemon stop` | 停止守护进程 |
 | `tianji daemon restart [--fg]` | 重启守护进程 |
@@ -89,16 +89,25 @@ tianji log --follow [-n <n>]
 ```bash
 tianji daemon start          # 后台模式（fork 子进程）
 tianji daemon start --fg     # 前台模式（阻塞终端，调试用）
+tianji daemon start --register "http://127.0.0.1:3000/register?enrollment-token=<token>"  # 首次注册并启动
 ```
 
 **后台模式**：
 1. 检查是否已有 daemon 在运行（读取端口文件 + ping）
 2. 已运行：输出现有进程信息，正常退出
-3. 未运行：清理残留文件，fork 子进程
-4. 等待最多 10 秒直到 daemon 就绪
-5. 输出：`Daemon started (pid=1234, port=5678)`
+3. 如果传入 `--register`，解析 URL 并准备写入 controlplane 配置
+4. 若已有不同 controlplane 配置，交互确认是否覆盖；拒绝覆盖时退出码为 `0`
+5. 未运行：清理残留文件，fork 子进程
+6. 等待最多 10 秒直到 daemon 就绪
+7. 输出：`Daemon started (pid=1234, port=5678)`
 
 **前台模式**：直接在当前终端启动 daemon server，Ctrl+C 停止。
+
+**controlplane 配置规则**：
+- 首次启动如果本地没有已保存的 controlplane 配置，必须传入 `--register <url>`
+- daemon 启动链路统一从用户配置读取 controlplane 注册信息
+- 再次传入相同 `--register` 值时不提示
+- 再次传入不同 `--register` 值时提示是否覆盖
 
 ### 3.4 daemon status
 
@@ -136,6 +145,8 @@ tianji daemon restart --fg    # 前台重启
 ```
 
 先停止现有 daemon（如有），再启动新实例。
+
+`daemon restart` 不接受 `--register`，也不负责变更 controlplane 配置。
 
 ### 3.7 chat
 
@@ -190,6 +201,8 @@ tianji help
 | `~/.config/tianji-ai/daemon.port` | Daemon 端口号 | `daemon start` |
 | `~/.config/tianji-ai/daemon.pid` | Daemon PID | `daemon start` |
 
+controlplane 注册信息也持久化在 `~/.config/tianji-ai/tianji.json` 的 `controlPlane` 字段中，由 `daemon start --register` 写入，后续 `daemon start` / `daemon restart` 复用。
+
 ### 4.2 配置加载优先级
 
 ```
@@ -243,12 +256,14 @@ tianji help
 ### 6.1 启动流程
 
 ```
-daemon start
+daemon start [--register <url>]
   → 检查端口文件是否存在 + ping 验证
   → 已运行？输出信息，退出
+  → 如传入 --register：解析 URL，加载已有 controlplane 配置
+  → 配置冲突？提示是否覆盖；拒绝则退出
   → 清理残留文件
   → fork 子进程（detached, stdio='ignore'）
-  → 子进程：loadAgentContext → createAgentSession → DaemonServer.listen(0)
+  → 子进程：从用户配置读取 controlplane 配置 → loadAgentContext → createAgentSession → DaemonServer.listen(0)
   → 父进程：轮询端口文件 + ping，最多等 10 秒
   → 输出 pid 和 port
 ```

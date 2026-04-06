@@ -1,6 +1,6 @@
 # @tianji/node
 
-`@tianji/node` 是 `tianji-ai` 的节点命令行入口，当前提供 `run`、`register`、`log`、`daemon`、`chat` 和 `help` 能力，并支持全局 `-h` / `--help` 与 `-V` / `--version`。
+`@tianji/node` 是 `tianji-ai` 的节点命令行入口，当前提供 `run`、`log`、`daemon`、`chat` 和 `help` 能力，并支持全局 `-h` / `--help` 与 `-V` / `--version`。
 
 ## 安装与运行
 
@@ -15,9 +15,9 @@ pnpm build
 ```bash
 pnpm tianji --help
 pnpm tianji run "hello"
-pnpm tianji register "http://127.0.0.1:3000/register?enrollment-token=<enrollment-token>"
+pnpm tianji daemon start --register "http://127.0.0.1:3000/register?enrollment-token=<enrollment-token>"
 pnpm tianji log --lines 20
-pnpm tianji daemon --help
+pnpm tianji help daemon
 ```
 
 `apps/node/package.json` 中声明了 `bin.tianji -> ./bin/tianji.mjs`。在 monorepo 开发环境里，推荐通过仓库根脚本 `pnpm tianji` 调用；如果将包链接到全局环境，也可以直接执行 `tianji`。
@@ -30,15 +30,6 @@ pnpm tianji daemon --help
 - 当前 node app 仍会通过 `@tianji/agent` 加载配置、解析默认 agent、读取对应 `SOUL.md`、创建会话，并把 assistant 文本流式输出到 stdout；后续将迁移为 ACP 管理模式。
 - 首次运行时，如果 `~/.config/tianji-ai/` 下缺少配置目录，会自动创建基础目录、空的用户层 `tianji.json`、默认 agent 的 `SOUL.md`，以及日志目录。
 - 用法错误返回退出码 `2`，运行时错误返回退出码 `1`。
-
-### `tianji register "<url>"`
-
-- 把当前 node 注册到 controlplane，并保持长连接在线。
-- URL 格式固定为 `http://cp_base_url/register?enrollment-token=xxxxx`。
-- 命令会从 URL 中解析 controlplane 基础地址和 enrollment token，然后启动注册、心跳和任务轮询流程。
-- 启动后会输出 `nodeId`、`baseUrl` 和连接状态，便于确认当前 node 是否已经连上 controlplane。
-- `tianji run "<prompt>"` 不会注册 node；它只会执行一次本地 CLI 请求。
-- 已移除旧的“依赖环境变量并在不带子命令时自动进入 controlplane 模式”的行为。
 
 ### `tianji log [--follow] [--lines <n>]`
 
@@ -56,7 +47,12 @@ pnpm tianji daemon --help
 
 - 默认行为：fork 一个后台子进程，将端口号写入 `~/.config/tianji-ai/daemon.port`，PID 写入 `~/.config/tianji-ai/daemon.pid`。
 - `--fg`：以前台模式运行，方便调试。前台模式下进程不会 fork，直接在当前终端中运行。
+- `--register <url>`：首次启动时写入 controlplane 注册配置，并立即用该配置启动 daemon。URL 格式固定为 `http://cp_base_url/register?enrollment-token=xxxxx`。
 - 如果检测到已有守护进程在运行（端口文件存在且可以 ping 通），会直接输出已有进程信息，不会重复启动。
+- 如果本地还没有保存过 controlplane 注册配置，首次启动必须显式传入 `--register`。
+- 如果再次传入不同的 `--register` URL，CLI 会先交互确认是否覆盖已有配置；拒绝覆盖时直接退出，不启动 daemon。
+- `tianji run "<prompt>"` 不会注册 node；它只会执行一次本地 CLI 请求。
+- 已移除顶层 `tianji register` 命令，以及更早期依赖环境变量自动进入 controlplane 模式的行为。
 
 ### `tianji daemon status`
 
@@ -76,6 +72,7 @@ pnpm tianji daemon --help
 
 - `--fg`：重启后以前台模式运行。
 - 如果当前有守护进程在运行，会先停止它，再启动新实例。
+- `restart` 只复用已保存的 controlplane 配置，不负责更新注册配置。
 
 ### `tianji chat`
 
@@ -108,6 +105,8 @@ pnpm tianji daemon --help
 | `~/.config/tianji-ai/logs/tianji.log` | observer JSONL 日志文件，供 CLI follow |
 | `~/.config/tianji-ai/daemon.port` | 守护进程监听端口号 |
 | `~/.config/tianji-ai/daemon.pid` | 守护进程 PID |
+
+controlplane 注册信息也会持久化到 `~/.config/tianji-ai/tianji.json` 的 `controlPlane` 字段中，供后续 `daemon start` 和 `daemon restart` 复用。
 
 ## 配置文件结构
 

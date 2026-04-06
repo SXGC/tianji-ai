@@ -3,7 +3,12 @@ import { readFile, rm } from 'node:fs/promises'
 
 import { DaemonClient } from '@tianji/agent'
 
-import { type UserConfigPaths, getUserConfigPaths } from '../config.js'
+import {
+  type LoadedUserConfigContext,
+  type UserConfigPaths,
+  getUserConfigPaths,
+  loadUserConfigContext,
+} from '../config.js'
 import { runDaemonEntry } from '../daemon-entry.js'
 import {
   areStoredControlPlaneConfigsEqual,
@@ -108,7 +113,12 @@ const daemonStartCommand: CommandDefinition = {
 
     // 配置加载与 --register 处理
     const registerUrl = options.register as string | undefined
-    const loadConfig = deps?.loadConfig ?? (async () => ({}))
+    const loadConfig =
+      deps?.loadConfig ??
+      (async () => {
+        const ctx: LoadedUserConfigContext = await loadUserConfigContext()
+        return ctx.config
+      })
     const config = await loadConfig().catch(() => ({}))
 
     if (registerUrl) {
