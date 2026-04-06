@@ -1,5 +1,6 @@
 import { chatCommand } from './chat.js'
 import { daemonCommand } from './daemon.js'
+import { debugCommand } from './debug.js'
 import { logCommand } from './log.js'
 import { runCommand } from './run.js'
 import type { CommandDefinition } from './types.js'
@@ -9,6 +10,7 @@ export const COMMAND_REGISTRY: readonly CommandDefinition[] = [
   logCommand,
   daemonCommand,
   chatCommand,
+  debugCommand,
 ]
 
 export function findCommand(

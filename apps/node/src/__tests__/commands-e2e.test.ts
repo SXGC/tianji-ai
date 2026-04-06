@@ -7,6 +7,7 @@ import {
   captureStdout,
   createDepsWithLocale,
   createDepsWithoutLocale,
+  createFakeContext,
 } from './helpers/cli-test-utils.js'
 
 async function runCommand(argv: readonly string[], deps = createDepsWithoutLocale()) {
@@ -28,6 +29,7 @@ describe('command dispatch e2e', () => {
     expect(exitCode).toBe(0)
     expect(stdout).toContain('tianji run <prompt>')
     expect(stdout).toContain('tianji daemon <subcommand>')
+    expect(stdout).toContain('tianji debug <subcommand>')
     expect(stdout).toContain('tianji log')
     expect(stdout).toContain('tianji chat')
     expect(stdout).toContain('-h, --help')
@@ -67,6 +69,13 @@ describe('command dispatch e2e', () => {
     expect(stdout).toContain('restart')
     expect(stdout).toContain('--fg')
     expect(stdout).toContain('--register')
+  })
+
+  it('tianji debug --help shows debug subcommand list', async () => {
+    const { exitCode, stdout } = await runCommand(['debug', '--help'], deps)
+    expect(exitCode).toBe(0)
+    expect(stdout).toContain('config')
+    expect(stdout).toContain('Print the final resolved configuration as JSON')
   })
 
   it('tianji log --help shows --follow and --lines', async () => {
@@ -121,6 +130,70 @@ describe('command dispatch e2e', () => {
     const exitCode = await runCli(['daemon', 'fly'], deps)
     expect(exitCode).toBe(2)
     expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/Unknown subcommand "fly"/))
+    stderrSpy.mockRestore()
+  })
+
+  it('debug without subcommand exits 2', async () => {
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const exitCode = await runCli(['debug'], deps)
+    expect(exitCode).toBe(2)
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/Missing subcommand/))
+    stderrSpy.mockRestore()
+  })
+
+  it('debug with unknown subcommand exits 2', async () => {
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const exitCode = await runCli(['debug', 'wat'], deps)
+    expect(exitCode).toBe(2)
+    expect(stderrSpy).toHaveBeenCalledWith(expect.stringMatching(/Unknown subcommand "wat"/))
+    stderrSpy.mockRestore()
+  })
+
+  it('debug config prints resolved config json', async () => {
+    const depsWithContext = createDepsWithoutLocale({
+      loadContext: async () =>
+        createFakeContext({
+          config: {
+            locale: 'zh-CN',
+            providers: {
+              openai: {
+                apiKey: 'test-key',
+              },
+            },
+          },
+        }),
+    })
+
+    const { exitCode, stdout } = await runCommand(['debug', 'config'], depsWithContext)
+    expect(exitCode).toBe(0)
+    expect(stdout).toBe(
+      `${JSON.stringify(
+        {
+          locale: 'zh-CN',
+          providers: {
+            openai: {
+              apiKey: 'test-key',
+            },
+          },
+        },
+        null,
+        2
+      )}\n`
+    )
+  })
+
+  it('debug config returns exit code 1 when loading config fails', async () => {
+    const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const exitCode = await runCli(
+      ['debug', 'config'],
+      createDepsWithoutLocale({
+        loadContext: async () => {
+          throw new Error('load failed')
+        },
+      })
+    )
+    expect(exitCode).toBe(1)
+    expect(stderrSpy).toHaveBeenCalledWith('load failed')
     stderrSpy.mockRestore()
   })
 

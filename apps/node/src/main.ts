@@ -9,11 +9,18 @@ import { createI18n, detectLocale } from './i18n/index.js'
 
 export type DaemonSubcommand = 'start' | 'status' | 'stop' | 'restart'
 
+export type DebugSubcommand = 'config'
+
 export interface DaemonCommand {
   readonly kind: 'daemon'
   readonly subcommand: DaemonSubcommand
   readonly foreground: boolean
   readonly registerUrl?: string
+}
+
+export interface DebugCommand {
+  readonly kind: 'debug'
+  readonly subcommand: DebugSubcommand
 }
 
 export interface ChatCommand {
@@ -40,6 +47,7 @@ export type TianjiCliCommand =
   | HelpCommand
   | DaemonCommand
   | ChatCommand
+  | DebugCommand
 
 export type RunCommandDependencies = CliDependencies
 
@@ -68,6 +76,9 @@ export function parseCliArgs(argv: readonly string[]): TianjiCliCommand {
   }
   if (parsed.command.name === 'chat') {
     return { kind: 'chat' }
+  }
+  if (parsed.command.name === 'config') {
+    return { kind: 'debug', subcommand: 'config' }
   }
 
   const foreground = parsed.context.options.fg === true

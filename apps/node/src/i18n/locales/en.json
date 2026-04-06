@@ -17,6 +17,8 @@
   "cmd.daemon.stop.description": "Stop the daemon",
   "cmd.daemon.restart.description": "Restart the daemon (stop + start)",
   "cmd.daemon.restart.option.fg": "Run in foreground instead of background",
+  "cmd.debug.description": "Debug and introspection tools",
+  "cmd.debug.config.description": "Print the final resolved configuration as JSON",
   "cmd.chat.description": "Connect to daemon for multi-turn chat",
   "daemon.already_running": "Daemon already running (pid={pid})",
   "daemon.started": "Daemon started (pid={pid}, port={port})",

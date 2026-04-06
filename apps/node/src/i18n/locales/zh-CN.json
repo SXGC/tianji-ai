@@ -17,6 +17,8 @@
   "cmd.daemon.stop.description": "停止守护进程",
   "cmd.daemon.restart.description": "重启守护进程 (先停止再启动)",
   "cmd.daemon.restart.option.fg": "在前台运行而非后台",
+  "cmd.debug.description": "调试与内省工具",
+  "cmd.debug.config.description": "打印最终生效的配置 JSON",
   "cmd.chat.description": "连接守护进程进行多轮对话",
   "daemon.already_running": "守护进程已在运行 (pid={pid})",
   "daemon.started": "守护进程已启动 (pid={pid}, port={port})",

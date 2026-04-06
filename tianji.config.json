@@ -10,7 +10,15 @@
     "items": {
       "default": {
         "model": "openai/glm-latest",
-        "entryPath": "@tianji/agent/dist/acp-entry.js"
+        "command": "tianji-agent"
+      },
+      "claude": {
+        "command": "claude",
+        "args": ["--acp"]
+      },
+      "codex": {
+        "command": "codex",
+        "args": ["--acp", "--model", "o3"]
       }
     }
   },

@@ -71,4 +71,24 @@ describe('parseCommand', () => {
       /Unknown command "wat"/i
     )
   })
+
+  it('parses debug config subcommand', () => {
+    const result = parseCommand(['debug', 'config'], COMMAND_REGISTRY, createI18n('en'))
+
+    expect(result.command.name).toBe('config')
+    expect(result.context.args).toEqual({})
+    expect(result.context.options).toEqual({})
+  })
+
+  it('rejects debug without subcommand', () => {
+    expect(() => parseCommand(['debug'], COMMAND_REGISTRY, createI18n('en'))).toThrow(
+      /Missing subcommand for "debug"/
+    )
+  })
+
+  it('rejects debug with unknown subcommand', () => {
+    expect(() => parseCommand(['debug', 'wat'], COMMAND_REGISTRY, createI18n('en'))).toThrow(
+      /Unknown subcommand "wat" for "debug"/
+    )
+  })
 })
