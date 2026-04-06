@@ -151,7 +151,15 @@ const daemonStartCommand: CommandDefinition = {
             nodeId: candidate.nodeId,
           }
         )
-        const confirm = deps?.confirmOverwrite ?? (async () => false)
+        const confirm =
+          deps?.confirmOverwrite ??
+          (async (message: string) => {
+            const readline = await import('node:readline/promises')
+            const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+            const answer = await rl.question(`${message} [y/N] `)
+            rl.close()
+            return answer.toLowerCase() === 'y'
+          })
         const accepted = await confirm(i18n.t('daemon.register.confirm_overwrite'))
         if (!accepted) {
           await logInfo(paths, DAEMON_START_SCOPE, 'Registration config overwrite declined', {
