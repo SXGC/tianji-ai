@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+
 import { describe, expect, it, vi } from 'vitest'
 import { parseCliArgs, runCli } from '../main.js'
 import { captureStdout, createTempCliPaths } from './helpers/cli-test-utils.js'
@@ -291,6 +293,62 @@ describe('runCli daemon commands', () => {
 
       expect(exitCode).toBe(0)
       expect(confirmOverwrite).not.toHaveBeenCalled()
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('daemon start --fg --register writes key steps as info logs', async () => {
+    expect.assertions(6)
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const saveConfig = vi.fn(async () => undefined)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      const exitCode = await runCli(
+        [
+          'daemon',
+          'start',
+          '--fg',
+          '--register',
+          'http://127.0.0.1:3000/register?enrollment-token=test-token',
+        ],
+        {
+          getUserConfigPaths: () => paths,
+          runDaemonEntry,
+          loadConfig: async () => ({}),
+          saveConfig,
+        }
+      )
+
+      expect(exitCode).toBe(0)
+      expect(saveConfig).toHaveBeenCalledOnce()
+      expect(runDaemonEntry).toHaveBeenCalledOnce()
+
+      const logContent = await readFile(paths.cliLogFilePath, 'utf8')
+      const entries = logContent
+        .trim()
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .map((line) => JSON.parse(line) as { level: string; message: string })
+
+      expect(
+        entries.some(
+          (entry) => entry.level === 'info' && entry.message === 'Loaded daemon configuration'
+        )
+      ).toBe(true)
+      expect(
+        entries.some(
+          (entry) =>
+            entry.level === 'info' && entry.message === 'Saved control plane registration config'
+        )
+      ).toBe(true)
+      expect(
+        entries.some(
+          (entry) =>
+            entry.level === 'info' && entry.message === 'Starting daemon in foreground mode'
+        )
+      ).toBe(true)
     } finally {
       await cleanup()
     }

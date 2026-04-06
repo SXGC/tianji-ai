@@ -4,7 +4,7 @@ import { DaemonServer, createAgentSession } from '@tianji/agent'
 
 import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
-import { logError, logInfo } from './logger.js'
+import { logDebug, logInfo } from './logger.js'
 import {
   deriveControlPlaneAgentList,
   readStoredControlPlaneConfig,
@@ -36,6 +36,10 @@ export async function runDaemonEntry(): Promise<void> {
   const controlPlaneConfig = readStoredControlPlaneConfig(context.config)
   let controlPlaneHandle: ControlPlaneRuntimeHandle | null = null
   if (controlPlaneConfig) {
+    await logDebug(context.paths, ['daemon', 'controlplane'], 'Loaded control plane config', {
+      baseUrl: controlPlaneConfig.baseUrl,
+      nodeId: controlPlaneConfig.nodeId,
+    })
     const runtime = createControlPlaneRuntime({
       ...controlPlaneConfig,
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
@@ -53,8 +57,9 @@ export async function runDaemonEntry(): Promise<void> {
         }
       )
     } catch (error) {
-      await logError(context.paths, ['daemon', 'controlplane'], 'Control plane connection failed', {
+      await logInfo(context.paths, ['daemon', 'controlplane'], 'Control plane connection failed', {
         baseUrl: controlPlaneConfig.baseUrl,
+        nodeId: controlPlaneConfig.nodeId,
         error: error instanceof Error ? error.message : String(error),
       })
       // controlplane 连接失败时 daemon 继续以本地模式运行

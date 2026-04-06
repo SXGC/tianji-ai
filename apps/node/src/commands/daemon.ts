@@ -1,5 +1,5 @@
 import { fork } from 'node:child_process'
-import { readFile, rm } from 'node:fs/promises'
+import { readFile, rm, writeFile } from 'node:fs/promises'
 
 import { DaemonClient } from '@tianji/agent'
 
@@ -10,6 +10,7 @@ import {
   loadUserConfigContext,
 } from '../config.js'
 import { runDaemonEntry } from '../daemon-entry.js'
+import { logDebug, logInfo } from '../logger.js'
 import {
   areStoredControlPlaneConfigsEqual,
   buildStoredControlPlaneConfig,
@@ -17,7 +18,11 @@ import {
 } from '../node-runtime/controlplane-config.js'
 import { parseRegisterUrl } from './register.js'
 
+import type { TianjiConfig } from '@tianji/shared'
+
 import type { CommandDefinition } from './types.js'
+
+const DAEMON_START_SCOPE = ['cli', 'daemon', 'start'] as const
 
 async function readDaemonPort(paths: UserConfigPaths): Promise<number | undefined> {
   try {
@@ -120,66 +125,116 @@ const daemonStartCommand: CommandDefinition = {
         return ctx.config
       })
     const config = await loadConfig().catch(() => ({}))
+    const storedControlPlaneConfig = readStoredControlPlaneConfig(config)
+    await logInfo(paths, DAEMON_START_SCOPE, 'Loaded daemon configuration', {
+      hasRegisterUrl: registerUrl !== undefined,
+      hasStoredControlPlaneConfig: storedControlPlaneConfig !== null,
+    })
 
     if (registerUrl) {
       const parsed = parseRegisterUrl(registerUrl)
       const candidate = buildStoredControlPlaneConfig(parsed)
-      const stored = readStoredControlPlaneConfig(config)
+      const stored = storedControlPlaneConfig
+
+      await logDebug(paths, DAEMON_START_SCOPE, 'Parsed register URL', {
+        baseUrl: candidate.baseUrl,
+        nodeId: candidate.nodeId,
+      })
 
       if (stored && !areStoredControlPlaneConfigsEqual(stored, candidate)) {
+        await logInfo(
+          paths,
+          DAEMON_START_SCOPE,
+          'Stored control plane config differs from register URL',
+          {
+            baseUrl: candidate.baseUrl,
+            nodeId: candidate.nodeId,
+          }
+        )
         const confirm = deps?.confirmOverwrite ?? (async () => false)
         const accepted = await confirm(i18n.t('daemon.register.confirm_overwrite'))
         if (!accepted) {
+          await logInfo(paths, DAEMON_START_SCOPE, 'Registration config overwrite declined', {
+            baseUrl: candidate.baseUrl,
+            nodeId: candidate.nodeId,
+          })
           process.stderr.write(`${i18n.t('daemon.register.declined')}\n`)
           return 0
         }
       }
 
       if (!stored || !areStoredControlPlaneConfigsEqual(stored, candidate)) {
-        const saveConfig = deps?.saveConfig
-        if (saveConfig) {
-          await saveConfig({
-            ...config,
-            controlPlane: {
-              baseUrl: candidate.baseUrl,
-              enrollmentToken: candidate.enrollmentToken,
-              nodeId: String(candidate.nodeId),
-              hostname: candidate.hostname,
-              platform: candidate.platform,
-              version: candidate.version,
-            },
+        const saveConfig =
+          deps?.saveConfig ??
+          (async (c: Partial<TianjiConfig>) => {
+            await writeFile(paths.configFilePath, `${JSON.stringify(c, null, 2)}\n`, 'utf8')
           })
-          process.stdout.write(`${i18n.t('daemon.register.saved')}\n`)
-        }
+        await saveConfig({
+          ...config,
+          controlPlane: {
+            baseUrl: candidate.baseUrl,
+            enrollmentToken: candidate.enrollmentToken,
+            nodeId: String(candidate.nodeId),
+            hostname: candidate.hostname,
+            platform: candidate.platform,
+            version: candidate.version,
+          },
+        })
+        await logInfo(paths, DAEMON_START_SCOPE, 'Saved control plane registration config', {
+          baseUrl: candidate.baseUrl,
+          nodeId: candidate.nodeId,
+        })
+        process.stdout.write(`${i18n.t('daemon.register.saved')}\n`)
+      } else {
+        await logDebug(paths, DAEMON_START_SCOPE, 'Reusing existing control plane config', {
+          baseUrl: candidate.baseUrl,
+          nodeId: candidate.nodeId,
+        })
       }
     } else {
-      const stored = readStoredControlPlaneConfig(config)
+      const stored = storedControlPlaneConfig
       if (!stored) {
+        await logInfo(paths, DAEMON_START_SCOPE, 'No stored control plane config found')
         process.stderr.write(`${i18n.t('daemon.register.no_config')}\n`)
         return 1
       }
+
+      await logDebug(paths, DAEMON_START_SCOPE, 'Loaded stored control plane config', {
+        baseUrl: stored.baseUrl,
+        nodeId: stored.nodeId,
+      })
     }
 
     const existingClient = await tryCreateDaemonClient(paths)
     if (existingClient !== undefined) {
       try {
         const ping = await existingClient.ping()
+        await logInfo(paths, DAEMON_START_SCOPE, 'Daemon already running', {
+          pid: ping.pid,
+        })
         process.stdout.write(`${i18n.t('daemon.already_running', { pid: ping.pid })}\n`)
         return undefined
       } catch {
+        await logDebug(paths, DAEMON_START_SCOPE, 'Removing stale daemon files before start')
         await cleanupStaleDaemonFiles(paths)
       }
     }
 
     if (options.fg === true) {
+      await logInfo(paths, DAEMON_START_SCOPE, 'Starting daemon in foreground mode')
       const runDaemonEntryCommand = deps?.runDaemonEntry ?? runDaemonEntry
       await runDaemonEntryCommand()
       return undefined
     }
 
+    await logDebug(paths, DAEMON_START_SCOPE, 'Starting daemon in background mode')
     startDetachedDaemonProcess()
 
     const { pid, port } = await waitForDaemonReady(paths)
+    await logInfo(paths, DAEMON_START_SCOPE, 'Daemon started in background mode', {
+      pid,
+      port,
+    })
     process.stdout.write(`${i18n.t('daemon.started', { pid, port })}\n`)
   },
 }
