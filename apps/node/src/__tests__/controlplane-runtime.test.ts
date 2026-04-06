@@ -296,7 +296,8 @@ describe('createControlPlaneRuntime with custom deps', () => {
 describe('parseAgentArgs (via default TaskExecutor path)', () => {
   // parseAgentArgs is a private function, but we can test it indirectly
   // by creating a runtime without deps.createTaskExecutor and checking
-  // that the runtime is created without errors when TIANJI_AGENT_ARGS is set.
+  // The default TaskExecutor creation path uses resolveAgentEntryPath()
+  // to locate the @tianji/agent ACP entry point.
 
   it('creates runtime without deps using default constructors', () => {
     // This tests lines 99-116 (default TaskExecutor creation path).

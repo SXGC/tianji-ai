@@ -9,7 +9,8 @@
     "defaultAgent": "default",
     "items": {
       "default": {
-        "model": "openai/glm-latest"
+        "model": "openai/glm-latest",
+        "entryPath": "@tianji/agent/dist/acp-entry.js"
       }
     }
   },

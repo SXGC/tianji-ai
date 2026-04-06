@@ -62,7 +62,7 @@ describe('AgentProcessManager', () => {
   it('stores agentId from config', () => {
     const manager = new AgentProcessManager({
       agentId: 'test-agent',
-      binaryPath: '/usr/bin/test',
+      entryPath: '/path/to/acp-entry.js',
     })
 
     expect(manager.agentId).toBe('test-agent')
@@ -71,29 +71,29 @@ describe('AgentProcessManager', () => {
   it('isRunning returns false before spawn', () => {
     const manager = new AgentProcessManager({
       agentId: 'test-agent',
-      binaryPath: '/usr/bin/test',
+      entryPath: '/path/to/acp-entry.js',
     })
 
     expect(manager.isRunning).toBe(false)
   })
 
   describe('spawn', () => {
-    it('spawns a child process and returns Web Streams', () => {
+    it('spawns node with entryPath and returns Web Streams', () => {
       const mockProc = createMockChildProcess()
       mockSpawn.mockReturnValue(mockProc)
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
-        args: ['--port', '3000'],
+        entryPath: '/path/to/acp-entry.js',
+        args: ['--flag'],
         env: { CUSTOM_VAR: 'value' },
       })
 
       const streams = manager.spawn()
 
       expect(mockSpawn).toHaveBeenCalledWith(
-        '/usr/bin/test',
-        ['--port', '3000'],
+        process.execPath,
+        ['/path/to/acp-entry.js', '--flag'],
         expect.objectContaining({
           stdio: ['pipe', 'pipe', 'inherit'],
         })
@@ -109,12 +109,16 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       manager.spawn()
 
-      expect(mockSpawn).toHaveBeenCalledWith('/usr/bin/test', [], expect.any(Object))
+      expect(mockSpawn).toHaveBeenCalledWith(
+        process.execPath,
+        ['/path/to/acp-entry.js'],
+        expect.any(Object)
+      )
     })
 
     it('throws when agent is already running', () => {
@@ -123,7 +127,7 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       manager.spawn()
@@ -137,7 +141,7 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       expect(() => manager.spawn()).toThrow('Agent test-agent stdio is not available')
@@ -149,7 +153,7 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       expect(() => manager.spawn()).toThrow('Agent test-agent stdio is not available')
@@ -161,13 +165,11 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       manager.spawn()
       expect(manager.isRunning).toBe(true)
-
-      // 模拟进程退出
       ;(mockProc as Record<string, unknown>).exitCode = 0
       ;(mockProc as EventEmitter).emit('exit', 0)
 
@@ -179,7 +181,7 @@ describe('AgentProcessManager', () => {
     it('resolves immediately when no process is running', async () => {
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       await expect(manager.kill()).resolves.toBeUndefined()
@@ -187,24 +189,20 @@ describe('AgentProcessManager', () => {
 
     it('sends SIGTERM and resolves on exit', async () => {
       const mockProc = createMockChildProcess()
-      // 覆盖 kill 使其不自动触发 exit
       const killFn = vi.fn()
       ;(mockProc as Record<string, unknown>).kill = killFn
       mockSpawn.mockReturnValue(mockProc)
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       manager.spawn()
 
       const killPromise = manager.kill()
 
-      // 验证 SIGTERM 已发送
       expect(killFn).toHaveBeenCalledWith('SIGTERM')
-
-      // 模拟进程退出
       ;(mockProc as EventEmitter).emit('exit', 0)
 
       await killPromise
@@ -221,7 +219,7 @@ describe('AgentProcessManager', () => {
 
       const manager = new AgentProcessManager({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       manager.spawn()
@@ -230,7 +228,6 @@ describe('AgentProcessManager', () => {
 
       expect(killFn).toHaveBeenCalledWith('SIGTERM')
 
-      // 快进 5 秒触发 SIGKILL
       await vi.advanceTimersByTimeAsync(5000)
 
       await killPromise

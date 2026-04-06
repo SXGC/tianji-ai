@@ -143,6 +143,6 @@ function createDefaultAgentRunner(
 ): AgentRunner {
   return new AgentRunner({
     agentId: context.agent.agentName,
-    binaryPath: process.env.TIANJI_AGENT_BIN ?? 'tianji-agent',
+    entryPath: context.agent.entryPath,
   })
 }

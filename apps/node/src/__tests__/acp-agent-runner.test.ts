@@ -64,7 +64,7 @@ describe('AgentRunner', () => {
     const AgentRunner = await importRunner()
     const runner = new AgentRunner({
       agentId: 'test-agent',
-      binaryPath: '/usr/bin/test',
+      entryPath: '/path/to/acp-entry.js',
     })
 
     expect(runner.agentId).toBe('test-agent')
@@ -75,7 +75,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
         args: ['--flag'],
         env: { KEY: 'val' },
       })
@@ -99,7 +99,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       const iter = runner.chat('hello')
@@ -166,7 +166,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       await runner.connect()
@@ -194,7 +194,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       await runner.connect()
@@ -216,7 +216,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       await runner.connect()
@@ -237,7 +237,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       await runner.connect()
@@ -258,7 +258,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       await runner.connect()
@@ -271,7 +271,7 @@ describe('AgentRunner', () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
-        binaryPath: '/usr/bin/test',
+        entryPath: '/path/to/acp-entry.js',
       })
 
       await expect(runner.disconnect()).resolves.toBeUndefined()

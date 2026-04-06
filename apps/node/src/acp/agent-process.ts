@@ -8,11 +8,22 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { Readable, Writable } from 'node:stream'
+
+/**
+ * 解析 @tianji/agent 包的 ACP stdio 入口文件绝对路径。
+ * spawn 时以 `node <entryPath>` 方式启动 agent 子进程。
+ */
+export function resolveAgentEntryPath(): string {
+  const require = createRequire(import.meta.url)
+  return require.resolve('@tianji/agent/dist/acp-entry.js')
+}
 
 export interface AgentProcessConfig {
   readonly agentId: string
-  readonly binaryPath: string
+  /** agent 入口 JS 文件路径，由 `node` 直接执行 */
+  readonly entryPath: string
   readonly args?: readonly string[]
   readonly env?: Record<string, string>
 }
@@ -39,10 +50,14 @@ export class AgentProcessManager {
       throw new Error(`Agent ${this.agentId} is already running`)
     }
 
-    this.#process = spawn(this.#config.binaryPath, [...(this.#config.args ?? [])], {
-      stdio: ['pipe', 'pipe', 'inherit'],
-      env: { ...process.env, ...this.#config.env },
-    })
+    this.#process = spawn(
+      process.execPath,
+      [this.#config.entryPath, ...(this.#config.args ?? [])],
+      {
+        stdio: ['pipe', 'pipe', 'inherit'],
+        env: { ...process.env, ...this.#config.env },
+      }
+    )
 
     this.#process.on('exit', () => {
       this.#process = null

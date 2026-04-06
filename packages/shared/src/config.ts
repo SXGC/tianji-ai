@@ -284,6 +284,7 @@ export type AgentModelRef = z.infer<typeof AgentModelRefSchema>
  */
 export const TianjiAgentConfigSchema = z.object({
   model: AgentModelRefSchema,
+  entryPath: z.string().optional(),
 })
 
 export type TianjiAgentConfig = z.infer<typeof TianjiAgentConfigSchema>

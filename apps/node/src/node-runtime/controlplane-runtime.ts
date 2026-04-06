@@ -141,8 +141,6 @@ export function createControlPlaneRuntime(
       createRunner: async (command) => {
         return new AgentRunner({
           agentId: command.payload.agentId,
-          binaryPath: process.env.TIANJI_AGENT_BIN ?? 'tianji-agent',
-          args: parseAgentArgs(process.env.TIANJI_AGENT_ARGS),
         })
       },
       openEventStream: async (taskId) => {
@@ -163,12 +161,4 @@ export function createControlPlaneRuntime(
       await taskExecutor.execute(command)
     },
   }
-}
-
-function parseAgentArgs(raw: string | undefined): readonly string[] {
-  if (!raw) {
-    return []
-  }
-
-  return JSON.parse(raw) as string[]
 }

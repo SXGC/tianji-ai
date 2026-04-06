@@ -47,6 +47,7 @@ export interface AgentContext {
   readonly providerConfig: TianjiProviderConfig | undefined
   readonly soulPath: string
   readonly soul: string
+  readonly entryPath: string | undefined
 }
 
 export interface LoadedAgentContext {
@@ -142,6 +143,7 @@ export async function loadAgentContext(): Promise<LoadedAgentContext> {
       providerConfig: resolvedConfig.config.providers?.[provider],
       soulPath,
       soul,
+      entryPath: agent.entryPath,
     },
     resolvedEnvVars: resolvedConfig.resolvedEnvVars,
     snapshotStore: new FileSnapshotStore(join(paths.configDir, 'runtime-snapshots')),

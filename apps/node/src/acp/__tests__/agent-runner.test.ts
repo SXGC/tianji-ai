@@ -7,7 +7,6 @@ describe('AgentRunner', () => {
   it('should be constructable with config', () => {
     const config: AgentRunnerConfig = {
       agentId: 'default',
-      binaryPath: '/path/to/agent',
     }
 
     const runner = new AgentRunner(config)
@@ -18,7 +17,6 @@ describe('AgentRunner', () => {
   it('should expose agentId', () => {
     const runner = new AgentRunner({
       agentId: 'claude-code',
-      binaryPath: '/usr/local/bin/claude',
     })
 
     expect(runner.agentId).toBe('claude-code')
