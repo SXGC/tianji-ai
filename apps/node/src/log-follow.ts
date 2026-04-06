@@ -212,12 +212,80 @@ export async function readCliLogChunk(
 }
 
 /**
+ * 从文件尾部向前分块扫描，读取包含最后 N 行所需的尾部文本。
+ *
+ * 避免首次回放时将整个日志文件读入内存。从文件末尾按块向前读取，
+ * 统计换行符数量，收集到足够行数后立即停止。
+ *
+ * @param logFilePath - CLI 日志文件路径
+ * @param fileSize - 当前日志文件大小
+ * @param lineCount - 需要的尾部行数
+ * @returns 尾部文本内容
+ */
+export async function readCliLogTail(
+  logFilePath: string,
+  fileSize: number,
+  lineCount: number
+): Promise<string> {
+  if (fileSize === 0 || lineCount <= 0) {
+    return ''
+  }
+
+  const fileHandle = await open(logFilePath, 'r')
+
+  try {
+    const tailByte = Buffer.alloc(1)
+    const { bytesRead: tailBytesRead } = await fileHandle.read(tailByte, 0, 1, fileSize - 1)
+    const fileEndsWithNewline = tailBytesRead > 0 && tailByte[0] === 0x0a
+
+    const collectedChunks: Buffer[] = []
+    let readEnd = fileEndsWithNewline ? fileSize - 1 : fileSize
+    let linesFound = 0
+
+    while (readEnd > 0 && linesFound < lineCount) {
+      const readStart = Math.max(0, readEnd - LOG_FOLLOW_CHUNK_SIZE)
+      const readLength = readEnd - readStart
+      const buffer = Buffer.alloc(readLength)
+      const { bytesRead } = await fileHandle.read(buffer, 0, readLength, readStart)
+
+      if (bytesRead === 0) {
+        break
+      }
+
+      const readChunk = buffer.subarray(0, bytesRead)
+
+      for (let i = bytesRead - 1; i >= 0; i--) {
+        if (readChunk[i] === 0x0a) {
+          linesFound++
+          if (linesFound >= lineCount) {
+            const collected = readChunk.slice(i + 1)
+            if (collected.length > 0) {
+              collectedChunks.unshift(collected)
+            }
+            return Buffer.concat(collectedChunks).toString('utf8')
+          }
+        }
+      }
+
+      collectedChunks.unshift(readChunk)
+      readEnd = readStart
+    }
+
+    return Buffer.concat(collectedChunks).toString('utf8')
+  } finally {
+    await fileHandle.close()
+  }
+}
+
+/**
  * 启动 follow 前回放文件末尾的最近若干行，避免首次进入时输出整个历史文件。
+ *
+ * 使用尾部反向扫描策略，只读取覆盖最后 N 行所需的文件尾部数据。
  *
  * @param logFilePath - CLI 日志文件路径
  * @param fileSize - 当前日志文件大小
  * @param lineCount - 需要回放的尾部行数
- * @returns 回放结束后的下一次读取偏移量
+ * @returns 回放结束后的下一次读取偏移量（即文件末尾）
  */
 export async function replayLatestCliLogLines(
   logFilePath: string,
@@ -229,15 +297,14 @@ export async function replayLatestCliLogLines(
     return fileSize
   }
 
-  const chunkResult = await readCliLogChunk(logFilePath, 0, fileSize)
-  const lines = chunkResult.chunk.split('\n')
+  const tailText = await readCliLogTail(logFilePath, fileSize, lineCount)
+  const lines = tailText.split('\n')
 
   if (lines.at(-1) === '') {
     lines.pop()
   }
 
-  const visibleLines = lines.slice(Math.max(0, lines.length - lineCount))
-  for (const line of visibleLines) {
+  for (const line of lines) {
     const parsedEntry = parseCliLogLine(line)
     if (parsedEntry === null) {
       if (line.trim().length > 0) {
@@ -249,7 +316,7 @@ export async function replayLatestCliLogLines(
     process.stdout.write(`${formatCliLogEntry(parsedEntry)}\n`)
   }
 
-  return chunkResult.nextOffset
+  return fileSize
 }
 
 function renderCliLogChunk(remainder: string, chunk: string, i18n: I18n): string {
@@ -261,7 +328,6 @@ function renderCliLogChunk(remainder: string, chunk: string, i18n: I18n): string
     const parsedEntry = parseCliLogLine(line)
     if (parsedEntry === null) {
       if (line.trim().length > 0) {
-        process.stdout.write(`[invalid-cli-log] ${line}\n`)
         process.stdout.write(`${i18n.t('log.invalid_entry', { line })}\n`)
       }
       continue

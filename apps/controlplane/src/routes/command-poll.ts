@@ -32,17 +32,12 @@ export function createCommandPollRoute(
     }
 
     const timeout = Math.min(Number(c.req.query('timeout') ?? 30000), 60000)
-    const node = db.raw
-      .prepare('SELECT execution_state FROM nodes WHERE node_id = ?')
-      .get(nodeId) as { execution_state: string } | undefined
 
-    if (node?.execution_state === 'busy') {
-      return c.body(null, 204)
-    }
-
-    const command = tryLeasePendingCommand(db, nodeId)
-    if (command !== null) {
-      return c.json(command)
+    if (!isNodeBusy(db, nodeId)) {
+      const command = tryLeasePendingCommand(db, nodeId)
+      if (command !== null) {
+        return c.json(command)
+      }
     }
 
     const deadline = Date.now() + timeout
@@ -57,9 +52,11 @@ export function createCommandPollRoute(
         return c.body(null, 204)
       }
 
-      const nextCommand = tryLeasePendingCommand(db, nodeId)
-      if (nextCommand !== null) {
-        return c.json(nextCommand)
+      if (!isNodeBusy(db, nodeId)) {
+        const nextCommand = tryLeasePendingCommand(db, nodeId)
+        if (nextCommand !== null) {
+          return c.json(nextCommand)
+        }
       }
     }
 
@@ -67,6 +64,13 @@ export function createCommandPollRoute(
   })
 
   return app
+}
+
+function isNodeBusy(db: ControlPlaneDb, nodeId: string): boolean {
+  const node = db.raw.prepare('SELECT execution_state FROM nodes WHERE node_id = ?').get(nodeId) as
+    | { execution_state: string }
+    | undefined
+  return node?.execution_state === 'busy'
 }
 
 function tryLeasePendingCommand(
