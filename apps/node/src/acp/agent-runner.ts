@@ -12,6 +12,7 @@ import {
   createSessionId,
 } from '@tianji/shared'
 
+import type { RuntimeLogger } from '../logger.js'
 import { AgentProcessManager } from './agent-process.js'
 import { AcpNodeClient } from './client-bridge.js'
 import { mapSessionUpdateToRuntimeEvent } from './event-adapter.js'
@@ -22,6 +23,7 @@ export interface AgentRunnerConfig {
   readonly command?: string
   readonly args?: readonly string[]
   readonly env?: Record<string, string>
+  readonly logger?: RuntimeLogger
 }
 
 export class AgentRunner {
@@ -38,11 +40,17 @@ export class AgentRunner {
   }
 
   async connect(): Promise<void> {
+    await this.#config.logger?.logInfo(['acp', 'runner'], 'Connecting to agent', {
+      agentId: this.#config.agentId,
+      command: this.#config.command ?? DEFAULT_AGENT_COMMAND,
+    })
+
     this.#processManager = new AgentProcessManager({
       agentId: this.#config.agentId,
       command: this.#config.command ?? DEFAULT_AGENT_COMMAND,
       args: [...(this.#config.args ?? [])],
       env: this.#config.env,
+      logger: this.#config.logger,
     })
 
     const streams = this.#processManager.spawn()
@@ -56,17 +64,31 @@ export class AgentRunner {
       clientCapabilities: {},
     })
 
+    await this.#config.logger?.logDebug(['acp', 'runner'], 'ACP connection initialized', {
+      agentId: this.#config.agentId,
+    })
+
     const sessionResponse = await this.#connection.newSession({
       cwd: process.cwd(),
       mcpServers: [],
     })
     this.#acpSessionId = sessionResponse.sessionId
+
+    await this.#config.logger?.logInfo(['acp', 'runner'], 'ACP session created', {
+      agentId: this.#config.agentId,
+      acpSessionId: this.#acpSessionId,
+    })
   }
 
   async *chat(prompt: string): AsyncIterable<RuntimeEvent> {
     if (this.#connection === null || this.#client === null || this.#acpSessionId === null) {
       throw new Error('Not connected. Call connect() first.')
     }
+
+    await this.#config.logger?.logInfo(['acp', 'runner'], 'Agent chat started', {
+      agentId: this.#config.agentId,
+      promptLength: prompt.length,
+    })
 
     const runId = createRunId(`run_${Date.now()}`)
     const sessionId = createSessionId(this.#acpSessionId)
@@ -106,6 +128,10 @@ export class AgentRunner {
         }
       }
 
+      await this.#config.logger?.logInfo(['acp', 'runner'], 'Agent chat completed', {
+        agentId: this.#config.agentId,
+      })
+
       yield {
         type: 'run.completed',
         runId,
@@ -119,6 +145,9 @@ export class AgentRunner {
   }
 
   async disconnect(): Promise<void> {
+    await this.#config.logger?.logDebug(['acp', 'runner'], 'Disconnecting agent', {
+      agentId: this.#config.agentId,
+    })
     await this.#processManager?.kill()
     this.#processManager = null
     this.#connection = null

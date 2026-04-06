@@ -20,7 +20,11 @@ import { createAgentSession } from './session.js'
  * 从 stdin 读取 JSON-RPC 请求，通过 stdout 返回响应和通知。
  */
 export async function runAcpAgent(): Promise<void> {
+  console.error('[acp-agent] Starting ACP agent process')
+
   const context = await loadAgentContext()
+
+  console.error('[acp-agent] Agent context loaded:', context.agent.agentName)
 
   const output = Writable.toWeb(process.stdout) as WritableStream<Uint8Array>
   const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>
@@ -31,7 +35,11 @@ export async function runAcpAgent(): Promise<void> {
     return new TianjiAcpAgent(conn, sessionFactory)
   }, stream)
 
+  console.error('[acp-agent] ACP connection established, waiting for requests')
+
   await connection.closed
+
+  console.error('[acp-agent] ACP connection closed, agent exiting')
 }
 
 const isMain =

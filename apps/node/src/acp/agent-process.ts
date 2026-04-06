@@ -9,6 +9,7 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { Readable, Writable } from 'node:stream'
+import type { RuntimeLogger } from '../logger.js'
 
 export interface AgentProcessConfig {
   readonly agentId: string
@@ -16,16 +17,19 @@ export interface AgentProcessConfig {
   readonly command: string
   readonly args?: readonly string[]
   readonly env?: Record<string, string>
+  readonly logger?: RuntimeLogger
 }
 
 export class AgentProcessManager {
   readonly agentId: string
   readonly #config: AgentProcessConfig
+  readonly #logger: RuntimeLogger | undefined
   #process: ChildProcess | null = null
 
   constructor(config: AgentProcessConfig) {
     this.agentId = config.agentId
     this.#config = config
+    this.#logger = config.logger
   }
 
   get isRunning(): boolean {
@@ -45,7 +49,20 @@ export class AgentProcessManager {
       env: { ...process.env, ...this.#config.env },
     })
 
-    this.#process.on('exit', () => {
+    void this.#logger?.logInfo(['acp', 'process'], 'Agent process spawned', {
+      agentId: this.agentId,
+      command: this.#config.command,
+      pid: this.#process.pid,
+    })
+
+    const currentProcess = this.#process
+    currentProcess.on('exit', (code, signal) => {
+      void this.#logger?.logInfo(['acp', 'process'], 'Agent process exited', {
+        agentId: this.agentId,
+        pid: currentProcess.pid,
+        code,
+        signal,
+      })
       this.#process = null
     })
 
@@ -70,8 +87,21 @@ export class AgentProcessManager {
     const currentProcess = this.#process
     currentProcess.kill('SIGTERM')
 
+    void this.#logger?.logDebug(['acp', 'process'], 'Sent SIGTERM to agent process', {
+      agentId: this.agentId,
+      pid: currentProcess.pid,
+    })
+
     await new Promise<void>((resolve) => {
       const timeout = setTimeout(() => {
+        void this.#logger?.logWarn(
+          ['acp', 'process'],
+          'Agent process did not exit in time, sent SIGKILL',
+          {
+            agentId: this.agentId,
+            pid: currentProcess.pid,
+          }
+        )
         currentProcess.kill('SIGKILL')
         resolve()
       }, 5000)

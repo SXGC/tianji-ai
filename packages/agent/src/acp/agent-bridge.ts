@@ -40,6 +40,7 @@ export class TianjiAcpAgent {
   }
 
   async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
+    console.error('[acp-agent] Received initialize request')
     return {
       protocolVersion: PROTOCOL_VERSION,
       agentCapabilities: {
@@ -51,6 +52,8 @@ export class TianjiAcpAgent {
   async newSession(_params: NewSessionRequest): Promise<NewSessionResponse> {
     this.#currentSession = this.#sessionFactory()
 
+    console.error('[acp-agent] New session created:', this.#currentSession.sessionId)
+
     return {
       sessionId: this.#currentSession.sessionId,
     }
@@ -61,6 +64,8 @@ export class TianjiAcpAgent {
   }
 
   async prompt(params: PromptRequest): Promise<PromptResponse> {
+    console.error('[acp-agent] Received prompt request, session:', params.sessionId)
+
     if (!this.#currentSession) {
       throw new Error('No active session. Call newSession first.')
     }
@@ -83,6 +88,7 @@ export class TianjiAcpAgent {
     try {
       for await (const event of this.#currentSession.chat(promptText)) {
         if (this.#abortController.signal.aborted) {
+          console.error('[acp-agent] Prompt cancelled')
           return { stopReason: 'cancelled' }
         }
 
@@ -92,6 +98,7 @@ export class TianjiAcpAgent {
         }
       }
 
+      console.error('[acp-agent] Prompt completed')
       return { stopReason: 'end_turn' }
     } finally {
       this.#abortController = null
@@ -99,6 +106,7 @@ export class TianjiAcpAgent {
   }
 
   async cancel(_params: CancelNotification): Promise<void> {
+    console.error('[acp-agent] Received cancel request')
     this.#abortController?.abort()
   }
 }

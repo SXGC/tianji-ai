@@ -147,6 +147,7 @@ export function createControlPlaneRuntime(
           command: agentConfig?.command,
           args: agentConfig?.args,
           env: agentConfig?.env,
+          logger: config.logger,
         })
       },
       openEventStream: async (taskId) => {
