@@ -1,3 +1,4 @@
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { describe, expect, it } from 'vitest'
 
 import { createApp } from '../app.js'
@@ -6,7 +7,9 @@ import { createDatabase } from '../db/index.js'
 describe('createApp', () => {
   it('returns a Hono app with a health endpoint', async () => {
     const db = createDatabase(':memory:')
-    const { app, monitor } = createApp(db)
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const { app, monitor } = createApp(db, logger)
 
     const response = await app.request('http://localhost/health')
 
@@ -19,7 +22,9 @@ describe('createApp', () => {
 
   it('returns the controlplane spa shell at root', async () => {
     const db = createDatabase(':memory:')
-    const { app, monitor } = createApp(db)
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const { app, monitor } = createApp(db, logger)
 
     const response = await app.request('http://localhost/')
     const html = await response.text()
@@ -35,7 +40,9 @@ describe('createApp', () => {
 
   it('does not intercept api routes when serving web ui', async () => {
     const db = createDatabase(':memory:')
-    const { app, monitor } = createApp(db)
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const { app, monitor } = createApp(db, logger)
 
     const response = await app.request('http://localhost/api/ui/nodes')
 

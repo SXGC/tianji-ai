@@ -1,3 +1,4 @@
+import type { ObserverLogger } from '@tianji/observer'
 import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from '../db/index.js'
@@ -12,10 +13,16 @@ type AuthVariables = {
 
 /**
  * 创建 task 事件接收路由。
+ *
+ * @param db - controlplane 数据库实例
+ * @param logger - 结构化日志实例
  */
-export function createTaskEventsRoute(db: ControlPlaneDb): Hono<AuthVariables> {
+export function createTaskEventsRoute(
+  db: ControlPlaneDb,
+  logger: ObserverLogger
+): Hono<AuthVariables> {
   const app = new Hono<AuthVariables>()
-  const auth = createAuthMiddleware(db)
+  const auth = createAuthMiddleware(db, logger)
   const eventStore = new EventStore(db)
 
   app.post('/api/tasks/:taskId/events', auth, async (c) => {

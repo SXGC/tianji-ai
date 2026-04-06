@@ -1,3 +1,4 @@
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { type ControlPlaneDb, createDatabase } from '../db/index.js'
@@ -57,7 +58,9 @@ describe('task-events route', () => {
 
   /** 构造经过认证的 POST 请求。 */
   function postEvents(taskId: string, body: string, token?: string) {
-    const app = createTaskEventsRoute(db)
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const app = createTaskEventsRoute(db, logger)
     return app.request(`http://localhost/api/tasks/${taskId}/events`, {
       method: 'POST',
       headers: {
@@ -69,7 +72,9 @@ describe('task-events route', () => {
   }
 
   it('returns 401 without authorization header', async () => {
-    const app = createTaskEventsRoute(db)
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const app = createTaskEventsRoute(db, logger)
     const res = await app.request(`http://localhost/api/tasks/${seed.taskId}/events`, {
       method: 'POST',
       body: '{}',

@@ -1,3 +1,4 @@
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { Hono } from 'hono'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -19,9 +20,11 @@ describe('POST /api/nodes/:nodeId/heartbeat', () => {
       .prepare('INSERT INTO enrollment_tokens (token, created_at) VALUES (?, ?)')
       .run('valid-token', Date.now())
 
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
     const app = new Hono()
-    app.route('/', createNodeRegisterRoute(db))
-    app.route('/', createNodeHeartbeatRoute(db))
+    app.route('/', createNodeRegisterRoute(db, logger))
+    app.route('/', createNodeHeartbeatRoute(db, logger))
 
     const response = await app.request('/api/nodes/register', {
       method: 'POST',
@@ -39,11 +42,11 @@ describe('POST /api/nodes/:nodeId/heartbeat', () => {
     const data = (await response.json()) as { accessToken: string }
     accessToken = data.accessToken
 
-    return app
+    return { app, sink }
   }
 
   it('should accept heartbeat and update last_heartbeat_at', async () => {
-    const app = await setup()
+    const { app, sink } = await setup()
     const response = await app.request('/api/nodes/node-001/heartbeat', {
       method: 'POST',
       headers: {
@@ -60,10 +63,14 @@ describe('POST /api/nodes/:nodeId/heartbeat', () => {
       .get('node-001') as { last_heartbeat_at: number; execution_state: string }
     expect(node.execution_state).toBe('idle')
     expect(node.last_heartbeat_at).toBeGreaterThan(0)
+
+    expect(
+      sink.entries.some((e) => e.level === 'debug' && e.message === 'Heartbeat received')
+    ).toBe(true)
   })
 
   it('should update execution_state to busy', async () => {
-    const app = await setup()
+    const { app } = await setup()
 
     await app.request('/api/nodes/node-001/heartbeat', {
       method: 'POST',
@@ -81,7 +88,7 @@ describe('POST /api/nodes/:nodeId/heartbeat', () => {
   })
 
   it('should reject without auth token', async () => {
-    const app = await setup()
+    const { app, sink } = await setup()
     const response = await app.request('/api/nodes/node-001/heartbeat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -89,5 +96,8 @@ describe('POST /api/nodes/:nodeId/heartbeat', () => {
     })
 
     expect(response.status).toBe(401)
+    expect(
+      sink.entries.some((e) => e.level === 'warn' && e.message === 'Missing authorization header')
+    ).toBe(true)
   })
 })

@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { serve } from '@hono/node-server'
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../app.js'
@@ -176,7 +177,9 @@ async function setupTestEnv(nodeId: string): Promise<{
     .prepare('INSERT INTO enrollment_tokens(token, created_at) VALUES(?, ?)')
     .run('e2e-token', now)
 
-  const { app, monitor } = createApp(db)
+  const sink = createMemorySink()
+  const logger = createObserverLogger({ sinks: [sink] })
+  const { app, monitor } = createApp(db, logger)
   monitor.start()
   const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' })
 

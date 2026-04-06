@@ -1,13 +1,19 @@
+import type { ObserverLogger } from '@tianji/observer'
 import type { AgentInfo, NodeRegisterRequest, NodeRegisterResponse } from '@tianji/shared'
 import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from '../db/index.js'
 import { ACCESS_TOKEN_TTL_MS, generateAccessToken, hashToken } from '../services/auth.js'
 
+const SCOPE_REGISTER = ['controlplane', 'register'] as const
+
 /**
  * 创建 node 注册路由。
+ *
+ * @param db - controlplane 数据库实例
+ * @param logger - 结构化日志实例
  */
-export function createNodeRegisterRoute(db: ControlPlaneDb): Hono {
+export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogger): Hono {
   const app = new Hono()
 
   app.post('/api/nodes/register', async (c) => {
@@ -17,6 +23,7 @@ export function createNodeRegisterRoute(db: ControlPlaneDb): Hono {
       .get(body.enrollmentToken)
 
     if (tokenRow === undefined) {
+      await logger.warn(SCOPE_REGISTER, 'Registration rejected: invalid enrollment token')
       return c.json({ error: 'Invalid enrollment token' }, 403)
     }
 
@@ -49,6 +56,12 @@ export function createNodeRegisterRoute(db: ControlPlaneDb): Hono {
           now,
           now
         )
+      await logger.info(SCOPE_REGISTER, 'New node registered', {
+        nodeId: body.nodeId,
+        hostname: body.hostname,
+        platform: body.platform,
+        agentCount: body.agentList.length,
+      })
     } else {
       db.raw
         .prepare(
@@ -73,6 +86,12 @@ export function createNodeRegisterRoute(db: ControlPlaneDb): Hono {
           now,
           body.nodeId
         )
+      await logger.info(SCOPE_REGISTER, 'Node re-registered', {
+        nodeId: body.nodeId,
+        hostname: body.hostname,
+        platform: body.platform,
+        agentCount: body.agentList.length,
+      })
     }
 
     updateAgentList(db, body.nodeId, body.agentList, now)

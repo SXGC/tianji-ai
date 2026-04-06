@@ -1,3 +1,4 @@
+import type { ObserverLogger } from '@tianji/observer'
 import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from '../db/index.js'
@@ -11,10 +12,16 @@ type AuthVariables = {
 
 /**
  * 创建长轮询取指令路由。
+ *
+ * @param db - controlplane 数据库实例
+ * @param logger - 结构化日志实例
  */
-export function createCommandPollRoute(db: ControlPlaneDb): Hono<AuthVariables> {
+export function createCommandPollRoute(
+  db: ControlPlaneDb,
+  logger: ObserverLogger
+): Hono<AuthVariables> {
   const app = new Hono<AuthVariables>()
-  const auth = createAuthMiddleware(db)
+  const auth = createAuthMiddleware(db, logger)
 
   app.get('/api/nodes/:nodeId/commands/poll', auth, async (c) => {
     const nodeId = c.req.param('nodeId')

@@ -1,3 +1,4 @@
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { Hono } from 'hono'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -19,9 +20,11 @@ describe('GET /api/nodes/:nodeId/commands/poll', () => {
       .prepare('INSERT INTO enrollment_tokens (token, created_at) VALUES (?, ?)')
       .run('valid-token', Date.now())
 
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
     const app = new Hono()
-    app.route('/', createNodeRegisterRoute(db))
-    app.route('/', createCommandPollRoute(db))
+    app.route('/', createNodeRegisterRoute(db, logger))
+    app.route('/', createCommandPollRoute(db, logger))
 
     const response = await app.request('/api/nodes/register', {
       method: 'POST',

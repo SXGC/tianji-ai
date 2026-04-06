@@ -1,3 +1,4 @@
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { Hono } from 'hono'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -39,8 +40,10 @@ describe('POST /api/tasks/:taskId/events', () => {
       )
       .run(now, now)
 
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
     const app = new Hono()
-    app.route('/', createTaskEventsRoute(db))
+    app.route('/', createTaskEventsRoute(db, logger))
 
     return { app, token }
   }

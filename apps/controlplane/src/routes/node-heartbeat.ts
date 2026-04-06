@@ -1,3 +1,4 @@
+import type { ObserverLogger } from '@tianji/observer'
 import type { NodeHeartbeatRequest } from '@tianji/shared'
 import { Hono } from 'hono'
 
@@ -14,18 +15,27 @@ type AuthVariables = {
 /** 心跳超时阈值（90s 无心跳标记 offline）。 */
 export const HEARTBEAT_TIMEOUT_MS = 90_000
 
+const SCOPE_HEARTBEAT = ['controlplane', 'heartbeat'] as const
+
 /**
  * 创建 node 心跳路由。
+ *
+ * @param db - controlplane 数据库实例
+ * @param logger - 结构化日志实例
  */
-export function createNodeHeartbeatRoute(db: ControlPlaneDb): Hono<AuthVariables> {
+export function createNodeHeartbeatRoute(
+  db: ControlPlaneDb,
+  logger: ObserverLogger
+): Hono<AuthVariables> {
   const app = new Hono<AuthVariables>()
-  const auth = createAuthMiddleware(db)
+  const auth = createAuthMiddleware(db, logger)
 
   app.post('/api/nodes/:nodeId/heartbeat', auth, async (c) => {
     const nodeId = c.req.param('nodeId')
     const authenticatedNodeId = c.get('nodeId') as string // NOSONAR
 
     if (nodeId !== authenticatedNodeId) {
+      await logger.warn(SCOPE_HEARTBEAT, 'Node ID mismatch', { nodeId, authenticatedNodeId })
       return c.json({ error: 'Node ID mismatch' }, 403)
     }
 
@@ -46,6 +56,11 @@ export function createNodeHeartbeatRoute(db: ControlPlaneDb): Hono<AuthVariables
     if (body.agentList !== undefined) {
       updateAgentList(db, nodeId, body.agentList, now)
     }
+
+    await logger.debug(SCOPE_HEARTBEAT, 'Heartbeat received', {
+      nodeId,
+      executionState: body.executionState,
+    })
 
     return c.body(null, 204)
   })

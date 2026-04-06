@@ -1,3 +1,4 @@
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { type ControlPlaneDb, createDatabase } from '../../db/index.js'
@@ -29,11 +30,14 @@ describe('ObservationMonitor', () => {
       )
       .run(now)
 
-    return now
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+
+    return { now, sink, logger }
   }
 
   it('should mark running tasks as observation_lost when node goes offline', () => {
-    const now = setup()
+    const { now, sink, logger } = setup()
 
     db.raw
       .prepare(
@@ -46,7 +50,7 @@ describe('ObservationMonitor', () => {
       .prepare('UPDATE nodes SET last_heartbeat_at = ?, status = ? WHERE node_id = ?')
       .run(now - 120_000, 'offline', 'n1')
 
-    const monitor = new ObservationMonitor(db)
+    const monitor = new ObservationMonitor(db, logger)
     monitor.checkOfflineNodes()
 
     const task = db.raw
@@ -54,10 +58,16 @@ describe('ObservationMonitor', () => {
       .get('task-1') as { status: string; failure_reason: string }
     expect(task.status).toBe('observation_lost')
     expect(task.failure_reason).toBe('observation_lost')
+
+    expect(
+      sink.entries.some(
+        (e) => e.level === 'warn' && e.message === 'Tasks marked as observation_lost'
+      )
+    ).toBe(true)
   })
 
   it('should not affect tasks in terminal states', () => {
-    const now = setup()
+    const { now, sink, logger } = setup()
 
     db.raw
       .prepare(
@@ -70,12 +80,18 @@ describe('ObservationMonitor', () => {
       .prepare('UPDATE nodes SET last_heartbeat_at = ?, status = ? WHERE node_id = ?')
       .run(now - 120_000, 'offline', 'n1')
 
-    const monitor = new ObservationMonitor(db)
+    const monitor = new ObservationMonitor(db, logger)
     monitor.checkOfflineNodes()
 
     const task = db.raw.prepare('SELECT status FROM tasks WHERE task_id = ?').get('task-1') as {
       status: string
     }
     expect(task.status).toBe('completed')
+
+    expect(
+      sink.entries.some(
+        (e) => e.level === 'warn' && e.message === 'Tasks marked as observation_lost'
+      )
+    ).toBe(false)
   })
 })

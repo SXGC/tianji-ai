@@ -1,3 +1,5 @@
+import type { ObserverMemorySink } from '@tianji/observer'
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { Hono } from 'hono'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -17,14 +19,16 @@ describe('POST /api/nodes/register', () => {
       .prepare('INSERT INTO enrollment_tokens (token, created_at) VALUES (?, ?)')
       .run('valid-token', Date.now())
 
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
     const app = new Hono()
-    app.route('/', createNodeRegisterRoute(db))
+    app.route('/', createNodeRegisterRoute(db, logger))
 
-    return app
+    return { app, sink }
   }
 
   it('should register a new node and return access token', async () => {
-    const app = setup()
+    const { app, sink } = setup()
     const response = await app.request('/api/nodes/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -43,10 +47,14 @@ describe('POST /api/nodes/register', () => {
     const data = (await response.json()) as { accessToken: string; expiresAt: number }
     expect(data.accessToken).toBeDefined()
     expect(data.expiresAt).toBeGreaterThan(Date.now())
+
+    expect(
+      sink.entries.some((e) => e.level === 'info' && e.message === 'New node registered')
+    ).toBe(true)
   })
 
   it('should reject invalid enrollment token', async () => {
-    const app = setup()
+    const { app, sink } = setup()
     const response = await app.request('/api/nodes/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -61,10 +69,15 @@ describe('POST /api/nodes/register', () => {
     })
 
     expect(response.status).toBe(403)
+    expect(
+      sink.entries.some(
+        (e) => e.level === 'warn' && e.message === 'Registration rejected: invalid enrollment token'
+      )
+    ).toBe(true)
   })
 
   it('should re-register existing node with new access token', async () => {
-    const app = setup()
+    const { app, sink } = setup()
 
     await app.request('/api/nodes/register', {
       method: 'POST',
@@ -99,5 +112,9 @@ describe('POST /api/nodes/register', () => {
       .get('node-001') as { hostname: string; version: string }
     expect(node.hostname).toBe('dev-1-updated')
     expect(node.version).toBe('3.1.0')
+
+    expect(sink.entries.some((e) => e.level === 'info' && e.message === 'Node re-registered')).toBe(
+      true
+    )
   })
 })

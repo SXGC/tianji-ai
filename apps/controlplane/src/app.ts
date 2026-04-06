@@ -1,3 +1,4 @@
+import type { ObserverLogger } from '@tianji/observer'
 import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from './db/index.js'
@@ -20,16 +21,19 @@ export interface ControlPlaneApp {
 
 /**
  * 创建 controlplane HTTP 应用。
+ *
+ * @param db - controlplane 数据库实例
+ * @param logger - 结构化日志实例，传递给需要日志的子模块
  */
-export function createApp(db: ControlPlaneDb): ControlPlaneApp {
+export function createApp(db: ControlPlaneDb, logger: ObserverLogger): ControlPlaneApp {
   const app = new Hono()
 
   app.get('/health', (c) => c.json({ status: 'ok' }))
 
-  app.route('/', createNodeRegisterRoute(db))
-  app.route('/', createNodeHeartbeatRoute(db))
-  app.route('/', createCommandPollRoute(db))
-  app.route('/', createTaskEventsRoute(db))
+  app.route('/', createNodeRegisterRoute(db, logger))
+  app.route('/', createNodeHeartbeatRoute(db, logger))
+  app.route('/', createCommandPollRoute(db, logger))
+  app.route('/', createTaskEventsRoute(db, logger))
 
   app.route('/', createUiNodesRoute(db))
   app.route('/', createUiTasksRoute(db))
@@ -40,6 +44,6 @@ export function createApp(db: ControlPlaneDb): ControlPlaneApp {
 
   return {
     app,
-    monitor: new ObservationMonitor(db),
+    monitor: new ObservationMonitor(db, logger),
   }
 }
