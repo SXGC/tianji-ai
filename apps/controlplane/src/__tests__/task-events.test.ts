@@ -316,6 +316,61 @@ describe('task-events route', () => {
     })
   })
 
+  it('processes events incrementally from a streaming body', async () => {
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const app = createTaskEventsRoute(db, logger)
+
+    // 使用 ReadableStream 模拟 duplex: 'half' 的流式请求体。
+    let pushChunk!: (chunk: string) => void
+    let closeStream!: () => void
+
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const encoder = new TextEncoder()
+        pushChunk = (chunk: string) => controller.enqueue(encoder.encode(chunk))
+        closeStream = () => controller.close()
+      },
+    })
+
+    const responsePromise = app.request(`http://localhost/api/tasks/${seed.taskId}/events`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${seed.token}`,
+        'Content-Type': 'application/x-ndjson',
+      },
+      body,
+      duplex: 'half',
+    } as RequestInit)
+
+    // 发送第一条事件。
+    pushChunk(
+      `${JSON.stringify({
+        kind: 'lifecycle',
+        sequence: 1,
+        type: 'task.started',
+        summary: 'streaming',
+      })}\n`
+    )
+
+    // 让微任务执行，使 reader.read() 处理该 chunk。
+    await new Promise((r) => setTimeout(r, 50))
+
+    const task = db.raw.prepare('SELECT status FROM tasks WHERE task_id = ?').get(seed.taskId) as {
+      status: string
+    }
+    expect(task.status).toBe('running')
+
+    // 关闭流，完成请求。
+    closeStream()
+    const res = await responsePromise
+    expect(res.status).toBe(200)
+
+    const json = (await res.json()) as { accepted: number }
+    expect(json.accepted).toBe(1)
+    db.close()
+  })
+
   it('non-lifecycle kind does not trigger updateTaskFromLifecycle', async () => {
     const body = JSON.stringify({
       kind: 'agent',

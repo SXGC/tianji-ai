@@ -1,7 +1,14 @@
-import type { AgentInfo, Command, NodeExecutionState, NodeId } from '@tianji/shared'
+import type {
+  AgentInfo,
+  Command,
+  NodeExecutionState,
+  NodeId,
+  PollCommandResponse,
+} from '@tianji/shared'
 
 import { AgentRunner } from '../acp/index.js'
 import { ControlPlaneConnection, type ControlPlaneConnectionConfig } from '../controlplane/index.js'
+import type { RuntimeLogger } from '../logger.js'
 import { TaskExecutor, type TaskExecutorConfig } from '../task/task-executor.js'
 
 export interface ControlPlaneRuntimeConfig {
@@ -12,6 +19,7 @@ export interface ControlPlaneRuntimeConfig {
   readonly platform: string
   readonly version: string
   readonly agentList: readonly AgentInfo[]
+  readonly logger?: RuntimeLogger
 }
 
 export interface ControlPlaneCallbacks {
@@ -60,6 +68,15 @@ export function createControlPlaneRuntime(
     currentConnection?.setExecutionState(state)
   }
 
+  const toCommand = (command: PollCommandResponse): Command => ({
+    commandId: command.commandId,
+    nodeId: config.nodeId,
+    type: command.type,
+    payload: command.payload,
+    state: 'pending',
+    createdAt: Date.now(),
+  })
+
   const connection =
     deps.createConnection?.({
       baseUrl: config.baseUrl,
@@ -69,9 +86,10 @@ export function createControlPlaneRuntime(
       platform: config.platform,
       version: config.version,
       agentList: config.agentList,
+      logger: config.logger,
       onCommand: (command) => {
         if (taskExecutorRef !== null) {
-          void taskExecutorRef.execute(command as Command)
+          void taskExecutorRef.execute(toCommand(command))
         }
       },
     }) ??
@@ -83,9 +101,10 @@ export function createControlPlaneRuntime(
       platform: config.platform,
       version: config.version,
       agentList: config.agentList,
+      logger: config.logger,
       onCommand: (command) => {
         if (taskExecutorRef !== null) {
-          void taskExecutorRef.execute(command as Command)
+          void taskExecutorRef.execute(toCommand(command))
         }
       },
     })
@@ -99,6 +118,7 @@ export function createControlPlaneRuntime(
     new TaskExecutor({
       nodeId: config.nodeId,
       onExecutionStateChange: updateExecutionState,
+      logger: config.logger,
       createRunner: async (command) => {
         return new AgentRunner({
           agentId: command.payload.agentId,

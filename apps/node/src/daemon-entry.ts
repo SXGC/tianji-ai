@@ -4,7 +4,7 @@ import { DaemonServer, createAgentSession } from '@tianji/agent'
 
 import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
-import { logDebug, logInfo } from './logger.js'
+import { getCliLogger, logDebug, logError, logInfo } from './logger.js'
 import {
   deriveControlPlaneAgentList,
   readStoredControlPlaneConfig,
@@ -14,9 +14,19 @@ import {
   createControlPlaneRuntime,
 } from './node-runtime/controlplane-runtime.js'
 
+type DaemonShutdownReason =
+  | { readonly type: 'signal'; readonly signal: NodeJS.Signals }
+  | { readonly type: 'uncaughtException'; readonly error: unknown }
+  | { readonly type: 'unhandledRejection'; readonly error: unknown }
+
+function formatErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 export async function runDaemonEntry(): Promise<void> {
   const context = await loadUserConfigContext()
   const i18n = createI18n(detectLocale(context.config))
+  const logger = getCliLogger(context.paths)
   const session = createAgentSession(context)
   const server = new DaemonServer({
     session,
@@ -43,6 +53,7 @@ export async function runDaemonEntry(): Promise<void> {
     const runtime = createControlPlaneRuntime({
       ...controlPlaneConfig,
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
+      logger,
     })
     try {
       await runtime.connection.start()
@@ -57,7 +68,7 @@ export async function runDaemonEntry(): Promise<void> {
         }
       )
     } catch (error) {
-      await logInfo(context.paths, ['daemon', 'controlplane'], 'Control plane connection failed', {
+      await logError(context.paths, ['daemon', 'controlplane'], 'Control plane connection failed', {
         baseUrl: controlPlaneConfig.baseUrl,
         nodeId: controlPlaneConfig.nodeId,
         error: error instanceof Error ? error.message : String(error),
@@ -67,18 +78,57 @@ export async function runDaemonEntry(): Promise<void> {
     }
   }
 
-  const shutdown = async (signal: NodeJS.Signals) => {
-    await logInfo(context.paths, ['daemon'], 'Daemon shutdown signal received', {
-      signal,
-    })
-    controlPlaneHandle?.connection.stop()
-    void server.shutdown().finally(() => process.exit(0))
+  let shutdownPromise: Promise<void> | null = null
+
+  const shutdown = (reason: DaemonShutdownReason): Promise<void> => {
+    if (shutdownPromise !== null) {
+      return shutdownPromise
+    }
+
+    shutdownPromise = (async () => {
+      if (reason.type === 'signal') {
+        await logInfo(context.paths, ['daemon'], 'Daemon shutdown signal received', {
+          signal: reason.signal,
+        })
+      }
+
+      if (reason.type === 'uncaughtException') {
+        await logError(context.paths, ['daemon'], 'Daemon crashed with uncaught exception', {
+          error: formatErrorMessage(reason.error),
+        })
+      }
+
+      if (reason.type === 'unhandledRejection') {
+        await logError(context.paths, ['daemon'], 'Daemon crashed with unhandled rejection', {
+          error: formatErrorMessage(reason.error),
+        })
+      }
+
+      controlPlaneHandle?.connection.stop()
+      await server.shutdown()
+
+      await logInfo(context.paths, ['daemon'], 'Daemon exiting', {
+        reason: reason.type,
+        signal: reason.type === 'signal' ? reason.signal : undefined,
+      })
+
+      process.exit(reason.type === 'signal' ? 0 : 1)
+    })()
+
+    return shutdownPromise
   }
+
   process.on('SIGTERM', () => {
-    void shutdown('SIGTERM')
+    void shutdown({ type: 'signal', signal: 'SIGTERM' })
   })
   process.on('SIGINT', () => {
-    void shutdown('SIGINT')
+    void shutdown({ type: 'signal', signal: 'SIGINT' })
+  })
+  process.on('uncaughtException', (error) => {
+    void shutdown({ type: 'uncaughtException', error })
+  })
+  process.on('unhandledRejection', (error) => {
+    void shutdown({ type: 'unhandledRejection', error })
   })
 }
 

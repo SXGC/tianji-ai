@@ -6,6 +6,7 @@
 
 import type { AgentRunner } from '../acp/index.js'
 import type { NdjsonWriter } from '../controlplane/index.js'
+import type { RuntimeLogger } from '../logger.js'
 
 import type { Command, NodeExecutionState, NodeId, RuntimeEvent } from '@tianji/shared'
 
@@ -14,10 +15,12 @@ export interface TaskExecutorConfig {
   readonly onExecutionStateChange: (state: NodeExecutionState) => void
   readonly createRunner: (command: Command) => Promise<AgentRunner>
   readonly openEventStream: (taskId: string) => Promise<NdjsonWriter>
+  readonly logger?: RuntimeLogger
 }
 
 export class TaskExecutor {
   readonly #config: TaskExecutorConfig
+  readonly #scope = ['daemon', 'task'] as const
   #executionState: NodeExecutionState = 'idle'
   #currentTaskId: string | null = null
 
@@ -38,14 +41,36 @@ export class TaskExecutor {
       throw new Error('Node is already executing a task')
     }
 
+    const taskId = String(command.payload.taskId)
     this.#executionState = 'busy'
-    this.#currentTaskId = String(command.payload.taskId)
+    this.#currentTaskId = taskId
     this.#config.onExecutionStateChange(this.#executionState)
 
+    await this.#config.logger?.logInfo(this.#scope, 'Daemon started processing task', {
+      nodeId: this.#config.nodeId,
+      commandId: command.commandId,
+      taskId,
+      agentId: command.payload.agentId,
+    })
+    await this.#config.logger?.logDebug(this.#scope, 'Preparing task execution', {
+      command,
+    })
+
     const runner = await this.#config.createRunner(command)
-    const eventStream = await this.#config.openEventStream(this.#currentTaskId)
+    await this.#config.logger?.logDebug(this.#scope, 'Created task runner', {
+      taskId,
+      agentId: command.payload.agentId,
+    })
+    const eventStream = await this.#config.openEventStream(taskId)
+    await this.#config.logger?.logDebug(this.#scope, 'Opened task event stream', {
+      taskId,
+    })
 
     try {
+      await this.#config.logger?.logDebug(this.#scope, 'Writing task started lifecycle event', {
+        taskId,
+        sequence: 1,
+      })
       await eventStream.write(
         JSON.stringify({
           kind: 'lifecycle',
@@ -55,8 +80,16 @@ export class TaskExecutor {
       )
 
       await runner.connect()
+      await this.#config.logger?.logDebug(this.#scope, 'Connected task runner', {
+        taskId,
+      })
       let sequence = 2
       for await (const event of runner.chat(command.payload.goal)) {
+        await this.#config.logger?.logDebug(this.#scope, 'Forwarding task runtime event', {
+          taskId,
+          sequence,
+          eventType: event.type,
+        })
         await eventStream.write(
           JSON.stringify({
             kind: 'agent',
@@ -67,6 +100,10 @@ export class TaskExecutor {
         sequence += 1
       }
 
+      await this.#config.logger?.logDebug(this.#scope, 'Writing task completed lifecycle event', {
+        taskId,
+        sequence,
+      })
       await eventStream.write(
         JSON.stringify({
           kind: 'lifecycle',
@@ -74,12 +111,28 @@ export class TaskExecutor {
           type: 'task.completed',
         })
       )
+      await this.#config.logger?.logDebug(this.#scope, 'Task execution finished successfully', {
+        taskId,
+      })
+    } catch (error) {
+      await this.#config.logger?.logError(this.#scope, 'Task execution failed', {
+        taskId,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      throw error
     } finally {
+      await this.#config.logger?.logDebug(this.#scope, 'Cleaning up task execution resources', {
+        taskId,
+      })
       await runner.disconnect()
       await eventStream.close()
       this.#executionState = 'idle'
       this.#currentTaskId = null
       this.#config.onExecutionStateChange(this.#executionState)
+      await this.#config.logger?.logDebug(this.#scope, 'Task executor returned to idle', {
+        taskId,
+        nodeId: this.#config.nodeId,
+      })
     }
   }
 }

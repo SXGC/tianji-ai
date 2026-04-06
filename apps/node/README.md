@@ -185,8 +185,17 @@ controlplane 注册信息也会持久化到 `~/.config/tianji-ai/tianji.json` �
 | `cli > run > event` | runtime 事件消费 |
 | `cli > log > follow` | log follow 主流程 |
 | `cli > main` | CLI 顶层错误记录 |
+| `daemon > controlplane` | daemon 与 controlplane 的注册、心跳、收取任务 |
+| `daemon > task` | daemon 开始处理 task 与任务执行细节 |
 
 日志中会保留 `agentName`、`provider`、`modelName`、`soulPath`、`sessionId`、`runId` 等元信息；对于 `message.delta` 事件，还会记录 `channel`、`delta` 和 `deltaLength` 以便排查流式输出问题。但会过滤 `apiKey`、`prompt`、`soul` 等敏感字段，不记录 `SOUL.md` 正文或 prompt 正文。JSONL 的写入格式与脱敏行为都由 `@tianji/observer` 提供。
+
+daemon 相关新增日志约定：
+
+- 心跳发送使用 `debug`，记录发送开始、发送成功与失败原因。
+- 接收到 controlplane 下发 task 时，接收摘要写 `info`，完整 task 明细写 `debug`。
+- daemon 开始处理 task 写 `info`，处理过程中的 runner 创建、事件流打开、runtime 事件转发、收尾清理写 `debug`。
+- daemon 收到 `SIGTERM` / `SIGINT` 时写退出 `info`；捕获未处理异常或未处理 Promise 拒绝时先写 `error`，再写退出 `info`。
 
 ## 错误处理
 

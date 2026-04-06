@@ -6,6 +6,7 @@
 
 import type { AgentInfo, NodeExecutionState, NodeId, PollCommandResponse } from '@tianji/shared'
 
+import type { RuntimeLogger } from '../logger.js'
 import { ControlPlaneAuthError, ControlPlaneClient } from './client.js'
 
 export interface ControlPlaneConnectionConfig {
@@ -17,12 +18,15 @@ export interface ControlPlaneConnectionConfig {
   readonly version: string
   readonly agentList: readonly AgentInfo[]
   readonly heartbeatIntervalMs?: number
+  readonly emptyPollBackoffMs?: number
   readonly onCommand: (command: PollCommandResponse) => void
+  readonly logger?: RuntimeLogger
 }
 
 export class ControlPlaneConnection {
   readonly #config: ControlPlaneConnectionConfig
   readonly #client: ControlPlaneClient
+  readonly #scope = ['daemon', 'controlplane'] as const
   #heartbeatTimer: ReturnType<typeof setInterval> | null = null
   #pollAbortController: AbortController | null = null
   #running = false
@@ -81,9 +85,23 @@ export class ControlPlaneConnection {
   }
 
   async #heartbeatOnce(): Promise<void> {
+    await this.#config.logger?.logDebug(this.#scope, 'Sending control plane heartbeat', {
+      nodeId: this.#config.nodeId,
+      executionState: this.#executionState,
+      baseUrl: this.#config.baseUrl,
+    })
     try {
       await this.#client.heartbeat(this.#executionState)
+      await this.#config.logger?.logDebug(this.#scope, 'Control plane heartbeat sent', {
+        nodeId: this.#config.nodeId,
+        executionState: this.#executionState,
+      })
     } catch (error) {
+      await this.#config.logger?.logError(this.#scope, 'Control plane heartbeat failed', {
+        nodeId: this.#config.nodeId,
+        executionState: this.#executionState,
+        error: error instanceof Error ? error.message : String(error),
+      })
       if (error instanceof ControlPlaneAuthError) {
         await this.#reRegister()
       }
@@ -97,7 +115,18 @@ export class ControlPlaneConnection {
       try {
         const command = await this.#client.pollCommand(30000, this.#pollAbortController.signal)
         if (command !== null) {
+          await this.#config.logger?.logInfo(this.#scope, 'Received control plane task', {
+            commandId: command.commandId,
+            taskId: command.payload.taskId,
+            type: command.type,
+            agentId: command.payload.agentId,
+          })
+          await this.#config.logger?.logDebug(this.#scope, 'Received control plane task detail', {
+            command,
+          })
           this.#config.onCommand(command)
+        } else {
+          await sleep(this.#config.emptyPollBackoffMs ?? 25)
         }
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {

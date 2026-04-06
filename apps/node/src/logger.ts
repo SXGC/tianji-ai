@@ -36,6 +36,8 @@ export interface CliLogger {
   ) => Promise<void>
 }
 
+export type RuntimeLogger = Pick<CliLogger, 'logDebug' | 'logInfo' | 'logWarn' | 'logError'>
+
 export interface CreateCliLoggerOptions {
   readonly sink: ObserverLogSink
 }
@@ -147,6 +149,10 @@ export function logWarn(
   data?: Record<string, unknown>
 ): Promise<void> {
   return createCliLoggerFromPaths(paths).logWarn(scope, message, data)
+}
+
+export function getCliLogger(paths: UserConfigPaths): CliLogger {
+  return createCliLoggerFromPaths(paths)
 }
 
 function createCliLoggerFromPaths(paths: UserConfigPaths): CliLogger {

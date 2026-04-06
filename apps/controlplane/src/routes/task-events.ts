@@ -31,10 +31,17 @@ export function createTaskEventsRoute(
       return c.json({ error: 'Missing task ID' }, 400)
     }
 
-    const body = await c.req.text()
-    const lines = body.split('\n').filter((line) => line.trim().length > 0)
+    const body = c.req.raw.body
+    if (body === null) {
+      return c.json({ accepted: 0 })
+    }
 
-    for (const line of lines) {
+    let accepted = 0
+    const tid = taskId
+
+    /** 处理单行 NDJSON 数据，入库并更新任务状态。 */
+    function processLine(line: string): void {
+      accepted++
       try {
         const event = JSON.parse(line) as {
           kind: string
@@ -45,10 +52,10 @@ export function createTaskEventsRoute(
           sessionId?: string
         }
 
-        eventStore.insertEvent(taskId, event.sequence, event.kind, line)
+        eventStore.insertEvent(tid, event.sequence, event.kind, line)
 
         if (event.kind === 'lifecycle' && event.type !== undefined) {
-          updateTaskFromLifecycle(db, taskId, {
+          updateTaskFromLifecycle(db, tid, {
             type: event.type,
             summary: event.summary,
             error: event.error,
@@ -60,7 +67,41 @@ export function createTaskEventsRoute(
       }
     }
 
-    return c.json({ accepted: lines.length })
+    const reader = body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (value !== undefined) {
+        buffer += decoder.decode(value, { stream: !done })
+      }
+
+      // 逐行处理已到达的 NDJSON 数据。
+      for (
+        let newlineIdx = buffer.indexOf('\n');
+        newlineIdx !== -1;
+        newlineIdx = buffer.indexOf('\n')
+      ) {
+        const line = buffer.slice(0, newlineIdx).trim()
+        buffer = buffer.slice(newlineIdx + 1)
+        if (line.length > 0) {
+          processLine(line)
+        }
+      }
+
+      if (done) {
+        break
+      }
+    }
+
+    // 处理末尾无换行的残留数据。
+    const trailing = buffer.trim()
+    if (trailing.length > 0) {
+      processLine(trailing)
+    }
+
+    return c.json({ accepted })
   })
 
   return app
