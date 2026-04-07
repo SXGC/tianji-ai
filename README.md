@@ -37,7 +37,7 @@ pnpm tianji daemon start --register "http://127.0.0.1:3000/register?enrollment-t
 ## 当前范围
 
 - 使用 `pnpm workspace` 管理多包仓库。
-- 使用 `turbo` 编排 `build`、`test`、`typecheck` 等任务，并结合 Biome 承担根目录 `lint` / `format` / `check`。
+- 使用 `turbo` 编排 `build`、`test` 等任务，并结合 Biome 承担根目录 `lint` / `format` / `check`。
 - 以 TypeScript 为主语言，代码质量工具链为 Biome + Vitest。
 - `docs/` 下提供架构与配置设计文档，但其中部分内容仍是 v1 draft，不应视为全部已实现能力。
 

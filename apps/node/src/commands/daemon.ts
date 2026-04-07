@@ -10,7 +10,7 @@ import {
   loadUserConfigContext,
 } from '../config.js'
 import { runDaemonEntry } from '../daemon-entry.js'
-import { type CliLogScope, logDebug, logInfo } from '../logger.js'
+import { type CliLogScope, logDebug, logError, logInfo } from '../logger.js'
 import {
   areStoredControlPlaneConfigsEqual,
   buildStoredControlPlaneConfig,
@@ -466,16 +466,30 @@ const daemonStopCommand: CommandDefinition = {
     try {
       const pid = await readDaemonPid(paths)
       const client = await requireDaemonClient(paths)
-      await logDebug(paths, DAEMON_STOP_SCOPE, 'Sending shutdown request')
+
+      if (pid !== undefined) {
+        await logInfo(paths, DAEMON_STOP_SCOPE, 'Stopping daemon', { pid })
+        process.stdout.write(`${i18n.t('daemon.stop.stopping', { pid })}\n`)
+      }
+
+      await logInfo(paths, DAEMON_STOP_SCOPE, 'Sending shutdown request')
       await client.shutdown()
       client.close()
-      process.stdout.write(`${i18n.t('daemon.stopped')}\n`)
 
       const stopped = await stopDaemonGracefullyOrForce(paths, DAEMON_STOP_SCOPE, pid)
       if (!stopped) {
-        process.stderr.write('Failed to stop daemon process.\n')
+        await logError(paths, DAEMON_STOP_SCOPE, 'Failed to stop daemon process', {
+          pid: pid ?? 0,
+        })
+        process.stderr.write(`${i18n.t('daemon.stop.process_kill_failed', { pid: pid ?? 0 })}\n`)
         return 1
       }
+
+      if (pid !== undefined) {
+        await logInfo(paths, DAEMON_STOP_SCOPE, 'Daemon process stopped', { pid })
+        process.stdout.write(`${i18n.t('daemon.stop.process_killed', { pid })}\n`)
+      }
+
       return 0
     } catch (error) {
       if (error instanceof Error) {
@@ -499,47 +513,108 @@ const daemonRestartCommand: CommandDefinition = {
     const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
     const paths = resolveUserConfigPaths()
 
-    const pid = await readDaemonPid(paths)
+    const loadConfig =
+      deps?.loadConfig ??
+      (async () => {
+        const ctx: LoadedUserConfigContext = await loadUserConfigContext()
+        return ctx.config
+      })
+    const config = await loadConfig().catch(() => ({}))
+    const storedControlPlaneConfig = readStoredControlPlaneConfig(config)
+
+    await logInfo(paths, DAEMON_RESTART_SCOPE, 'Daemon restart initiated', {
+      hasStoredControlPlaneConfig: storedControlPlaneConfig !== null,
+      controlPlaneBaseUrl: storedControlPlaneConfig?.baseUrl ?? null,
+      nodeId: storedControlPlaneConfig?.nodeId ?? null,
+      foreground: options.fg === true,
+    })
+
+    if (storedControlPlaneConfig) {
+      process.stdout.write(
+        `Control plane: ${storedControlPlaneConfig.baseUrl}, nodeId=${storedControlPlaneConfig.nodeId}\n`
+      )
+    }
+
+    const oldPid = await readDaemonPid(paths)
     const existingClient = await tryCreateDaemonClient(paths)
+
     if (existingClient !== undefined) {
+      await logInfo(paths, DAEMON_RESTART_SCOPE, 'Found running daemon, stopping', {
+        pid: oldPid ?? 0,
+      })
+      process.stdout.write(`${i18n.t('daemon.restart.found_running', { pid: oldPid ?? 0 })}\n`)
+
       try {
-        await logDebug(paths, DAEMON_RESTART_SCOPE, 'Sending shutdown request to existing daemon')
+        await logInfo(paths, DAEMON_RESTART_SCOPE, 'Sending shutdown request', {
+          pid: oldPid ?? 0,
+        })
         await existingClient.shutdown()
         existingClient.close()
-        process.stdout.write(`${i18n.t('daemon.stopped')}\n`)
+        process.stdout.write(`${i18n.t('daemon.restart.shutdown_sent', { pid: oldPid ?? 0 })}\n`)
       } catch {
-        await logDebug(paths, DAEMON_RESTART_SCOPE, 'Shutdown request failed, will force kill')
+        await logInfo(paths, DAEMON_RESTART_SCOPE, 'Shutdown request failed, escalating')
+        process.stdout.write(`${i18n.t('daemon.restart.shutdown_failed')}\n`)
       }
 
-      const stopped = await stopDaemonGracefullyOrForce(paths, DAEMON_RESTART_SCOPE, pid)
+      const stopped = await stopDaemonGracefullyOrForce(paths, DAEMON_RESTART_SCOPE, oldPid)
       if (!stopped) {
-        process.stderr.write('Failed to stop daemon process.\n')
+        await logError(paths, DAEMON_RESTART_SCOPE, 'Failed to stop daemon process', {
+          pid: oldPid ?? 0,
+        })
+        process.stderr.write(
+          `${i18n.t('daemon.restart.process_kill_failed', { pid: oldPid ?? 0 })}\n`
+        )
         return 1
       }
-    } else if (pid !== undefined && isProcessAlive(pid)) {
-      await logDebug(paths, DAEMON_RESTART_SCOPE, 'Found orphaned daemon, stopping', { pid })
-      const stopped = await stopDaemonGracefullyOrForce(paths, DAEMON_RESTART_SCOPE, pid)
+
+      await logInfo(paths, DAEMON_RESTART_SCOPE, 'Daemon process stopped', {
+        pid: oldPid ?? 0,
+      })
+      process.stdout.write(`${i18n.t('daemon.restart.process_killed', { pid: oldPid ?? 0 })}\n`)
+    } else if (oldPid !== undefined && isProcessAlive(oldPid)) {
+      await logInfo(paths, DAEMON_RESTART_SCOPE, 'Found orphaned daemon process', {
+        pid: oldPid,
+      })
+      process.stdout.write(`${i18n.t('daemon.restart.orphan_found', { pid: oldPid })}\n`)
+
+      const stopped = await stopDaemonGracefullyOrForce(paths, DAEMON_RESTART_SCOPE, oldPid)
       if (!stopped) {
-        process.stderr.write('Failed to stop orphaned daemon process.\n')
+        await logError(paths, DAEMON_RESTART_SCOPE, 'Failed to stop orphaned daemon process', {
+          pid: oldPid,
+        })
+        process.stderr.write(`${i18n.t('daemon.restart.process_kill_failed', { pid: oldPid })}\n`)
         return 1
       }
+
+      await logInfo(paths, DAEMON_RESTART_SCOPE, 'Orphaned daemon process stopped', {
+        pid: oldPid,
+      })
+      process.stdout.write(`${i18n.t('daemon.restart.process_killed', { pid: oldPid })}\n`)
     } else {
       await cleanupStaleDaemonFiles(paths)
+      await logInfo(paths, DAEMON_RESTART_SCOPE, 'No running daemon found, starting fresh')
+      process.stdout.write(`${i18n.t('daemon.restart.no_daemon')}\n`)
     }
 
     if (options.fg === true) {
-      await logDebug(paths, DAEMON_RESTART_SCOPE, 'Starting new daemon in foreground mode')
+      await logInfo(paths, DAEMON_RESTART_SCOPE, 'Starting daemon in foreground mode')
+      process.stdout.write(`${i18n.t('daemon.restart.starting_fg')}\n`)
       const runDaemonEntryCommand = deps?.runDaemonEntry ?? runDaemonEntry
       await runDaemonEntryCommand()
       return undefined
     }
 
-    await logDebug(paths, DAEMON_RESTART_SCOPE, 'Starting new daemon in background mode')
+    await logInfo(paths, DAEMON_RESTART_SCOPE, 'Starting daemon in background mode')
+    process.stdout.write(`${i18n.t('daemon.restart.starting_bg')}\n`)
     startDetachedDaemonProcess()
 
     const { pid: newPid, port } = await waitForDaemonReady(paths)
-    await logInfo(paths, DAEMON_RESTART_SCOPE, 'Daemon restarted', { pid: newPid, port })
-    process.stdout.write(`${i18n.t('daemon.started', { pid: newPid, port })}\n`)
+    await logInfo(paths, DAEMON_RESTART_SCOPE, 'Daemon restarted', {
+      oldPid: oldPid ?? null,
+      newPid,
+      port,
+    })
+    process.stdout.write(`${i18n.t('daemon.restart.restarted', { pid: newPid, port })}\n`)
   },
 }
 

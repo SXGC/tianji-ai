@@ -49,5 +49,18 @@
   "daemon.register.no_config": "No controlplane configuration found. Use --register to provide a register URL.",
   "daemon.register.confirm_overwrite": "Stored controlplane config differs from the provided register URL. Overwrite?",
   "daemon.register.saved": "Controlplane configuration saved.",
-  "daemon.register.declined": "Overwrite declined. Exiting without starting daemon."
+  "daemon.register.declined": "Overwrite declined. Exiting without starting daemon.",
+  "daemon.restart.found_running": "Found running daemon (pid={pid}), stopping...",
+  "daemon.restart.shutdown_sent": "Shutdown request sent to daemon (pid={pid})",
+  "daemon.restart.shutdown_failed": "Shutdown request failed, escalating to force stop",
+  "daemon.restart.process_killed": "Daemon process (pid={pid}) stopped successfully",
+  "daemon.restart.process_kill_failed": "Failed to stop daemon process (pid={pid})",
+  "daemon.restart.orphan_found": "Found orphaned daemon process (pid={pid}), stopping...",
+  "daemon.restart.no_daemon": "No running daemon found, starting fresh...",
+  "daemon.restart.starting_fg": "Starting daemon in foreground mode...",
+  "daemon.restart.starting_bg": "Starting daemon in background mode...",
+  "daemon.restart.restarted": "Daemon restarted (pid={pid}, port={port})",
+  "daemon.stop.stopping": "Stopping daemon (pid={pid})...",
+  "daemon.stop.process_killed": "Daemon process (pid={pid}) stopped successfully",
+  "daemon.stop.process_kill_failed": "Failed to stop daemon process (pid={pid})"
 }

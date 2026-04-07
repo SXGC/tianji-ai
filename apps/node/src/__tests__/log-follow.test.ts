@@ -108,6 +108,73 @@ describe('formatCliLogEntry', () => {
     expect(result).toContain('fail')
     expect(result).toContain('"code":500')
   })
+
+  it('applies ANSI color for error level when colorize is true', () => {
+    const result = formatCliLogEntry(
+      {
+        timestamp: '2026-01-01T00:00:00.000Z',
+        level: 'error',
+        scope: ['test'],
+        message: 'fail',
+      },
+      true
+    )
+    expect(result).toContain('\x1b[31m')
+    expect(result).toContain('\x1b[0m')
+    expect(result).toContain('ERROR')
+  })
+
+  it('applies ANSI color for warn level when colorize is true', () => {
+    const result = formatCliLogEntry(
+      {
+        timestamp: '2026-01-01T00:00:00.000Z',
+        level: 'warn',
+        scope: ['test'],
+        message: 'careful',
+      },
+      true
+    )
+    expect(result).toContain('\x1b[33m')
+  })
+
+  it('applies ANSI color for debug level when colorize is true', () => {
+    const result = formatCliLogEntry(
+      {
+        timestamp: '2026-01-01T00:00:00.000Z',
+        level: 'debug',
+        scope: ['test'],
+        message: 'trace',
+      },
+      true
+    )
+    expect(result).toContain('\x1b[90m')
+  })
+
+  it('applies ANSI color for info level when colorize is true', () => {
+    const result = formatCliLogEntry(
+      {
+        timestamp: '2026-01-01T00:00:00.000Z',
+        level: 'info',
+        scope: ['test'],
+        message: 'hello',
+      },
+      true
+    )
+    expect(result).toContain('\x1b[32m')
+  })
+
+  it('does not apply ANSI color when colorize is false', () => {
+    const result = formatCliLogEntry(
+      {
+        timestamp: '2026-01-01T00:00:00.000Z',
+        level: 'error',
+        scope: ['test'],
+        message: 'fail',
+      },
+      false
+    )
+    expect(result).not.toContain('\x1b[')
+  })
 })
 
 describe('readCliLogTail', () => {

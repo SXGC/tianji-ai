@@ -11,6 +11,16 @@ type CliLogLevel = CliLogEntry['level']
 const LOG_FOLLOW_POLL_INTERVAL_MS = 500
 const LOG_FOLLOW_CHUNK_SIZE = 64 * 1024
 
+const ANSI_RESET = '\x1b[0m'
+const LOG_LEVEL_ANSI_COLORS: Record<CliLogLevel, string> = {
+  trace: '\x1b[97m',
+  debug: '\x1b[90m',
+  info: '\x1b[32m',
+  warn: '\x1b[33m',
+  error: '\x1b[31m',
+  fatal: '\x1b[35m',
+}
+
 export interface FollowCliLogOptions {
   readonly follow?: boolean
   readonly lines?: number
@@ -92,10 +102,11 @@ export async function followCliLog(
  * Formats a structured CLI log entry into a human-readable line.
  *
  * @param entry - The parsed CLI log entry
+ * @param colorize - When true, applies ANSI color to the level label
  * @returns A single formatted text line
  */
-export function formatCliLogEntry(entry: CliLogEntry): string {
-  const level = entry.level.toUpperCase().padEnd(5, ' ')
+export function formatCliLogEntry(entry: CliLogEntry, colorize = false): string {
+  const level = colorize ? colorizeLevel(entry.level) : entry.level.toUpperCase().padEnd(5, ' ')
   const scope = formatCliLogScope(entry.scope).padEnd(24, ' ')
 
   if (entry.data === undefined) {
@@ -103,6 +114,16 @@ export function formatCliLogEntry(entry: CliLogEntry): string {
   }
 
   return `${entry.timestamp} ${level} ${scope} ${entry.message} ${JSON.stringify(entry.data)}`
+}
+
+/**
+ * Returns whether stdout is attached to an interactive terminal.
+ *
+ * Used to decide whether ANSI color codes should be emitted; when the output
+ * is piped or redirected the escape sequences would corrupt the text.
+ */
+export function supportsColor(): boolean {
+  return process.stdout.isTTY === true
 }
 
 /**
@@ -313,7 +334,7 @@ export async function replayLatestCliLogLines(
       continue
     }
 
-    process.stdout.write(`${formatCliLogEntry(parsedEntry)}\n`)
+    process.stdout.write(`${formatCliLogEntry(parsedEntry, supportsColor())}\n`)
   }
 
   return fileSize
@@ -323,6 +344,7 @@ function renderCliLogChunk(remainder: string, chunk: string, i18n: I18n): string
   const combinedChunk = `${remainder}${chunk}`
   const lines = combinedChunk.split('\n')
   const nextRemainder = lines.pop() ?? ''
+  const useColor = supportsColor()
 
   for (const line of lines) {
     const parsedEntry = parseCliLogLine(line)
@@ -333,7 +355,7 @@ function renderCliLogChunk(remainder: string, chunk: string, i18n: I18n): string
       continue
     }
 
-    process.stdout.write(`${formatCliLogEntry(parsedEntry)}\n`)
+    process.stdout.write(`${formatCliLogEntry(parsedEntry, useColor)}\n`)
   }
 
   return nextRemainder
@@ -375,4 +397,13 @@ function isCliLogScope(value: unknown): value is CliLogScope {
 
 function formatCliLogScope(scope: CliLogScope): string {
   return scope.join(' > ')
+}
+
+function colorizeLevel(level: string): string {
+  const code = LOG_LEVEL_ANSI_COLORS[level as CliLogLevel]
+  if (!code) {
+    return level.toUpperCase().padEnd(5, ' ')
+  }
+
+  return `${code}${level.toUpperCase().padEnd(5, ' ')}${ANSI_RESET}`
 }

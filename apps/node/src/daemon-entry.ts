@@ -1,4 +1,6 @@
-import { pathToFileURL } from 'node:url'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import {
   type ControlPlaneStatusSnapshot,
@@ -29,6 +31,14 @@ function formatErrorMessage(error: unknown): string {
 }
 
 export async function runDaemonEntry(): Promise<void> {
+  // 开发环境中 daemon 作为 detached 进程，PATH 不含 pnpm 注入的本地 .bin 目录。
+  // 若本地 node_modules/.bin/tianji-agent 存在（workspace 链接），则追加到 PATH。
+  // 生产环境全局安装时该路径不存在，条件不成立，不做修改。
+  const localBin = join(dirname(fileURLToPath(import.meta.url)), '..', 'node_modules', '.bin')
+  if (existsSync(join(localBin, 'tianji-agent'))) {
+    process.env.PATH = `${localBin}:${process.env.PATH ?? ''}`
+  }
+
   const context = await loadUserConfigContext()
   const i18n = createI18n(detectLocale(context.config))
   const logger = getCliLogger(context.paths)
