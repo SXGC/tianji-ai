@@ -1,9 +1,18 @@
-import { type Command, type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
+import { type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { LoadedAgentContext } from '@tianji/agent'
 import { InProcessAgentRunner } from '../acp/in-process-runner.js'
 import { TaskExecutor } from '../task/task-executor.js'
+import {
+  SESSION_ID,
+  createCommand,
+  createFakeContext,
+  createNdjsonWriterStub,
+  messageDeltaEvent,
+  runCompletedEvent,
+  toolCompletedEvent,
+  toolStartedEvent,
+} from './helpers/native-agent-test-utils.js'
 
 /**
  * Mock @tianji/agent module at the top level.
@@ -14,105 +23,6 @@ vi.mock('@tianji/agent', () => ({
   loadAgentContextForName: vi.fn(),
   createAgentSession: vi.fn(),
 }))
-
-// --- helpers ---
-
-function createFakeContext(): LoadedAgentContext {
-  return {
-    paths: {
-      configDir: '/tmp/config',
-      agentsDir: '/tmp/agents',
-      logsDir: '/tmp/logs',
-      configFilePath: '/tmp/config/config.json',
-      cliLogFilePath: '/tmp/logs/cli.log',
-      daemonPortPath: '/tmp/config/daemon.port',
-      daemonPidPath: '/tmp/config/daemon.pid',
-    },
-    config: {},
-    agent: {
-      agentName: 'test-agent',
-      modelRef: 'test:model',
-      provider: 'test',
-      modelName: 'model',
-      providerConfig: undefined,
-      soulPath: '/tmp/agents/test-agent/soul.md',
-      soul: '',
-    },
-    resolvedEnvVars: [],
-    snapshotStore: {} as never,
-  }
-}
-
-function createCommand(taskId: ReturnType<typeof createTaskId>, goal: string): Command {
-  return {
-    commandId: `cmd-${taskId}` as never,
-    nodeId: createNodeId('node-test'),
-    type: 'task.run',
-    state: 'pending',
-    createdAt: Date.now(),
-    payload: { taskId, agentId: 'test-agent', goal },
-  }
-}
-
-function createNdjsonWriterStub() {
-  const lines: string[] = []
-  return {
-    lines,
-    writer: {
-      write: async (json: string) => {
-        lines.push(json)
-      },
-      writeKeepalive: async () => undefined,
-      close: async () => undefined,
-      abort: () => undefined,
-    },
-  }
-}
-
-const RUN_ID = 'run-001' as never
-const SESSION_ID = 'session-001' as never
-
-function messageDeltaEvent(): RuntimeEvent {
-  return {
-    type: 'message.delta',
-    runId: RUN_ID,
-    messageId: 'msg-001',
-    sequence: 1,
-    channel: 'text',
-    payload: { content: 'hello' },
-    timestamp: Date.now(),
-  }
-}
-
-function runCompletedEvent(): RuntimeEvent {
-  return {
-    type: 'run.completed',
-    runId: RUN_ID,
-    sessionId: SESSION_ID,
-    triggerType: 'new',
-    timestamp: Date.now(),
-  }
-}
-
-function toolStartedEvent(): RuntimeEvent {
-  return {
-    type: 'tool.started',
-    runId: RUN_ID,
-    toolCallId: 'tc-001',
-    invocation: { toolCallId: 'tc-001', toolName: 'readFile', args: { path: '/tmp/x' } },
-    timestamp: Date.now(),
-  }
-}
-
-function toolCompletedEvent(): RuntimeEvent {
-  return {
-    type: 'tool.completed',
-    runId: RUN_ID,
-    toolCallId: 'tc-001',
-    result: { toolCallId: 'tc-001', result: 'file contents' },
-    timestamp: Date.now(),
-  }
-}
 
 // --- setup ---
 
