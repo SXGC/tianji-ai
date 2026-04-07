@@ -2,7 +2,7 @@
 
 > 状态：当前
 > 日期：2026-04-03
-> 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)、[`./CONFIG_DESIGN.md`](./CONFIG_DESIGN.md)
+> 相关文档：[`01 - ARCHITECTURE.md`](./01%20-%20ARCHITECTURE.md)、[`02 - CONFIG_DESIGN.md`](./02%20-%20CONFIG_DESIGN.md)
 > 范围：`@tianji/runtime` 包的内部设计——会话生命周期、执行引擎、快照持久化、工具系统、事件流与 LLM 网关。
 
 ---
@@ -388,7 +388,7 @@ function collectLlmUsage(
 
 ## 9. 中心化配置加载
 
-配置加载是 runtime 的职责之一，但其设计细节见 [`CONFIG_DESIGN.md`](./CONFIG_DESIGN.md)。这里仅列出 runtime 侧的关键接口。
+配置加载是 runtime 的职责之一，但其设计细节见 [`02 - CONFIG_DESIGN.md`](./02%20-%20CONFIG_DESIGN.md)。这里仅列出 runtime 侧的关键接口。
 
 ### 9.1 loadResolvedConfig()
 

@@ -4,6 +4,8 @@ import { sleep } from '@tianji/shared'
 
 import type { I18n } from './i18n/index.js'
 
+const LOG_DISPLAY_TIMEZONE = 'Asia/Shanghai'
+
 type CliLogEntry = ObserverLogEntry
 type CliLogScope = ObserverLogScope
 type CliLogLevel = CliLogEntry['level']
@@ -44,7 +46,7 @@ export async function followCliLog(
   let offset = 0
   let remainder = ''
   let hasPrintedWaitingMessage = false
-  let lastReadFingerprint = ''
+  let lastIno = 0
   let hasReplayedInitialLines = false
 
   while (!options.signal?.aborted) {
@@ -72,26 +74,26 @@ export async function followCliLog(
         i18n
       )
       offset = initialReadOffset
+      lastIno = nextStat.ino
       hasReplayedInitialLines = true
       await sleep(LOG_FOLLOW_POLL_INTERVAL_MS)
       continue
     }
 
-    const fileWasReplaced =
-      offset > 0 && (await hasCliLogPrefixChanged(logFilePath, offset, lastReadFingerprint))
+    const fileWasReplaced = lastIno !== 0 && nextStat.ino !== lastIno
 
     if (nextStat.size < offset || fileWasReplaced) {
       process.stdout.write(`${i18n.t('log.truncated')}\n`)
       offset = 0
       remainder = ''
-      lastReadFingerprint = ''
     }
+
+    lastIno = nextStat.ino
 
     if (nextStat.size > offset) {
       const chunkResult = await readCliLogChunk(logFilePath, offset, nextStat.size)
       offset = chunkResult.nextOffset
       remainder = renderCliLogChunk(remainder, chunkResult.chunk, i18n)
-      lastReadFingerprint = createCliLogFingerprint(chunkResult.chunk)
     }
 
     await sleep(LOG_FOLLOW_POLL_INTERVAL_MS)
@@ -105,15 +107,39 @@ export async function followCliLog(
  * @param colorize - When true, applies ANSI color to the level label
  * @returns A single formatted text line
  */
+/**
+ * 将 ISO 时间字符串转换为上海时区格式化输出。
+ *
+ * 使用 `Intl.DateTimeFormat` 进行时区转换，确保在不同 Node.js 版本
+ * 和操作系统上都能正确工作，无需额外依赖。
+ */
+function formatTimestampToShanghai(isoTimestamp: string): string {
+  const date = new Date(isoTimestamp)
+  const formatter = new Intl.DateTimeFormat('zh-CN', {
+    timeZone: LOG_DISPLAY_TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+  const parts = formatter.formatToParts(date)
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? ''
+  return `${get('year')}-${get('month')}-${get('day')} ${get('hour')}:${get('minute')}:${get('second')}`
+}
+
 export function formatCliLogEntry(entry: CliLogEntry, colorize = false): string {
   const level = colorize ? colorizeLevel(entry.level) : entry.level.toUpperCase().padEnd(5, ' ')
   const scope = formatCliLogScope(entry.scope).padEnd(24, ' ')
+  const ts = formatTimestampToShanghai(entry.timestamp)
 
   if (entry.data === undefined) {
-    return `${entry.timestamp} ${level} ${scope} ${entry.message}`
+    return `${ts} ${level} ${scope} ${entry.message}`
   }
 
-  return `${entry.timestamp} ${level} ${scope} ${entry.message} ${JSON.stringify(entry.data)}`
+  return `${ts} ${level} ${scope} ${entry.message} ${JSON.stringify(entry.data)}`
 }
 
 /**
@@ -175,7 +201,9 @@ export function parseCliLogLine(line: string): CliLogEntry | null {
   }
 }
 
-async function readCliLogStat(logFilePath: string): Promise<{ readonly size: number } | null> {
+async function readCliLogStat(
+  logFilePath: string
+): Promise<{ readonly size: number; readonly ino: number } | null> {
   try {
     return await stat(logFilePath)
   } catch (error) {
@@ -361,30 +389,15 @@ function renderCliLogChunk(remainder: string, chunk: string, i18n: I18n): string
   return nextRemainder
 }
 
-async function hasCliLogPrefixChanged(
-  logFilePath: string,
-  offset: number,
-  expectedFingerprint: string
-): Promise<boolean> {
-  if (expectedFingerprint.length === 0) {
-    return false
-  }
-
-  const prefixStart = Math.max(0, offset - LOG_FOLLOW_CHUNK_SIZE)
-  const prefixResult = await readCliLogChunk(logFilePath, prefixStart, offset)
-  return createCliLogFingerprint(prefixResult.chunk) !== expectedFingerprint
-}
-
-function createCliLogFingerprint(chunk: string): string {
-  if (chunk.length <= LOG_FOLLOW_CHUNK_SIZE) {
-    return chunk
-  }
-
-  return chunk.slice(-LOG_FOLLOW_CHUNK_SIZE)
-}
-
 function isCliLogLevel(value: unknown): value is CliLogLevel {
-  return value === 'debug' || value === 'info' || value === 'warn' || value === 'error'
+  return (
+    value === 'trace' ||
+    value === 'debug' ||
+    value === 'info' ||
+    value === 'warn' ||
+    value === 'error' ||
+    value === 'fatal'
+  )
 }
 
 function isCliLogScope(value: unknown): value is CliLogScope {

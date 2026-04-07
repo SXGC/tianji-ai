@@ -2,7 +2,7 @@
 
 > 状态：当前
 > 日期：2026-04-02
-> 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)、[`./CONFIG_DESIGN.md`](./CONFIG_DESIGN.md)
+> 相关文档：[`01 - ARCHITECTURE.md`](./01%20-%20ARCHITECTURE.md)、[`02 - CONFIG_DESIGN.md`](./02%20-%20CONFIG_DESIGN.md)
 
 ---
 
@@ -209,7 +209,7 @@ controlplane 注册信息也持久化在 `~/.config/tianji-ai/tianji.json` 的 `
 内置默认配置 < 用户配置 < 工作区配置
 ```
 
-详见 [`CONFIG_DESIGN.md`](./CONFIG_DESIGN.md)。
+详见 [`02 - CONFIG_DESIGN.md`](./02%20-%20CONFIG_DESIGN.md)。
 
 ### 4.3 用户配置示例
 

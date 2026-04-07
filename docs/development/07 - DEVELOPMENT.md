@@ -1,8 +1,8 @@
 # Tianji AI 开发者指南
 
 > 状态：当前
-> 日期：2026-04-02
-> 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)
+> 日期：2026-04-07
+> 相关文档：[`01 - ARCHITECTURE.md`](./01%20-%20ARCHITECTURE.md)
 
 ---
 
@@ -85,6 +85,8 @@ cli (→ shared, agent, observer)
 | `pnpm check` | 完整检查 = `biome check` + `typecheck` |
 | `pnpm build` | Turbo 编排构建所有包 |
 | `pnpm test` | Turbo 编排运行所有测试 |
+| `pnpm check:boundaries` | dependency-cruiser 模块边界检查 |
+| `pnpm check:deps` | knip 未使用依赖/导出检测 |
 | `pnpm tianji <cmd>` | 构建后直接运行 node CLI |
 
 ### 4.2 单包命令
@@ -157,7 +159,39 @@ pnpm clean              # 清理 dist/
 
 **忽略**：`node_modules`、`dist`、`.turbo`、`coverage`、`*.min.js`、`*.js`、`*.d.ts`
 
-### 6.2 代码规范
+### 6.2 模块边界检查
+
+通过 [dependency-cruiser](https://github.com/sverweij/dependency-cruiser) 强制执行架构约束，配置文件为根目录 `.dependency-cruiser.cjs`。
+
+```bash
+pnpm check:boundaries
+```
+
+**当前规则**：
+
+| 规则 | 说明 |
+|------|------|
+| `shared-no-internal-deps` | shared 禁止依赖其他内部包 |
+| `runtime-only-depends-on-shared` | runtime 禁止依赖 agent、observer、apps |
+| `agent-no-ai-frameworks` | agent 禁止运行时依赖 AI 框架（type-only 允许） |
+| `agent-no-apps` | agent 禁止依赖 apps 层 |
+| `node-no-runtime` | node 禁止直接依赖 runtime |
+| `node-no-ai-frameworks` | node 禁止运行时依赖 AI 框架（type-only 允许） |
+| `no-circular` | 禁止循环依赖 |
+
+规则与 [01 - ARCHITECTURE.md](./01%20-%20ARCHITECTURE.md) 第 4 节的依赖约束表一一对应。
+
+### 6.3 未使用依赖检测
+
+通过 [knip](https://knip.dev/) 检测未使用的依赖、导出和文件。
+
+```bash
+pnpm check:deps
+```
+
+检测范围包括：未使用的 `dependencies` / `devDependencies`、未列入 `package.json` 但被引用的依赖、未使用的导出函数和类型、无入口引用的孤立文件。
+
+### 6.4 代码规范
 
 - **禁止 `any`**：除非绝对必要
 - **顶部导入**：禁止动态 `import()` 和类型层面的动态导入

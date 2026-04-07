@@ -225,13 +225,13 @@ pnpm tianji stop
 
 ### 开发文档
 
-- `docs/development/ARCHITECTURE.md`：架构设计文档，描述 4 包分层、各包职责、依赖约束与迁移路径。
-- `docs/development/CONFIG_DESIGN.md`：配置系统设计文档，描述多层 JSON 配置、优先级与 `${env:VAR_NAME}` 解析规则。
-- `docs/development/RUNTIME_DESIGN.md`：运行时设计文档，描述会话生命周期、执行引擎、快照持久化、工具系统与 LLM 网关。
-- `docs/development/OBSERVER_DESIGN.md`：Observer 设计文档，描述结构化日志协议、sink 机制、数据脱敏与 tracing。
-- `docs/development/AGENT_DESIGN.md`：Agent 设计文档，描述上下文装配、provider 凭据注入、daemon 协议与 SOUL.md 加载。
-- `docs/development/CLI_GUIDE.md`：CLI 用户指南，描述所有命令用法、配置路径与 daemon 生命周期。
-- `docs/development/DEVELOPMENT.md`：开发者指南，描述环境搭建、构建测试流程、代码规范与 git hooks。
+- `docs/development/01 - ARCHITECTURE.md`：架构设计文档，描述 4 包分层、各包职责、依赖约束与迁移路径。
+- `docs/development/02 - CONFIG_DESIGN.md`：配置系统设计文档，描述多层 JSON 配置、优先级与 `${env:VAR_NAME}` 解析规则。
+- `docs/development/03 - RUNTIME_DESIGN.md`：运行时设计文档，描述会话生命周期、执行引擎、快照持久化、工具系统与 LLM 网关。
+- `docs/development/04 - OBSERVER_DESIGN.md`：Observer 设计文档，描述结构化日志协议、sink 机制、数据脱敏与 tracing。
+- `docs/development/05 - AGENT_DESIGN.md`：Agent 设计文档，描述上下文装配、provider 凭据注入、daemon 协议与 SOUL.md 加载。
+- `docs/development/06 - CLI_GUIDE.md`：CLI 用户指南，描述所有命令用法、配置路径与 daemon 生命周期。
+- `docs/development/07 - DEVELOPMENT.md`：开发者指南，描述环境搭建、构建测试流程、代码规范与 git hooks。
 
 ## 当前状态
 

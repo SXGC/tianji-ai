@@ -2,7 +2,7 @@
 
 > 状态：Draft v1  
 > 范围：`tianji-ai` 的详细配置机制  
-> 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)  
+> 相关文档：[`01 - ARCHITECTURE.md`](./01%20-%20ARCHITECTURE.md)  
 > 更新：2026-04-02，补充 CLI locale 配置。设计依据：`../superpowers/plans/2026-04-02-cli-i18n-implementation-plan.md`
 
 ---

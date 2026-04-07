@@ -30,8 +30,8 @@
     "@tianji/shared": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
-    "esbuild": "^0.28.0"
+    "@langchain/core": "^1.1.33",
+    "@types/node": "^22.0.0"
   },
   "keywords": ["tianji", "agent"],
   "license": "MIT"

@@ -1,7 +1,7 @@
 import { createGoogleGenerativeAI, google } from '@ai-sdk/google'
 
-import type { LlmGateway, LlmProviderConfig } from './index.js'
 import { SdkLlmGateway } from './sdk-gateway.js'
+import type { LlmGateway, LlmProviderConfig } from './types.js'
 
 export function createGoogleGateway(config: LlmProviderConfig): LlmGateway {
   return new SdkLlmGateway(config, 'google', (providerConfig) => {

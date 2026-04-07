@@ -1,6 +1,6 @@
 import type { LanguageModelUsage } from 'ai'
 
-import type { LlmCost, LlmPricing, LlmUsage } from './index.js'
+import type { LlmCost, LlmPricing, LlmUsage } from './types.js'
 
 function roundUsd(value: number): number {
   return Number(value.toFixed(8))

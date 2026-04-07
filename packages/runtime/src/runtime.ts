@@ -13,7 +13,6 @@
  */
 import { randomUUID } from 'node:crypto'
 
-import type { BaseLanguageModel } from '@langchain/core/language_models/base'
 import { ChatOpenAI } from '@langchain/openai'
 import type { ObserverLogger } from '@tianji/observer'
 import {
@@ -31,7 +30,6 @@ import {
   createRunId,
   createSessionId,
 } from '@tianji/shared'
-import type { InterruptOnConfig } from 'langchain'
 
 import { executeDeepagentsRun } from './engines/deepagents-engine.js'
 import { ReplayableEventStream } from './event-stream.js'
@@ -39,6 +37,7 @@ import type { LlmGenerationConfig } from './llm/index.js'
 import type { SnapshotStore } from './snapshot-store.js'
 import { InMemorySnapshotStore } from './snapshot-store.js'
 import { type RuntimeToolDefinition, type ToolCatalog, ToolRegistry } from './tool-catalog.js'
+import type { RuntimeProviderConfig, SessionRuntimeDeepagentsConfig } from './types.js'
 
 export interface CreateSessionOptions {
   readonly sessionId?: SessionId
@@ -76,25 +75,7 @@ export interface RunRuntimeMetadata extends SessionRuntimeMetadata {
   readonly checkpointId?: string
 }
 
-export interface SessionRuntimeDeepagentsConfig {
-  readonly model: string | BaseLanguageModel
-  readonly providerConfig?: RuntimeProviderConfig
-  readonly middleware?: readonly unknown[]
-  readonly backend?: unknown
-  readonly checkpointer?: unknown
-  readonly store?: unknown
-  readonly subagents?: readonly { readonly name: string; [key: string]: unknown }[]
-  readonly skills?: readonly string[]
-  readonly interruptOn?: Record<string, boolean | InterruptOnConfig>
-}
-
-export interface RuntimeProviderConfig {
-  readonly provider: string
-  readonly model: string
-  readonly apiKey?: string
-  readonly baseUrl?: string
-  readonly headers?: Record<string, string>
-}
+export type { RuntimeProviderConfig, SessionRuntimeDeepagentsConfig } from './types.js'
 
 export interface DeepagentsInterruptRecord {
   readonly id?: string

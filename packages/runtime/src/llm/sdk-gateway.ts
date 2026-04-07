@@ -6,6 +6,8 @@ import {
 } from '@tianji/shared'
 import { type LanguageModelUsage, type LanguageModelV1, generateText, streamText, tool } from 'ai'
 
+import { appMessagesToSdkMessages } from './message-conversion.js'
+import { convertToolSpecs } from './tool-schema-bridge.js'
 import type {
   LlmGateway,
   LlmProvider,
@@ -14,9 +16,7 @@ import type {
   LlmResponse,
   LlmStream,
   LlmStreamCallback,
-} from './index.js'
-import { appMessagesToSdkMessages } from './message-conversion.js'
-import { convertToolSpecs } from './tool-schema-bridge.js'
+} from './types.js'
 import { collectLlmUsage } from './usage.js'
 
 type SdkResultLike = {

@@ -1,7 +1,7 @@
 import { createAnthropicGateway } from './anthropic-gateway.js'
 import { createGoogleGateway } from './google-gateway.js'
-import type { LlmGateway, LlmProviderConfig } from './index.js'
 import { createOpenAIGateway } from './openai-gateway.js'
+import type { LlmGateway, LlmProviderConfig } from './types.js'
 
 export function createLlmGateway(config: LlmProviderConfig): LlmGateway {
   switch (config.provider) {

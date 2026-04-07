@@ -2,7 +2,7 @@
 
 > 状态：当前
 > 日期：2026-04-02
-> 相关文档：[`./ARCHITECTURE.md`](./ARCHITECTURE.md)、[`./RUNTIME_DESIGN.md`](./RUNTIME_DESIGN.md)
+> 相关文档：[`01 - ARCHITECTURE.md`](./01%20-%20ARCHITECTURE.md)、[`03 - RUNTIME_DESIGN.md`](./03%20-%20RUNTIME_DESIGN.md)
 > 范围：`@tianji/observer` 包的设计——结构化日志协议、sink 机制、数据脱敏、tracing 初始化。
 
 ---

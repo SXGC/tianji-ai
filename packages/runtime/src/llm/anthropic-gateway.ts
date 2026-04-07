@@ -1,7 +1,7 @@
 import { anthropic, createAnthropic } from '@ai-sdk/anthropic'
 
-import type { LlmGateway, LlmProviderConfig } from './index.js'
 import { SdkLlmGateway } from './sdk-gateway.js'
+import type { LlmGateway, LlmProviderConfig } from './types.js'
 
 export function createAnthropicGateway(config: LlmProviderConfig): LlmGateway {
   return new SdkLlmGateway(config, 'anthropic', (providerConfig) => {

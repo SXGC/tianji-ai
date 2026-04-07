@@ -8,7 +8,22 @@ import type { IAgentRunner } from '../acp/index.js'
 import type { NdjsonWriter } from '../controlplane/index.js'
 import type { RuntimeLogger } from '../logger.js'
 
-import type { Command, NodeExecutionState, NodeId, RuntimeEvent } from '@tianji/shared'
+import type {
+  Command,
+  MessageCompletedEvent,
+  NodeExecutionState,
+  NodeId,
+  RuntimeEvent,
+  ToolCompletedEvent,
+  ToolFailedEvent,
+} from '@tianji/shared'
+
+interface TurnSummary {
+  runId: string
+  events: string[]
+  messages: string[]
+  toolCalls: string[]
+}
 
 export interface TaskExecutorConfig {
   readonly nodeId: NodeId
@@ -84,12 +99,31 @@ export class TaskExecutor {
       await this.#config.logger?.logDebug(this.#scope, 'Connected task runner', {
         taskId,
       })
+
+      let currentTurn: TurnSummary | null = null
+
       for await (const event of runner.query(command.payload.goal)) {
-        await this.#config.logger?.logDebug(this.#scope, 'Forwarding task runtime event', {
-          taskId,
-          sequence,
-          eventType: event.type,
-        })
+        if (event != null) {
+          currentTurn = collectTurnEvent(currentTurn, event)
+        }
+
+        const isRunEnd =
+          event?.type === 'run.completed' ||
+          event?.type === 'run.failed' ||
+          event?.type === 'run.cancelled'
+
+        if (isRunEnd && currentTurn !== null) {
+          await this.#config.logger?.logInfo(this.#scope, 'Run turn summary', {
+            taskId,
+            runId: currentTurn.runId,
+            endReason: event.type,
+            events: currentTurn.events,
+            messages: currentTurn.messages,
+            toolCalls: currentTurn.toolCalls,
+          })
+          currentTurn = null
+        }
+
         await eventStream.write(
           JSON.stringify({
             kind: 'agent',
@@ -153,6 +187,46 @@ export class TaskExecutor {
       })
     }
   }
+}
+
+function extractTextSummary(event: MessageCompletedEvent): string {
+  const parts = event.message.content
+    .filter((p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text')
+    .map((p) => p.text)
+  return parts.length > 0 ? parts.join('\n') : '(no text content)'
+}
+
+function extractToolCallSummary(event: ToolCompletedEvent | ToolFailedEvent): string {
+  const status = event.type === 'tool.completed' ? 'completed' : 'failed'
+  const name = event.type === 'tool.failed' ? event.invocation.toolName : event.toolCallId
+  return `${name} [${status}]`
+}
+
+function collectTurnEvent(turn: TurnSummary | null, event: RuntimeEvent): TurnSummary | null {
+  if (
+    event.type === 'run.started' ||
+    event.type === 'run.completed' ||
+    event.type === 'run.failed' ||
+    event.type === 'run.cancelled'
+  ) {
+    const current = turn ?? { runId: event.runId, events: [], messages: [], toolCalls: [] }
+    current.events.push(event.type)
+    return current
+  }
+
+  if (turn === null) {
+    return null
+  }
+
+  turn.events.push(event.type)
+
+  if (event.type === 'message.completed') {
+    turn.messages.push(extractTextSummary(event))
+  } else if (event.type === 'tool.completed' || event.type === 'tool.failed') {
+    turn.toolCalls.push(extractToolCallSummary(event))
+  }
+
+  return turn
 }
 
 function serializeRuntimeEvent(event: RuntimeEvent): unknown {

@@ -93,7 +93,7 @@ describe('formatCliLogEntry', () => {
       scope: ['cli', 'run'],
       message: 'hello',
     })
-    expect(result).toMatch(/^2026-01-01T00:00:00\.000Z INFO {2}cli > run {15,}hello$/)
+    expect(result).toMatch(/^2026-01-01 08:00:00 INFO {2}cli > run {15,}hello$/)
   })
 
   it('formats entry with data', () => {

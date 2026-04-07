@@ -144,4 +144,4 @@ apps/controlplane/
 
 - 仓库级使用说明：[`../../docs/usage/controlplane.md`](../../docs/usage/controlplane.md)
 - node 使用说明：[`../../docs/usage/node.md`](../../docs/usage/node.md)
-- 架构设计：[`../../docs/development/ARCHITECTURE.md`](../../docs/development/ARCHITECTURE.md)
+- 架构设计：[`../../docs/development/01 - ARCHITECTURE.md`](../../docs/development/01%20-%20ARCHITECTURE.md)

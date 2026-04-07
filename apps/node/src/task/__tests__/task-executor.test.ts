@@ -142,9 +142,7 @@ describe('TaskExecutorConfig', () => {
       )
     ).toBe(true)
     expect(
-      written.some(
-        (entry) => entry.level === 'debug' && entry.message === 'Forwarding task runtime event'
-      )
+      written.some((entry) => entry.level === 'info' && entry.message === 'Run turn summary')
     ).toBe(true)
   })
 

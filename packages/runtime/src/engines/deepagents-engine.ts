@@ -31,9 +31,9 @@ import {
 import { createDeepAgent } from 'deepagents'
 
 import type { LlmGenerationConfig } from '../llm/index.js'
-import type { SessionRuntimeDeepagentsConfig } from '../runtime.js'
 import type { ToolCatalog } from '../tool-catalog.js'
 import { ensureToolAllowed } from '../tool-catalog.js'
+import type { SessionRuntimeDeepagentsConfig } from '../types.js'
 
 interface DeepagentsPendingToolCall {
   readonly toolCallId: string

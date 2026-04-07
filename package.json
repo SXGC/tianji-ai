@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "tianji": "node apps/node/bin/tianji.mjs",
-    "check": "pnpm exec biome check --files-ignore-unknown=true --error-on-warnings . && pnpm typecheck",
+    "check": "pnpm exec biome check --files-ignore-unknown=true --error-on-warnings . && pnpm typecheck && pnpm check:boundaries && pnpm check:deps",
     "build": "turbo build",
     "test": "turbo test",
     "test:coverage": "turbo test:coverage",
@@ -15,12 +15,16 @@
     "typecheck": "pnpm -r --if-present --filter \"./packages/*\" typecheck && pnpm -r --if-present --filter \"./apps/*\" typecheck",
     "precommit:check": "pnpm exec biome check --staged --files-ignore-unknown=true --no-errors-on-unmatched --error-on-warnings && pnpm typecheck",
     "prepare": "husky",
+    "check:boundaries": "depcruise packages/ apps/ --config .dependency-cruiser.cjs",
+    "check:deps": "knip",
     "sonar": "sonar-scanner -Dsonar.token=$SONAR_TOKEN"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "@vitest/coverage-v8": "^3.2.4",
+    "dependency-cruiser": "^17.3.10",
     "husky": "^9.1.7",
+    "knip": "^6.3.0",
     "sonarqube-scanner": "^4.3.5",
     "turbo": "^2.8.16",
     "typescript": "^5.8.2",

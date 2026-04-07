@@ -21,13 +21,13 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.18.0",
-    "@langchain/openai": "^1.3.1",
     "@tianji/agent": "workspace:*",
     "@tianji/observer": "workspace:*",
     "@tianji/shared": "workspace:*"
   },
   "devDependencies": {
     "@langchain/core": "^1.1.33",
+    "@tianji/runtime": "workspace:*",
     "@types/node": "^22.0.0",
     "vitest": "^3.2.4"
   },
