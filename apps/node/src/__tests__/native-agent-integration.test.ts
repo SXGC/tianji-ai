@@ -1,0 +1,269 @@
+import { type Command, type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+
+import type { LoadedAgentContext } from '@tianji/agent'
+import { InProcessAgentRunner } from '../acp/in-process-runner.js'
+import { TaskExecutor } from '../task/task-executor.js'
+
+/**
+ * Mock @tianji/agent module at the top level.
+ * Provides controllable createAgentSession / loadAgentContextForName stubs
+ * so real InProcessAgentRunner and TaskExecutor code runs against fake sessions.
+ */
+vi.mock('@tianji/agent', () => ({
+  loadAgentContextForName: vi.fn(),
+  createAgentSession: vi.fn(),
+}))
+
+// --- helpers ---
+
+function createFakeContext(): LoadedAgentContext {
+  return {
+    paths: {
+      configDir: '/tmp/config',
+      agentsDir: '/tmp/agents',
+      logsDir: '/tmp/logs',
+      configFilePath: '/tmp/config/config.json',
+      cliLogFilePath: '/tmp/logs/cli.log',
+      daemonPortPath: '/tmp/config/daemon.port',
+      daemonPidPath: '/tmp/config/daemon.pid',
+    },
+    config: {},
+    agent: {
+      agentName: 'test-agent',
+      modelRef: 'test:model',
+      provider: 'test',
+      modelName: 'model',
+      providerConfig: undefined,
+      soulPath: '/tmp/agents/test-agent/soul.md',
+      soul: '',
+    },
+    resolvedEnvVars: [],
+    snapshotStore: {} as never,
+  }
+}
+
+function createCommand(taskId: ReturnType<typeof createTaskId>, goal: string): Command {
+  return {
+    commandId: `cmd-${taskId}` as never,
+    nodeId: createNodeId('node-test'),
+    type: 'task.run',
+    state: 'pending',
+    createdAt: Date.now(),
+    payload: { taskId, agentId: 'test-agent', goal },
+  }
+}
+
+function createNdjsonWriterStub() {
+  const lines: string[] = []
+  return {
+    lines,
+    writer: {
+      write: async (json: string) => {
+        lines.push(json)
+      },
+      writeKeepalive: async () => undefined,
+      close: async () => undefined,
+      abort: () => undefined,
+    },
+  }
+}
+
+const RUN_ID = 'run-001' as never
+const SESSION_ID = 'session-001' as never
+
+function messageDeltaEvent(): RuntimeEvent {
+  return {
+    type: 'message.delta',
+    runId: RUN_ID,
+    messageId: 'msg-001',
+    sequence: 1,
+    channel: 'text',
+    payload: { content: 'hello' },
+    timestamp: Date.now(),
+  }
+}
+
+function runCompletedEvent(): RuntimeEvent {
+  return {
+    type: 'run.completed',
+    runId: RUN_ID,
+    sessionId: SESSION_ID,
+    triggerType: 'new',
+    timestamp: Date.now(),
+  }
+}
+
+function toolStartedEvent(): RuntimeEvent {
+  return {
+    type: 'tool.started',
+    runId: RUN_ID,
+    toolCallId: 'tc-001',
+    invocation: { toolCallId: 'tc-001', toolName: 'readFile', args: { path: '/tmp/x' } },
+    timestamp: Date.now(),
+  }
+}
+
+function toolCompletedEvent(): RuntimeEvent {
+  return {
+    type: 'tool.completed',
+    runId: RUN_ID,
+    toolCallId: 'tc-001',
+    result: { toolCallId: 'tc-001', result: 'file contents' },
+    timestamp: Date.now(),
+  }
+}
+
+// --- setup ---
+
+// eslint-disable-next-line @typescript-eslint/consistent-type-imports
+let agentMock: typeof import('@tianji/agent')
+
+beforeEach(async () => {
+  vi.clearAllMocks()
+  agentMock = await import('@tianji/agent')
+})
+
+// --- tests ---
+
+describe('TaskExecutor + InProcessAgentRunner integration', () => {
+  it('produces correct NDJSON event sequence for a successful run', async () => {
+    const events: RuntimeEvent[] = [messageDeltaEvent(), runCompletedEvent()]
+    vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
+    vi.mocked(agentMock.createAgentSession).mockReturnValue({
+      sessionId: SESSION_ID,
+      query: async function* () {
+        for (const e of events) yield e
+      },
+      abort: vi.fn(),
+    })
+
+    const stateChanges: string[] = []
+    const { lines, writer } = createNdjsonWriterStub()
+    const baseContext = createFakeContext()
+
+    const executor = new TaskExecutor({
+      nodeId: createNodeId('node-test'),
+      onExecutionStateChange: (s) => stateChanges.push(s),
+      createRunner: async (cmd) => {
+        return new InProcessAgentRunner({
+          agentId: cmd.payload.agentId,
+          nativeAgentContext: baseContext,
+        })
+      },
+      openEventStream: async () => writer,
+    })
+
+    expect(executor.executionState).toBe('idle')
+
+    const taskId = createTaskId('task-001')
+    await executor.execute(createCommand(taskId, 'do something'))
+
+    // State transitions: busy -> idle
+    expect(stateChanges).toEqual(['busy', 'idle'])
+
+    // Executor returns to idle with null currentTaskId
+    expect(executor.executionState).toBe('idle')
+    expect(executor.currentTaskId).toBeNull()
+
+    // NDJSON output: task.started(1) -> message.delta(2) -> run.completed(3) -> task.completed(4)
+    expect(lines).toHaveLength(4)
+
+    const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+
+    expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
+    expect(parsed[1]).toMatchObject({ kind: 'agent', sequence: 2 })
+    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('message.delta')
+    expect(parsed[2]).toMatchObject({ kind: 'agent', sequence: 3 })
+    expect((parsed[2] as { event: RuntimeEvent }).event.type).toBe('run.completed')
+    expect(parsed[3]).toMatchObject({ kind: 'lifecycle', sequence: 4, type: 'task.completed' })
+
+    // Sequences are contiguous with no gaps
+    const sequences = parsed.map((p) => p.sequence as number)
+    for (let i = 1; i < sequences.length; i++) {
+      expect(sequences[i]).toBe(sequences[i - 1]! + 1)
+    }
+  })
+
+  it('serializes tool events in correct NDJSON format', async () => {
+    const events: RuntimeEvent[] = [toolStartedEvent(), toolCompletedEvent(), runCompletedEvent()]
+    vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
+    vi.mocked(agentMock.createAgentSession).mockReturnValue({
+      sessionId: SESSION_ID,
+      query: async function* () {
+        for (const e of events) yield e
+      },
+      abort: vi.fn(),
+    })
+
+    const { lines, writer } = createNdjsonWriterStub()
+    const baseContext = createFakeContext()
+
+    const executor = new TaskExecutor({
+      nodeId: createNodeId('node-test'),
+      onExecutionStateChange: () => undefined,
+      createRunner: async (cmd) => {
+        return new InProcessAgentRunner({
+          agentId: cmd.payload.agentId,
+          nativeAgentContext: baseContext,
+        })
+      },
+      openEventStream: async () => writer,
+    })
+
+    await executor.execute(createCommand(createTaskId('task-002'), 'use tools'))
+
+    // 5 total events: started + tool.started + tool.completed + run.completed + completed
+    expect(lines).toHaveLength(5)
+
+    const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+
+    expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
+    expect(parsed[1]).toMatchObject({ kind: 'agent', sequence: 2 })
+    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('tool.started')
+    expect(parsed[2]).toMatchObject({ kind: 'agent', sequence: 3 })
+    expect((parsed[2] as { event: RuntimeEvent }).event.type).toBe('tool.completed')
+    expect(parsed[3]).toMatchObject({ kind: 'agent', sequence: 4 })
+    expect((parsed[3] as { event: RuntimeEvent }).event.type).toBe('run.completed')
+    expect(parsed[4]).toMatchObject({ kind: 'lifecycle', sequence: 5, type: 'task.completed' })
+  })
+
+  it('deduplicates repeated run.completed events through the full pipeline', async () => {
+    const events: RuntimeEvent[] = [runCompletedEvent(), runCompletedEvent(), runCompletedEvent()]
+    vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
+    vi.mocked(agentMock.createAgentSession).mockReturnValue({
+      sessionId: SESSION_ID,
+      query: async function* () {
+        for (const e of events) yield e
+      },
+      abort: vi.fn(),
+    })
+
+    const { lines, writer } = createNdjsonWriterStub()
+    const baseContext = createFakeContext()
+
+    const executor = new TaskExecutor({
+      nodeId: createNodeId('node-test'),
+      onExecutionStateChange: () => undefined,
+      createRunner: async (cmd) => {
+        return new InProcessAgentRunner({
+          agentId: cmd.payload.agentId,
+          nativeAgentContext: baseContext,
+        })
+      },
+      openEventStream: async () => writer,
+    })
+
+    await executor.execute(createCommand(createTaskId('task-003'), 'duplicate test'))
+
+    // Only 3 events: task.started + 1x run.completed + task.completed (duplicates stripped)
+    expect(lines).toHaveLength(3)
+
+    const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
+
+    expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
+    expect(parsed[1]).toMatchObject({ kind: 'agent', sequence: 2 })
+    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('run.completed')
+    expect(parsed[2]).toMatchObject({ kind: 'lifecycle', sequence: 3, type: 'task.completed' })
+  })
+})
