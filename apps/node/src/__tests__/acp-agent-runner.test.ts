@@ -114,7 +114,7 @@ describe('AgentRunner', () => {
     })
   })
 
-  describe('chat', () => {
+  describe('query', () => {
     it('throws if not connected', async () => {
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
@@ -122,7 +122,7 @@ describe('AgentRunner', () => {
         command: 'tianji-agent',
       })
 
-      const iter = runner.chat('hello')
+      const iter = runner.query('hello')
       await expect(iter[Symbol.asyncIterator]().next()).rejects.toThrow(
         'Not connected. Call connect() first.'
       )
@@ -192,7 +192,7 @@ describe('AgentRunner', () => {
       await runner.connect()
 
       const events = []
-      for await (const event of runner.chat('hello')) {
+      for await (const event of runner.query('hello')) {
         events.push(event)
       }
 
@@ -220,7 +220,7 @@ describe('AgentRunner', () => {
       await runner.connect()
 
       const events = []
-      for await (const event of runner.chat('hello')) {
+      for await (const event of runner.query('hello')) {
         events.push(event)
       }
 
@@ -228,7 +228,7 @@ describe('AgentRunner', () => {
       expect(events[0]!.type).toBe('run.completed')
     })
 
-    it('unsubscribes from session updates after chat completes', async () => {
+    it('unsubscribes from session updates after query completes', async () => {
       const unsubscribe = vi.fn()
       mockOnSessionUpdate.mockReturnValue(unsubscribe)
       mockPrompt.mockResolvedValue({})
@@ -242,7 +242,7 @@ describe('AgentRunner', () => {
       await runner.connect()
 
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      for await (const _event of runner.chat('hello')) {
+      for await (const _event of runner.query('hello')) {
         // consume
       }
 
@@ -263,7 +263,7 @@ describe('AgentRunner', () => {
       await runner.connect()
 
       const events = []
-      for await (const event of runner.chat('hello')) {
+      for await (const event of runner.query('hello')) {
         events.push(event)
       }
 

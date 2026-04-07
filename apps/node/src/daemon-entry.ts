@@ -88,6 +88,7 @@ export async function runDaemonEntry(): Promise<void> {
     const runtime = createControlPlaneRuntime({
       ...controlPlaneConfig,
       agentConfigs: context.config.agents?.items ?? {},
+      nativeAgentContext: context,
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
       logger,
       onConnectionStateChange: (event) => {

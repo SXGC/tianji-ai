@@ -18,7 +18,7 @@ export function createTestRuntime(responses: string[]) {
 }
 
 /**
- * Drives `session.chat()` to completion and returns all emitted events.
+ * Drives `session.query()` to completion and returns all emitted events.
  */
 export async function collectChatEvents(
   session: AgentSession,
@@ -26,7 +26,7 @@ export async function collectChatEvents(
   options?: ChatOptions
 ): Promise<RuntimeEvent[]> {
   const events: RuntimeEvent[] = []
-  for await (const event of session.chat(prompt, options)) {
+  for await (const event of session.query(prompt, options)) {
     events.push(event)
   }
   return events

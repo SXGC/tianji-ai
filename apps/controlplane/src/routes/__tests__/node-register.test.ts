@@ -1,4 +1,3 @@
-import type { ObserverMemorySink } from '@tianji/observer'
 import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { Hono } from 'hono'
 import { afterEach, describe, expect, it } from 'vitest'

@@ -1,7 +1,7 @@
 import { type Command, createNodeId, createTaskId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
-import type { AgentRunner } from '../../acp/index.js'
+import type { IAgentRunner } from '../../acp/index.js'
 import { createCliLogger } from '../../logger.js'
 import type { TaskExecutorConfig } from '../task-executor.js'
 
@@ -20,12 +20,12 @@ function createCommand(taskId: ReturnType<typeof createTaskId>, goal: string): C
   }
 }
 
-function createRunnerStub(): AgentRunner {
+function createRunnerStub(): IAgentRunner {
   return {
     agentId: 'default',
     connect: async () => undefined,
     disconnect: async () => undefined,
-    async *chat() {
+    async *query() {
       yield {
         type: 'run.completed',
         runId: 'run-test' as never,
@@ -34,7 +34,7 @@ function createRunnerStub(): AgentRunner {
         timestamp: Date.now(),
       }
     },
-  } as unknown as AgentRunner
+  }
 }
 
 describe('TaskExecutorConfig', () => {
@@ -148,7 +148,7 @@ describe('TaskExecutorConfig', () => {
     ).toBe(true)
   })
 
-  it('writes task.failed lifecycle event when runner chat throws', async () => {
+  it('writes task.failed lifecycle event when runner query throws', async () => {
     const module = await import('../task-executor.js')
     const writes: string[] = []
     const failure = new Error('runner exploded')
@@ -156,16 +156,15 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor({
       nodeId: createNodeId('node-001'),
       onExecutionStateChange: () => undefined,
-      createRunner: async () =>
-        ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *chat() {
-            yield undefined as never
-            throw failure
-          },
-        }) as unknown as AgentRunner,
+      createRunner: async () => ({
+        agentId: 'default',
+        connect: async () => undefined,
+        disconnect: async () => undefined,
+        async *query() {
+          yield undefined as never
+          throw failure
+        },
+      }),
       openEventStream: async () => ({
         write: async (json: string) => {
           writes.push(json)

@@ -158,6 +158,16 @@ describe('runDaemonEntry', () => {
     const { runDaemonEntry } = await import('../daemon-entry.js')
     await runDaemonEntry()
 
+    const runtimeConfig = createControlPlaneRuntimeMock.mock.calls.at(0)?.at(0) as
+      | Record<string, unknown>
+      | undefined
+
+    expect(runtimeConfig).toEqual(
+      expect.objectContaining({
+        nativeAgentContext: expect.objectContaining({ paths, config: expect.any(Object) }),
+      })
+    )
+
     const daemonServerCall = vi.mocked((await import('@tianji/agent')).DaemonServer).mock
       .calls[0]?.[0]
     const getControlPlaneStatus = (daemonServerCall as { getControlPlaneStatus?: () => unknown })

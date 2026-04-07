@@ -1,3 +1,4 @@
+import type { LoadedAgentContext } from '@tianji/agent'
 import type {
   AgentInfo,
   Command,
@@ -7,7 +8,9 @@ import type {
   TianjiAgentConfig,
 } from '@tianji/shared'
 
-import { AgentRunner } from '../acp/index.js'
+import { resolveAgentType } from '@tianji/shared'
+
+import { AgentRunner, InProcessAgentRunner } from '../acp/index.js'
 import { ControlPlaneConnection, type ControlPlaneConnectionConfig } from '../controlplane/index.js'
 import type { RuntimeLogger } from '../logger.js'
 import { TaskExecutor, type TaskExecutorConfig } from '../task/task-executor.js'
@@ -21,6 +24,7 @@ export interface ControlPlaneRuntimeConfig {
   readonly version: string
   readonly agentConfigs: Readonly<Record<string, TianjiAgentConfig>>
   readonly agentList: readonly AgentInfo[]
+  readonly nativeAgentContext?: LoadedAgentContext
   readonly onConnectionStateChange?: (event: {
     status:
       | 'connecting'
@@ -142,11 +146,22 @@ export function createControlPlaneRuntime(
       logger: config.logger,
       createRunner: async (command) => {
         const agentConfig = config.agentConfigs[command.payload.agentId]
+        if (agentConfig === undefined) {
+          throw new Error(`Agent config not found for agentId "${command.payload.agentId}"`)
+        }
+
+        if (resolveAgentType(agentConfig) === 'native' && config.nativeAgentContext !== undefined) {
+          return new InProcessAgentRunner({
+            agentId: command.payload.agentId,
+            nativeAgentContext: config.nativeAgentContext,
+          })
+        }
+
         return new AgentRunner({
           agentId: command.payload.agentId,
-          command: agentConfig?.command,
-          args: agentConfig?.args,
-          env: agentConfig?.env,
+          command: agentConfig.command,
+          args: agentConfig.args,
+          env: agentConfig.env,
           logger: config.logger,
         })
       },

@@ -71,7 +71,7 @@ async function executeRunTurn(
   let currentRunId: RunId | undefined
   let currentSessionId: string | undefined
 
-  for await (const event of runner.chat(prompt)) {
+  for await (const event of runner.query(prompt)) {
     currentRunId = event.runId
     if ('sessionId' in event && event.sessionId !== undefined) {
       currentSessionId = String(event.sessionId)

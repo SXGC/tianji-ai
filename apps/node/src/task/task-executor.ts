@@ -4,7 +4,7 @@
  * @module task/task-executor
  */
 
-import type { AgentRunner } from '../acp/index.js'
+import type { IAgentRunner } from '../acp/index.js'
 import type { NdjsonWriter } from '../controlplane/index.js'
 import type { RuntimeLogger } from '../logger.js'
 
@@ -13,7 +13,7 @@ import type { Command, NodeExecutionState, NodeId, RuntimeEvent } from '@tianji/
 export interface TaskExecutorConfig {
   readonly nodeId: NodeId
   readonly onExecutionStateChange: (state: NodeExecutionState) => void
-  readonly createRunner: (command: Command) => Promise<AgentRunner>
+  readonly createRunner: (command: Command) => Promise<IAgentRunner>
   readonly openEventStream: (taskId: string) => Promise<NdjsonWriter>
   readonly logger?: RuntimeLogger
 }
@@ -84,7 +84,7 @@ export class TaskExecutor {
       await this.#config.logger?.logDebug(this.#scope, 'Connected task runner', {
         taskId,
       })
-      for await (const event of runner.chat(command.payload.goal)) {
+      for await (const event of runner.query(command.payload.goal)) {
         await this.#config.logger?.logDebug(this.#scope, 'Forwarding task runtime event', {
           taskId,
           sequence,

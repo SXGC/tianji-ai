@@ -127,28 +127,49 @@ export async function loadAgentContext(): Promise<LoadedAgentContext> {
   const paths = await ensureDefaultUserConfig()
   const resolvedConfig = await loadResolvedConfig()
   const { agentName, agent } = getDefaultAgentDefinition(resolvedConfig.config)
-  if (agent.model === undefined) {
-    throw new Error(`Agent "${agentName}" must have a "model" field for native agent execution`)
-  }
-  const { provider, modelName } = parseAgentModelRef(agent.model)
-  const soulPath = getAgentSoulPath(paths.configDir, agentName)
-  const soul = await loadAgentSoul(soulPath)
-
-  return {
+  return createLoadedAgentContext({
     paths,
     config: resolvedConfig.config,
-    agent: {
-      agentName,
-      modelRef: agent.model,
-      provider,
-      modelName,
-      providerConfig: resolvedConfig.config.providers?.[provider],
-      soulPath,
-      soul,
-    },
     resolvedEnvVars: resolvedConfig.resolvedEnvVars,
     snapshotStore: new FileSnapshotStore(join(paths.configDir, 'runtime-snapshots')),
+    agentName,
+  })
+}
+
+/**
+ * Creates an isolated agent view from an existing loaded context.
+ *
+ * @param agentName - The configured agent name to load
+ * @param baseContext - Shared daemon bootstrap context
+ * @returns A context with shared infrastructure and agent-specific config
+ */
+export async function loadAgentContextForName(
+  agentName: string,
+  baseContext: LoadedAgentContext
+): Promise<LoadedAgentContext> {
+  const agentItems = baseContext.config.agents?.items
+  if (agentItems === undefined) {
+    throw new Error(`Agent "${agentName}" not found in config.agents.items`)
   }
+
+  const agentConfig = {
+    ...baseContext.config,
+    agents: {
+      ...baseContext.config.agents,
+      defaultAgent: agentName,
+      items: {
+        ...agentItems,
+      },
+    },
+  }
+
+  return createLoadedAgentContext({
+    paths: baseContext.paths,
+    config: agentConfig,
+    resolvedEnvVars: baseContext.resolvedEnvVars,
+    snapshotStore: baseContext.snapshotStore,
+    agentName,
+  })
 }
 
 export function injectProviderEnv(context: LoadedAgentContext): void {
@@ -175,4 +196,43 @@ async function pathExists(filePath: string): Promise<boolean> {
 
 function readDefaultAgentName(config: TianjiConfig): string {
   return config.agents?.defaultAgent ?? DEFAULT_AGENT_NAME
+}
+
+async function createLoadedAgentContext(input: {
+  paths: AgentAppPaths
+  config: TianjiConfig
+  resolvedEnvVars: readonly string[]
+  snapshotStore: FileSnapshotStore
+  agentName: string
+}): Promise<LoadedAgentContext> {
+  const agent = input.config.agents?.items?.[input.agentName]
+  if (agent === undefined) {
+    throw new Error(`Agent "${input.agentName}" not found in config.agents.items`)
+  }
+
+  if (agent.model === undefined) {
+    throw new Error(
+      `Agent "${input.agentName}" must have a "model" field for native agent execution`
+    )
+  }
+
+  const { provider, modelName } = parseAgentModelRef(agent.model)
+  const soulPath = getAgentSoulPath(input.paths.configDir, input.agentName)
+  const soul = await loadAgentSoul(soulPath)
+
+  return {
+    paths: input.paths,
+    config: input.config,
+    agent: {
+      agentName: input.agentName,
+      modelRef: agent.model,
+      provider,
+      modelName,
+      providerConfig: input.config.providers?.[provider],
+      soulPath,
+      soul,
+    },
+    resolvedEnvVars: input.resolvedEnvVars,
+    snapshotStore: input.snapshotStore,
+  }
 }

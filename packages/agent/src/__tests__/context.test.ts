@@ -11,6 +11,7 @@ import {
   getAgentAppPaths,
   injectProviderEnv,
   loadAgentContext,
+  loadAgentContextForName,
 } from '../context.js'
 
 const KNOWN_ENV_KEYS = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY']
@@ -201,7 +202,7 @@ describe('ensureDefaultUserConfig', () => {
     vi.mocked(fs.access).mockResolvedValue(undefined)
 
     vi.mocked(runtime.loadResolvedConfig).mockResolvedValue({
-      config: { agents: { defaultAgent: 'custom-agent', definitions: {} } },
+      config: { agents: { defaultAgent: 'custom-agent', items: {} } },
       resolvedEnvVars: [],
       paths: {} as never,
       workspace: {} as never,
@@ -227,7 +228,7 @@ describe('loadAgentContext', () => {
       config: {
         agents: {
           defaultAgent: 'test-agent',
-          definitions: {
+          items: {
             'test-agent': { model: 'openai/gpt-4' },
           },
         },
@@ -264,5 +265,62 @@ describe('loadAgentContext', () => {
     expect(ctx.agent.soul).toBe('You are a test agent.')
     expect(ctx.resolvedEnvVars).toEqual(['OPENAI_API_KEY'])
     expect(ctx.snapshotStore).toBeInstanceOf(FileSnapshotStore)
+  })
+
+  it('loads an isolated context for a named agent', async () => {
+    const providerConfig = { apiKey: 'sk-reviewer' }
+    const baseContext: LoadedAgentContext = {
+      ...createTestContext('openai', 'sk-base'),
+      config: {
+        agents: {
+          defaultAgent: 'default',
+          items: {
+            default: { model: 'openai/gpt-4o-mini' },
+            reviewer: { model: 'anthropic/claude-3-7-sonnet' },
+          },
+        },
+        providers: {
+          anthropic: providerConfig,
+        },
+      },
+    }
+
+    vi.mocked(shared.parseAgentModelRef).mockReturnValue({
+      provider: 'anthropic',
+      modelName: 'claude-3-7-sonnet',
+    })
+    vi.mocked(shared.getAgentSoulPath).mockReturnValue('/tmp/test/agents/reviewer/SOUL.md')
+    vi.mocked(shared.loadAgentSoul).mockResolvedValue('reviewer soul')
+
+    const result = await loadAgentContextForName('reviewer', baseContext)
+
+    expect(result).not.toBe(baseContext)
+    expect(result.config).not.toBe(baseContext.config)
+    expect(result.paths).toBe(baseContext.paths)
+    expect(result.snapshotStore).toBe(baseContext.snapshotStore)
+    expect(result.agent.agentName).toBe('reviewer')
+    expect(result.agent.modelRef).toBe('anthropic/claude-3-7-sonnet')
+    expect(result.agent.providerConfig).toBe(providerConfig)
+    expect(result.agent.soul).toBe('reviewer soul')
+    expect(baseContext.config.agents?.defaultAgent).toBe('default')
+  })
+
+  it('throws when named agent has no model', async () => {
+    const baseContext: LoadedAgentContext = {
+      ...createTestContext('openai', 'sk-base'),
+      config: {
+        agents: {
+          defaultAgent: 'default',
+          items: {
+            default: { model: 'openai/gpt-4o-mini' },
+            reviewer: {},
+          },
+        },
+      },
+    }
+
+    await expect(loadAgentContextForName('reviewer', baseContext)).rejects.toThrow(
+      'Agent "reviewer" must have a "model" field for native agent execution'
+    )
   })
 })

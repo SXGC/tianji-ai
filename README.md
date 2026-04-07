@@ -4,6 +4,19 @@
 
 当前仓库包含 `shared`、`runtime`、`observer`、`agent` 四个核心 package，以及 `apps/node` 和 `apps/controlplane` 两个应用。
 
+## 目录
+
+- [Quick Start](#quick-start)
+- [仓库概览](#仓库概览)
+- [开发命令](#开发命令)
+- [CLI 参考](#cli-参考)
+- [配置与环境变量](#配置与环境变量)
+- [Controlplane Web UI](#controlplane-web-ui)
+- [文档索引](#文档索引)
+- [当前状态](#当前状态)
+- [CI/CD](#cicd)
+- [License](#license)
+
 ## Quick Start
 
 ```bash
@@ -15,7 +28,11 @@ pnpm tianji run "hello"
 
 # 启动 controlplane
 pnpm --filter @tianji/controlplane start
+```
 
+如果要让 node 出现在 controlplane 页面中，还需要先生成 enrollment token，并完成首次注册：
+
+```bash
 # 生成 enrollment token
 pnpm --filter @tianji/controlplane token:create
 
@@ -34,14 +51,16 @@ pnpm tianji daemon start --register "http://127.0.0.1:3000/register?enrollment-t
 - node CLI：[`docs/usage/node.md`](./docs/usage/node.md)
 - controlplane：[`docs/usage/controlplane.md`](./docs/usage/controlplane.md)
 
-## 当前范围
+## 仓库概览
+
+### 当前范围
 
 - 使用 `pnpm workspace` 管理多包仓库。
 - 使用 `turbo` 编排 `build`、`test` 等任务，并结合 Biome 承担根目录 `lint` / `format` / `check`。
 - 以 TypeScript 为主语言，代码质量工具链为 Biome + Vitest。
 - `docs/` 下提供架构与配置设计文档，但其中部分内容仍是 v1 draft，不应视为全部已实现能力。
 
-## 仓库结构
+### 仓库结构
 
 ```text
 tianji-ai/
@@ -73,9 +92,9 @@ tianji-ai/
 └─ tsconfig.json
 ```
 
-## 核心包说明
+### 核心包说明
 
-### `@tianji/shared`
+#### `@tianji/shared`
 
 共享工具与配置模型包，当前主要包含：
 
@@ -87,7 +106,7 @@ tianji-ai/
 
 该包不依赖其他内部 `@tianji/*` 包，用于承载跨包复用的基础能力。基础协议与配置 schema 统一由 `@tianji/shared` 提供。
 
-### `@tianji/runtime`
+#### `@tianji/runtime`
 
 会话运行时包，负责管理 session 与执行过程。v2 公共 API 已收敛到 deepagents-native 配置面，运行时执行引擎为 deepagents-only，历史 legacy snapshot 仅通过 metadata helper 提供只读兼容。LLM provider 适配已内聚到 runtime 内部 `src/llm/`。当前公开能力包括：
 
@@ -99,7 +118,7 @@ tianji-ai/
 
 该包是编排层与运行时状态的核心承载位置。`SessionRuntimeOptions` 默认围绕 `deepagents` 配置块组织，支持 model、middleware、subagents、skills、interruptOn 等字段；`snapshotStore` 与 `toolCatalog` 继续作为稳定公共 API 暴露。
 
-### `@tianji/observer`
+#### `@tianji/observer`
 
 observer 包，负责统一提供结构化日志和 tracing 初始化原语。当前公开能力包括：
 
@@ -110,7 +129,7 @@ observer 包，负责统一提供结构化日志和 tracing 初始化原语。�
 
 该包负责 observer 侧公共边界；CLI 与 runtime 只消费这些能力，不再各自定义独立日志协议。
 
-### `@tianji/agent`
+#### `@tianji/agent`
 
 agent 装配层，负责把配置解析结果、默认 agent、`SOUL.md`、provider 凭据注入和 runtime/session 启动原语组合成应用入口可直接消费的 API。当前公开能力包括：
 
@@ -121,7 +140,7 @@ agent 装配层，负责把配置解析结果、默认 agent、`SOUL.md`、provi
 
 该包位于 CLI 与 runtime 之间，承接应用层初始化逻辑，避免 CLI 直接依赖 runtime 创建细节。
 
-### `@tianji/node`
+#### `@tianji/node`
 
 节点命令行应用，提供 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon start|status|stop|restart`、`tianji chat` 和 `tianji help` 等命令。首次运行时会自动在 `~/.config/tianji-ai/` 下创建用户层配置文件 `tianji.json`、默认 agent 的 `SOUL.md` 和日志目录。当前 `run` 命令仍通过 `@tianji/agent` 加载默认 agent、创建会话并执行请求；后续会逐步迁移为 ACP 管理的 node 架构。日志写入协议由 `@tianji/observer` 统一提供，`log -f` 命令负责 follow 文件并渲染为可读文本。使用说明见 [`docs/usage/node.md`](./docs/usage/node.md)。
 
@@ -142,7 +161,13 @@ pnpm test
 
 根目录脚本会在 Biome、`pnpm -r` 和 `turbo` 之间分工：Biome 负责 lint / format，包级递归 `typecheck` 会覆盖 `packages/*` 与 `apps/*`，`turbo` 负责 build / test；如果只关注某个 package，可进一步结合 `pnpm --filter <package>` 在对应包范围内执行。
 
-## CLI 用法
+### Git Hooks
+
+- 仓库使用 Husky 安装 `pre-commit` hook，`pnpm install` 后会通过 `prepare` 自动安装。
+- `pre-commit` 仅对已暂存文件执行 `biome check --staged`，然后递归执行各 package 的 `typecheck`。
+- 这套流程的目标是让提交前检查尽量轻量：lint / format 语义只覆盖 staged 文件，类型检查不再通过 `turbo` 触发依赖包构建。
+
+## CLI 参考
 
 ```bash
 # 发送 prompt 给默认 agent
@@ -169,31 +194,29 @@ pnpm tianji stop
 
 用户配置文件位于 `~/.config/tianji-ai/tianji.json`，首次运行时会自动生成。默认 agent 的 `SOUL.md` 位于 `~/.config/tianji-ai/agents/default/SOUL.md`。更多细节见 [`docs/usage/node.md`](./docs/usage/node.md) 和 [`apps/node/README.md`](./apps/node/README.md)。
 
-## 环境变量
-
-- 根目录提供了 `.env.example`，集中列出当前代码实际使用到的环境变量。
-- 当前没有“无条件必需”的环境变量；`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GOOGLE_GENERATIVE_AI_API_KEY` 是代码里内置识别的 provider API key 名称，仅在“使用对应 provider 且走默认 env 读取 API key”时必需。
-- 如果直接在 JSON 配置中提供 provider `apiKey`、`baseUrl` 或 `headers`，则不必依赖上述 env 名称。
-- 配置系统支持任意 `${env:VAR_NAME}` 占位符，因此 `.env.example` 只覆盖当前代码内置识别的环境变量，不是完整白名单。
-
-## CLI 日志
+### CLI 日志
 
 - `@tianji/observer` 统一提供结构化日志 API 和 JSONL sink；CLI 当前默认把日志写到 `~/.config/tianji-ai/logs/tianji.log`。
 - JSONL 记录字段为 `timestamp`、`level`、`scope`、`message`、`data`，其中 `scope` 是字符串数组。
 - `tianji log -f` 由 CLI 负责读取已有日志、持续 follow 新增内容，并渲染为人类可读文本。
 - 日志不会记录 prompt 原文、`SOUL.md` 正文或 provider `apiKey`。
 
+## 配置与环境变量
+
+- 根目录提供了 `.env.example`，集中列出当前代码实际使用到的环境变量。
+- 当前没有“无条件必需”的环境变量；`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GOOGLE_GENERATIVE_AI_API_KEY` 是代码里内置识别的 provider API key 名称，仅在“使用对应 provider 且走默认 env 读取 API key”时必需。
+- 如果直接在 JSON 配置中提供 provider `apiKey`、`baseUrl` 或 `headers`，则不必依赖上述 env 名称。
+- 配置系统支持任意 `${env:VAR_NAME}` 占位符，因此 `.env.example` 只覆盖当前代码内置识别的环境变量，不是完整白名单。
+
+补充说明：runtime 已实现中心化配置加载，会按 `default < user < workspace` 顺序解析内置默认配置 `tianji.config.json`、`~/.config/tianji-ai/tianji.json` 与工作区配置文件。
+
+当前配置系统支持 `providers`、`agents`、`runtime`、`observer` 四个顶层配置块。
+
 ## Controlplane Web UI
 
 `apps/controlplane` 现在会在 `/` 提供浏览器聊天界面。启动 controlplane 与 node 后，可直接访问 `http://127.0.0.1:3000/`，选择在线节点并发送 task。使用说明见 [`docs/usage/controlplane.md`](./docs/usage/controlplane.md)。
 
-## Git Hooks
-
-- 仓库使用 Husky 安装 `pre-commit` hook，`pnpm install` 后会通过 `prepare` 自动安装。
-- `pre-commit` 仅对已暂存文件执行 `biome check --staged`，然后递归执行各 package 的 `typecheck`。
-- 这套流程的目标是让提交前检查尽量轻量：lint / format 语义只覆盖 staged 文件，类型检查不再通过 `turbo` 触发依赖包构建。
-
-## 文档
+## 文档索引
 
 ### 使用文档
 
@@ -210,25 +233,27 @@ pnpm tianji stop
 - `docs/development/CLI_GUIDE.md`：CLI 用户指南，描述所有命令用法、配置路径与 daemon 生命周期。
 - `docs/development/DEVELOPMENT.md`：开发者指南，描述环境搭建、构建测试流程、代码规范与 git hooks。
 
-补充说明：runtime 已实现中心化配置加载，会按 `default < user < workspace` 顺序解析内置默认配置 `tianji.config.json`、`~/.config/tianji-ai/tianji.json` 与工作区配置文件。
-
-## 当前状态说明
+## 当前状态
 
 - 仓库包含四个核心 package（`shared`、`runtime`、`observer`、`agent`）和两个应用（`apps/node`、`apps/controlplane`）。
 - CLI 已支持 `tianji run "<prompt>"`、`tianji log -f`、`tianji daemon`、`tianji chat`、`tianji status`、`tianji stop` 完整流程。
-- 配置系统支持 `providers`、`agents`、`runtime`、`observer` 四个顶层配置块。
 - 日志系统当前通过 `@tianji/observer` 的 JSONL sink 落盘到 `~/.config/tianji-ai/logs/tianji.log`。
 - `docs/` 中部分内容会提到后续规划的 `tools-node` 等模块，这些仍未在仓库中完整落地。
 - 因此，阅读本仓库时应优先以 `packages/`、`apps/node` 与 `apps/controlplane` 下现有源码和导出 API 为准。
 
 ## CI/CD
 
-                                                                  
-### 生成覆盖率报告                                                             
-  pnpm test:coverage                                              
+### 生成覆盖率报告
 
-### 然后执行 sonar 扫描                                                        
-  pnpm sonar
+```bash
+pnpm test:coverage
+```
+
+### 然后执行 sonar 扫描
+
+```bash
+pnpm sonar
+```
 
 ## License
 

@@ -1,5 +1,5 @@
 import { type Command, createNodeId, createTaskId } from '@tianji/shared'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
   ControlPlaneCallbacks,
@@ -9,6 +9,56 @@ import type {
   TaskExecutorLike,
 } from '../node-runtime/controlplane-runtime.js'
 import { createControlPlaneRuntime } from '../node-runtime/controlplane-runtime.js'
+
+const { agentRunnerMock, inProcessRunnerMock } = vi.hoisted(() => ({
+  agentRunnerMock: vi.fn(),
+  inProcessRunnerMock: vi.fn(),
+}))
+
+vi.mock('../acp/index.js', () => ({
+  AgentRunner: agentRunnerMock,
+  InProcessAgentRunner: inProcessRunnerMock,
+}))
+
+function createRunnerDouble() {
+  return {
+    agentId: 'default',
+    connect: vi.fn(async () => undefined),
+    disconnect: vi.fn(async () => undefined),
+    async *query() {
+      yield {
+        type: 'run.completed',
+        runId: 'run-test' as never,
+        sessionId: 'session-test' as never,
+        triggerType: 'new',
+        timestamp: Date.now(),
+      }
+    },
+  }
+}
+
+function setupRunnerMocks(): void {
+  agentRunnerMock.mockImplementation(() => createRunnerDouble())
+  inProcessRunnerMock.mockImplementation(() => createRunnerDouble())
+  agentRunnerMock.mockClear()
+  inProcessRunnerMock.mockClear()
+}
+
+function createConnectionDouble(): ControlPlaneConnectionLike {
+  return {
+    start: vi.fn(async () => undefined),
+    stop: vi.fn(),
+    setExecutionState: vi.fn(),
+    client: {
+      openEventStream: vi.fn(async () => ({
+        write: vi.fn(async () => undefined),
+        close: vi.fn(async () => undefined),
+        abort: vi.fn(),
+        writeKeepalive: vi.fn(async () => undefined),
+      })),
+    },
+  }
+}
 
 function createTestConfig(
   overrides: Partial<ControlPlaneRuntimeConfig> = {}
@@ -313,5 +363,101 @@ describe('parseAgentArgs (via default TaskExecutor path)', () => {
     expect(runtime.connection).toBeDefined()
     expect(runtime.taskExecutor).toBeDefined()
     expect(runtime.onCommand).toBeTypeOf('function')
+  })
+})
+
+describe('createRunner routing', () => {
+  beforeEach(() => {
+    setupRunnerMocks()
+  })
+
+  it('routes native agents to InProcessAgentRunner when nativeAgentContext exists', async () => {
+    const runtime = createControlPlaneRuntime(
+      createTestConfig({
+        agentConfigs: {
+          default: { model: 'openai/gpt-4o-mini' },
+        },
+        nativeAgentContext: {
+          paths: {} as never,
+          config: {},
+          agent: {} as never,
+          resolvedEnvVars: [],
+          snapshotStore: {} as never,
+        },
+      }),
+      {
+        createConnection: () => createConnectionDouble(),
+      }
+    )
+
+    await runtime.taskExecutor.execute(createTestCommand())
+
+    expect(inProcessRunnerMock).toHaveBeenCalledWith({
+      agentId: 'default',
+      nativeAgentContext: expect.any(Object),
+    })
+    expect(agentRunnerMock).not.toHaveBeenCalled()
+  })
+
+  it('routes external agents to AgentRunner', async () => {
+    const runtime = createControlPlaneRuntime(
+      createTestConfig({
+        agentConfigs: {
+          default: { command: 'codex', args: ['--acp'] },
+        },
+        nativeAgentContext: {
+          paths: {} as never,
+          config: {},
+          agent: {} as never,
+          resolvedEnvVars: [],
+          snapshotStore: {} as never,
+        },
+      }),
+      {
+        createConnection: () => createConnectionDouble(),
+      }
+    )
+
+    await runtime.taskExecutor.execute(createTestCommand())
+
+    expect(agentRunnerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'default',
+        command: 'codex',
+        args: ['--acp'],
+      })
+    )
+    expect(inProcessRunnerMock).not.toHaveBeenCalled()
+  })
+
+  it('routes native agents to AgentRunner when nativeAgentContext is missing', async () => {
+    const runtime = createControlPlaneRuntime(
+      createTestConfig({
+        agentConfigs: {
+          default: { model: 'openai/gpt-4o-mini' },
+        },
+      }),
+      {
+        createConnection: () => createConnectionDouble(),
+      }
+    )
+
+    await runtime.taskExecutor.execute(createTestCommand())
+
+    expect(agentRunnerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'default',
+        command: undefined,
+      })
+    )
+    expect(inProcessRunnerMock).not.toHaveBeenCalled()
+  })
+
+  it('throws when agent config is missing', async () => {
+    const runtime = createControlPlaneRuntime(createTestConfig())
+
+    await expect(runtime.taskExecutor.execute(createTestCommand())).rejects.toThrow(
+      'Agent config not found for agentId "default"'
+    )
   })
 })

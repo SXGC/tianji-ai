@@ -1,5 +1,5 @@
 import { type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
-import type { AppMessage, RuntimeEvent, SessionId } from '@tianji/shared'
+import type { AppMessage, RunId, RuntimeEvent, SessionId } from '@tianji/shared'
 
 import { type LoadedAgentContext, injectProviderEnv } from './context.js'
 
@@ -9,7 +9,8 @@ export interface ChatOptions {
 
 export interface AgentSession {
   readonly sessionId: SessionId
-  readonly chat: (prompt: string, options?: ChatOptions) => AsyncIterable<RuntimeEvent>
+  readonly query: (prompt: string, options?: ChatOptions) => AsyncIterable<RuntimeEvent>
+  readonly abort: () => void
 }
 
 /**
@@ -45,10 +46,16 @@ export function createAgentRuntime(context: LoadedAgentContext): SessionRuntime 
 export function createAgentSession(context: LoadedAgentContext): AgentSession {
   const runtime = createAgentRuntime(context)
   const sessionId = `session_${Date.now()}` as SessionId
+  let activeRunId: RunId | null = null
 
   return {
     sessionId,
-    async *chat(prompt: string, options?: ChatOptions): AsyncIterable<RuntimeEvent> {
+    abort(): void {
+      if (activeRunId !== null) {
+        runtime.cancelRun(activeRunId)
+      }
+    },
+    async *query(prompt: string, options?: ChatOptions): AsyncIterable<RuntimeEvent> {
       await runtime.createSession({ sessionId })
 
       const userMessage: AppMessage = {
@@ -63,9 +70,16 @@ export function createAgentSession(context: LoadedAgentContext): AgentSession {
         message: userMessage,
         systemPrompt: options?.systemPrompt ?? context.agent.soul,
       })
+      activeRunId = runId
 
-      for await (const event of runtime.streamEvents(runId)) {
-        yield event
+      try {
+        for await (const event of runtime.streamEvents(runId)) {
+          yield event
+        }
+      } finally {
+        if (activeRunId === runId) {
+          activeRunId = null
+        }
       }
     },
   }

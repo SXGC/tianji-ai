@@ -51,4 +51,15 @@ describe('ControlPlaneDb', () => {
 
     expect(result[0]!.foreign_keys).toBe(1)
   })
+
+  it('should create nodes table with pid column in current schema', () => {
+    db = createDatabase(':memory:')
+
+    const columns = db.raw.prepare('PRAGMA table_info(nodes)').all() as {
+      name: string
+      type: string
+    }[]
+
+    expect(columns.some((column) => column.name === 'pid' && column.type === 'INTEGER')).toBe(true)
+  })
 })

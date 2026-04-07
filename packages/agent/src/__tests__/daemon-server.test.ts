@@ -18,7 +18,8 @@ import type { AgentSession } from '../session.js'
 function createStubSession(events: RuntimeEvent[] = []): AgentSession {
   return {
     sessionId: 'session_test' as unknown as AgentSession['sessionId'],
-    async *chat(_prompt: string) {
+    abort: () => undefined,
+    async *query(_prompt: string) {
       for (const event of events) {
         yield event
       }
@@ -34,7 +35,8 @@ function createBlockingSession(): AgentSession & { resolve: () => void } {
   return {
     sessionId: 'session_blocking' as unknown as AgentSession['sessionId'],
     resolve,
-    async *chat(_prompt: string) {
+    abort: () => undefined,
+    async *query(_prompt: string) {
       yield await barrier.then((): RuntimeEvent => ({ type: 'run.completed' }) as RuntimeEvent)
     },
   }
@@ -243,7 +245,8 @@ describe('DaemonServer', () => {
   it('POST /chat handles internal errors from session', async () => {
     const errorSession: AgentSession = {
       sessionId: 'session_error' as unknown as AgentSession['sessionId'],
-      async *chat() {
+      abort: () => undefined,
+      async *query() {
         yield await Promise.reject(new Error('boom'))
       },
     }

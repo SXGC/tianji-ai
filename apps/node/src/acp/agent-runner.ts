@@ -80,7 +80,7 @@ export class AgentRunner {
     })
   }
 
-  async *chat(prompt: string): AsyncIterable<RuntimeEvent> {
+  async *query(prompt: string): AsyncIterable<RuntimeEvent> {
     if (this.#connection === null || this.#client === null || this.#acpSessionId === null) {
       throw new Error('Not connected. Call connect() first.')
     }

@@ -86,7 +86,7 @@ export class TianjiAcpAgent {
     this.#abortController = new AbortController()
 
     try {
-      for await (const event of this.#currentSession.chat(promptText)) {
+      for await (const event of this.#currentSession.query(promptText)) {
         if (this.#abortController.signal.aborted) {
           console.error('[acp-agent] Prompt cancelled')
           return { stopReason: 'cancelled' }

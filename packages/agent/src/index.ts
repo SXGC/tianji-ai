@@ -3,6 +3,7 @@ export {
   getAgentAppPaths,
   injectProviderEnv,
   loadAgentContext,
+  loadAgentContextForName,
   type AgentAppPaths,
   type AgentContext,
   type LoadedAgentContext,

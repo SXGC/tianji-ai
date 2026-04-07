@@ -68,7 +68,7 @@ Controlplane 自身不执行模型调用，任务实际由在线 node 执行。
 - `POST /api/ui/tasks`
 - `GET /api/ui/tasks/:taskId/stream`
 
-## 包脚本
+## 各 package 脚本
 
 | 命令 | 说明 |
 |---|---|
@@ -77,6 +77,7 @@ Controlplane 自身不执行模型调用，任务实际由在线 node 执行。
 | `pnpm --filter @tianji/controlplane test` | 运行 Vitest |
 | `pnpm --filter @tianji/controlplane start` | 启动已构建产物 |
 | `pnpm --filter @tianji/controlplane token:create [token]` | 生成 enrollment token 并输出 register URL |
+| `pnpm --filter @tianji/controlplane migrate` | 执行 `migrations/*.sql` 升级数据库 schema |
 | `pnpm --filter @tianji/controlplane clean` | 清理 `dist/` |
 
 ## 生成 Enrollment Token
@@ -96,6 +97,31 @@ pnpm --filter @tianji/controlplane token:create dev-token
 ```bash
 TIANJI_CP_PUBLIC_BASE_URL=http://your-host:3000 pnpm --filter @tianji/controlplane token:create
 ```
+
+## 数据库升级
+
+当 `apps/controlplane/src/db/schema.ts` 有结构变化时，需要同时提供对应的 SQL migration 文件。
+
+当前 migration 文件目录：
+
+```text
+apps/controlplane/migrations/
+```
+
+执行方式：
+
+```bash
+pnpm --filter @tianji/controlplane build
+pnpm --filter @tianji/controlplane migrate
+```
+
+如果数据库目录不是默认值，可覆盖 `TIANJI_CP_DATA_DIR`：
+
+```bash
+TIANJI_CP_DATA_DIR=/path/to/controlplane pnpm --filter @tianji/controlplane migrate
+```
+
+建议在启动旧版本数据库前，先执行一次 migration。
 
 ## 目录结构
 

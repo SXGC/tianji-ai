@@ -236,7 +236,7 @@ export function createFakeAgentRunner(
     agentId: 'default',
     connect: async () => undefined,
     disconnect: async () => undefined,
-    async *chat(prompt: string): AsyncIterable<RuntimeEvent> {
+    async *query(prompt: string): AsyncIterable<RuntimeEvent> {
       await onChat?.(prompt)
       for (const event of events) {
         yield event

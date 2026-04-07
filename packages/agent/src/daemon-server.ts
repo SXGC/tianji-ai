@@ -176,7 +176,7 @@ export class DaemonServer {
     })
 
     try {
-      for await (const event of this.#session.chat(parsed.prompt)) {
+      for await (const event of this.#session.query(parsed.prompt)) {
         const message: ChatSseMessage = { type: 'chat.event', event }
         this.#sendSse(res, DAEMON_SSE_EVENT_NAME, message)
       }

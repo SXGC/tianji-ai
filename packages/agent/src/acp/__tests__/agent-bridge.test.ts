@@ -41,7 +41,8 @@ function createMockSessionFactory() {
 
   return vi.fn().mockReturnValue({
     sessionId: createSessionId('session-test'),
-    async *chat(_prompt: string) {
+    abort: vi.fn(),
+    async *query(_prompt: string) {
       for (const event of events) {
         yield event
       }

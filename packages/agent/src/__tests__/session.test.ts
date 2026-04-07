@@ -118,7 +118,7 @@ describe('agent session', () => {
     const session = createAgentSession(context)
     const events = []
 
-    for await (const event of session.chat('hello', { systemPrompt: context.agent.soul })) {
+    for await (const event of session.query('hello', { systemPrompt: context.agent.soul })) {
       events.push(event)
       if (event.type === 'run.completed') {
         break

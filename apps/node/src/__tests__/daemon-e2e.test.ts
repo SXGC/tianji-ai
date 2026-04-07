@@ -60,7 +60,8 @@ function createStubSession(chunks: readonly string[]): AgentSession {
 
   return {
     sessionId,
-    async *chat(_prompt: string): AsyncIterable<RuntimeEvent> {
+    abort: () => undefined,
+    async *query(_prompt: string): AsyncIterable<RuntimeEvent> {
       const runId = `run_${Date.now()}` as RunId
       const messageId = `msg_${Date.now()}`
 
@@ -92,7 +93,8 @@ function createRecordingSession(prompts: string[]): AgentSession {
 
   return {
     sessionId,
-    async *chat(prompt: string): AsyncIterable<RuntimeEvent> {
+    abort: () => undefined,
+    async *query(prompt: string): AsyncIterable<RuntimeEvent> {
       prompts.push(prompt)
       const runId = `run_${Date.now()}` as RunId
       yield {
