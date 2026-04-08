@@ -69,6 +69,7 @@ type DeepAgentFactory = (params?: Record<string, unknown>) => DeepagentsAgentIns
 interface DeepagentsAgentEvent {
   readonly event: string
   readonly name: string
+  readonly run_id: string
   readonly data?: Record<string, unknown>
 }
 
