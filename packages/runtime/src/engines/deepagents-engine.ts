@@ -100,7 +100,7 @@ interface DeepagentsInterruptRecord {
 }
 
 export interface DeepagentsRunResult {
-  readonly finalMessage?: AppMessage
+  readonly turnMessages: AppMessage[]
   readonly threadId: string
   readonly checkpointId?: string
   readonly interrupts?: readonly DeepagentsInterruptRecord[]
@@ -339,26 +339,34 @@ export async function executeDeepagentsRun(
 
   if (stateMetadata !== undefined && stateMetadata.interrupts.length > 0) {
     return {
+      turnMessages,
       threadId: stateMetadata.threadId,
       checkpointId: stateMetadata.checkpointId,
       interrupts: stateMetadata.interrupts,
     }
   }
 
-  const completedMessage =
-    [...turnMessages].reverse().find((m: AppMessage) => m.role === 'assistant') ??
-    buildAssistantMessage(messageId, messageStartedAt, currentText)
+  // 兜底：如果 on_chat_model_end 没触发，用剩余的 currentText 构建最终消息
+  if (currentText.length > 0 && turnMessages.every((m) => m.role !== 'assistant')) {
+    turnMessages.push(buildAssistantMessage(messageId, messageStartedAt, currentText))
+  }
 
-  options.emitEvent({
-    type: 'message.completed',
-    runId: options.runId,
-    messageId,
-    message: completedMessage,
-    timestamp: Date.now(),
-  })
+  const lastAssistantMessage = [...turnMessages]
+    .reverse()
+    .find((m: AppMessage) => m.role === 'assistant')
+
+  if (lastAssistantMessage !== undefined) {
+    options.emitEvent({
+      type: 'message.completed',
+      runId: options.runId,
+      messageId: lastAssistantMessage.id,
+      message: lastAssistantMessage,
+      timestamp: Date.now(),
+    })
+  }
 
   return {
-    finalMessage: completedMessage,
+    turnMessages,
     threadId: stateMetadata?.threadId ?? threadId,
     checkpointId: stateMetadata?.checkpointId,
   }
