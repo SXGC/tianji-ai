@@ -18,6 +18,7 @@ import {
   type AppMessage,
   CancelledError,
   type ExecutionPolicy,
+  type MessagePart,
   type MessageRole,
   type RunId,
   type RunSnapshot,
@@ -145,8 +146,10 @@ export async function executeDeepagentsRun(
     createdAt: messageStartedAt,
   }
   const observedToolCalls: DeepagentsPendingToolCall[] = []
-  let aggregatedText = ''
-  let finalMessage: AppMessage | undefined
+  const turnMessages: AppMessage[] = []
+  let currentThinking = ''
+  let currentText = ''
+  const builtinToolInvocations = new Map<string, ToolInvocation>()
   const threadId = options.threadId ?? options.sessionId
   const createUntypedDeepAgent = createDeepAgent as unknown as DeepAgentFactory
 
@@ -182,17 +185,30 @@ export async function executeDeepagentsRun(
 
   for await (const event of events) {
     if (event.event === 'on_chat_model_stream') {
-      const content = readChunkText(event.data?.chunk)
-
-      if (content.length > 0) {
-        aggregatedText += content
+      const text = readChunkText(event.data?.chunk)
+      if (text.length > 0) {
+        currentText += text
         options.emitEvent({
           type: 'message.delta',
           runId: options.runId,
           messageId,
           sequence: nextSequence(options.sequence),
           channel: 'text',
-          payload: { content },
+          payload: { content: text },
+          timestamp: Date.now(),
+        })
+      }
+
+      const thinking = readChunkThinking(event.data?.chunk)
+      if (thinking.length > 0) {
+        currentThinking += thinking
+        options.emitEvent({
+          type: 'message.delta',
+          runId: options.runId,
+          messageId,
+          sequence: nextSequence(options.sequence),
+          channel: 'thinking',
+          payload: { content: thinking },
           timestamp: Date.now(),
         })
       }
@@ -203,47 +219,111 @@ export async function executeDeepagentsRun(
 
     if (event.event === 'on_chat_model_end') {
       registerObservedToolCalls(event.data?.output, observedToolCalls)
+
+      const parts: MessagePart[] = []
+      if (currentThinking.length > 0) {
+        parts.push({ type: 'thinking', thinking: currentThinking })
+      }
+      if (currentText.length > 0) {
+        parts.push({ type: 'text', text: currentText })
+      }
+      for (const tc of observedToolCalls.filter((c) => !c.consumed)) {
+        parts.push({
+          type: 'tool-call',
+          toolCallId: tc.toolCallId,
+          toolName: tc.toolName,
+          args: tc.args,
+        })
+      }
+
+      if (parts.length > 0) {
+        turnMessages.push({
+          id: `msg_${randomUUID()}`,
+          role: 'assistant',
+          content: parts,
+          createdAt: Date.now(),
+        })
+      }
+
+      currentThinking = ''
+      currentText = ''
       continue
     }
 
     if (isLangGraphChainEnd(event)) {
-      finalMessage = buildAssistantMessageFromDeepagentsOutput(
-        messageId,
-        messageStartedAt,
-        aggregatedText,
-        event.data?.output
-      )
+      // on_chat_model_end 已构建消息。这里只做兜底：
+      // 如果 turnMessages 为空（某些 LangGraph 版本不触发 on_chat_model_end），
+      // 用 output 构建最终消息。
+      if (turnMessages.length === 0 || turnMessages.every((m) => m.role !== 'assistant')) {
+        const fallbackMessage = buildAssistantMessageFromDeepagentsOutput(
+          messageId,
+          messageStartedAt,
+          currentText,
+          event.data?.output
+        )
+        turnMessages.push(fallbackMessage)
+      }
       continue
     }
 
-    // 捕获 LangGraph 工具事件（内置 + 外部），统一在流式层 emit。
+    // 内置工具事件：不在 ToolCatalog 中的工具（deepagents middleware 注入的 ls/read/write/edit/execute）
+    // 外部工具事件：由 executeDeepagentsToolCall 负责 emit，这里跳过
     if (event.event === 'on_tool_start') {
-      const toolCallId = `builtin_tool_${randomUUID()}`
+      if (options.toolCatalog.getTool(event.name) !== undefined) {
+        continue
+      }
+      const toolCallId = event.run_id
+      const invocation: ToolInvocation = {
+        toolCallId,
+        toolName: event.name,
+        args: (event.data?.input ?? {}) as Record<string, unknown>,
+      }
+      builtinToolInvocations.set(toolCallId, invocation)
       options.emitEvent({
         type: 'tool.started',
         runId: options.runId,
         toolCallId,
-        invocation: {
-          toolCallId,
-          toolName: event.name,
-          args: (event.data?.input ?? {}) as Record<string, unknown>,
-        },
+        invocation,
         timestamp: Date.now(),
       })
       continue
     }
 
     if (event.event === 'on_tool_end') {
-      const toolCallId = `builtin_tool_${randomUUID()}`
+      if (options.toolCatalog.getTool(event.name) !== undefined) {
+        continue
+      }
+      const toolCallId = event.run_id
+      const invocation = builtinToolInvocations.get(toolCallId)
+      if (invocation === undefined) {
+        throw new TianjiError(
+          'internal',
+          'TOOL_EVENT_ORPHAN',
+          `on_tool_end without matching on_tool_start: run_id=${toolCallId}`
+        )
+      }
+      builtinToolInvocations.delete(toolCallId)
+
+      // 内置工具的 tool-result 消息
+      turnMessages.push({
+        id: `msg_${randomUUID()}`,
+        role: 'tool',
+        content: [
+          {
+            type: 'tool-result',
+            toolCallId,
+            toolName: invocation.toolName,
+            result: event.data?.output,
+          },
+        ],
+        createdAt: Date.now(),
+      })
+
       options.emitEvent({
         type: 'tool.completed',
         runId: options.runId,
         toolCallId,
-        invocation: {
-          toolCallId,
-          toolName: event.name,
-          args: {},
-        },
+        invocation,
         result: {
           toolCallId,
           result: event.data?.output,
@@ -266,7 +346,8 @@ export async function executeDeepagentsRun(
   }
 
   const completedMessage =
-    finalMessage ?? buildAssistantMessage(messageId, messageStartedAt, aggregatedText)
+    [...turnMessages].reverse().find((m: AppMessage) => m.role === 'assistant') ??
+    buildAssistantMessage(messageId, messageStartedAt, currentText)
 
   options.emitEvent({
     type: 'message.completed',
