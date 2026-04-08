@@ -26,8 +26,10 @@ import {
   type SessionId,
   TianjiError,
   TimeoutError,
+  type TokenUsage,
   ToolError,
   type ToolInvocation,
+  addTokenUsage,
 } from '@tianji/shared'
 import { createDeepAgent } from 'deepagents'
 
@@ -104,6 +106,7 @@ export interface DeepagentsRunResult {
   readonly threadId: string
   readonly checkpointId?: string
   readonly interrupts?: readonly DeepagentsInterruptRecord[]
+  readonly usage?: TokenUsage
 }
 
 interface AbortSignalScope {
@@ -124,6 +127,7 @@ interface StreamLoopState {
   readonly builtinToolInvocations: Map<string, ToolInvocation>
   currentThinking: string
   currentText: string
+  usage: TokenUsage | undefined
 }
 
 /** 处理 on_chat_model_stream：累积文本和 thinking 增量并发射 delta 事件。 */
@@ -163,9 +167,53 @@ function processChatModelStreamEvent(
   registerObservedToolCalls(event.data?.chunk, state.observedToolCalls)
 }
 
+/**
+ * 从 LangChain AIMessage 的 usage_metadata 字段安全提取 token 用量。
+ * LangChain 的 on_chat_model_end 事件中 data.output 是一个 AIMessage 实例，
+ * 其 usage_metadata 包含 input_tokens、output_tokens、total_tokens。
+ */
+function readUsageMetadata(output: unknown): TokenUsage | undefined {
+  if (typeof output !== 'object' || output === null) {
+    return undefined
+  }
+
+  const candidate = output as { usage_metadata?: unknown }
+  const metadata = candidate.usage_metadata
+
+  if (typeof metadata !== 'object' || metadata === null) {
+    return undefined
+  }
+
+  const typed = metadata as {
+    input_tokens?: unknown
+    output_tokens?: unknown
+    total_tokens?: unknown
+  }
+
+  if (
+    typeof typed.input_tokens !== 'number' ||
+    typeof typed.output_tokens !== 'number' ||
+    typeof typed.total_tokens !== 'number'
+  ) {
+    return undefined
+  }
+
+  return {
+    inputTokens: typed.input_tokens,
+    outputTokens: typed.output_tokens,
+    totalTokens: typed.total_tokens,
+  }
+}
+
 /** 处理 on_chat_model_end：将累积内容打包为 turn message 并重置状态。 */
 function processChatModelEndEvent(state: StreamLoopState, event: DeepagentsAgentEvent): void {
   registerObservedToolCalls(event.data?.output, state.observedToolCalls)
+
+  // 从 AIMessage.usage_metadata 提取 token 用量并累加到 run 级别计数器。
+  const usageMetadata = readUsageMetadata(event.data?.output)
+  if (usageMetadata !== undefined) {
+    state.usage = addTokenUsage(state.usage, usageMetadata)
+  }
 
   const parts: MessagePart[] = []
   if (state.currentThinking.length > 0) {
@@ -392,6 +440,7 @@ export async function executeDeepagentsRun(
     builtinToolInvocations,
     currentThinking: '',
     currentText: '',
+    usage: undefined,
   }
 
   for await (const event of events) {
@@ -410,6 +459,7 @@ export async function executeDeepagentsRun(
       threadId: stateMetadata.threadId,
       checkpointId: stateMetadata.checkpointId,
       interrupts: stateMetadata.interrupts,
+      usage: loopState.usage,
     }
   }
 
@@ -436,6 +486,7 @@ export async function executeDeepagentsRun(
     turnMessages,
     threadId: stateMetadata?.threadId ?? threadId,
     checkpointId: stateMetadata?.checkpointId,
+    usage: loopState.usage,
   }
 }
 
