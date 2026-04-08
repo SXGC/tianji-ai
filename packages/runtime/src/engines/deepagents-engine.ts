@@ -146,6 +146,8 @@ export async function executeDeepagentsRun(
   const observedToolCalls: DeepagentsPendingToolCall[] = []
   let aggregatedText = ''
   let finalMessage: AppMessage | undefined
+  /** 跟踪内置工具的 toolCallId，用于关联 on_tool_start 和 on_tool_end */
+  const builtinToolCallQueue = new Map<string, string[]>()
   const threadId = options.threadId ?? options.sessionId
   const createUntypedDeepAgent = createDeepAgent as unknown as DeepAgentFactory
 
@@ -212,6 +214,52 @@ export async function executeDeepagentsRun(
         aggregatedText,
         event.data?.output
       )
+      continue
+    }
+
+    // 捕获 LangGraph 内置工具事件。
+    // 外部工具（ToolCatalog 中注册的）由 executeDeepagentsToolCall 处理，此处跳过。
+    if (event.event === 'on_tool_start') {
+      if (!options.toolCatalog.hasTool(event.name)) {
+        const toolCallId = `builtin_tool_${randomUUID()}`
+        const queue = builtinToolCallQueue.get(event.name) ?? []
+        queue.push(toolCallId)
+        builtinToolCallQueue.set(event.name, queue)
+
+        options.emitEvent({
+          type: 'tool.started',
+          runId: options.runId,
+          toolCallId,
+          invocation: {
+            toolCallId,
+            toolName: event.name,
+            args: (event.data?.input ?? {}) as Record<string, unknown>,
+          },
+          timestamp: Date.now(),
+        })
+      }
+      continue
+    }
+
+    if (event.event === 'on_tool_end') {
+      if (!options.toolCatalog.hasTool(event.name)) {
+        const queue = builtinToolCallQueue.get(event.name)
+        const toolCallId = queue?.shift() ?? `builtin_tool_${randomUUID()}`
+        if (queue !== undefined && queue.length === 0) {
+          builtinToolCallQueue.delete(event.name)
+        }
+
+        options.emitEvent({
+          type: 'tool.completed',
+          runId: options.runId,
+          toolCallId,
+          result: {
+            toolCallId,
+            result: event.data?.output,
+          },
+          timestamp: Date.now(),
+        })
+      }
     }
   }
 
