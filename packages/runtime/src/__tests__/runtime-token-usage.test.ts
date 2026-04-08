@@ -6,6 +6,7 @@
  */
 import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
+import { type ObserverLogEntry, createMemorySink, createObserverLogger } from '@tianji/observer'
 import type { TokenUsage } from '@tianji/shared'
 import { createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
@@ -143,5 +144,45 @@ describe('Token usage tracking', () => {
     const run = await waitForRunStatus(runtime, runId, 'completed')
 
     expect(run.metadata?.usage).toBeUndefined()
+  })
+
+  it('logs usage in run.completed observer log entry', async () => {
+    const memorySink = createMemorySink()
+    const snapshotStore = new InMemorySnapshotStore()
+    const runtime = createSessionRuntime({
+      deepagents: {
+        model: fakeModel().respond(
+          new AIMessage({
+            content: 'Logged',
+            usage_metadata: { input_tokens: 300, output_tokens: 120, total_tokens: 420 },
+          })
+        ),
+      },
+      snapshotStore,
+      toolCatalog: new ToolRegistry(),
+      logger: createObserverLogger({ sinks: [memorySink] }),
+    })
+
+    const session = await runtime.createSession({
+      sessionId: createSessionId('session-usage-log'),
+    })
+    const runId = await runtime.runTurn({
+      sessionId: session.sessionId,
+      message: createUserMessage('msg-log', 'hi'),
+    })
+    await collectRuntimeEvents(runId, runtime)
+    await waitForRunStatus(runtime, runId, 'completed')
+
+    const completedLogEntry = memorySink.entries.find(
+      (entry: ObserverLogEntry) =>
+        entry.scope.join('.') === 'runtime.run' && entry.message === 'run.completed'
+    ) as (ObserverLogEntry & { data: Record<string, unknown> }) | undefined
+
+    expect(completedLogEntry).toBeDefined()
+    expect(completedLogEntry?.data.usage).toEqual({
+      inputTokens: 300,
+      outputTokens: 120,
+      totalTokens: 420,
+    })
   })
 })

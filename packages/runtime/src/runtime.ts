@@ -588,7 +588,10 @@ class SessionRuntimeImpl implements SessionRuntime {
           ...lineage,
           timestamp: Date.now(),
         })
-        this.logRunLifecycle('info', 'run.cancelled', lineage)
+        this.logRunLifecycle('info', 'run.cancelled', lineage, {
+          cancelPoint: 'human-in-the-loop',
+          ...(result.usage !== undefined ? { usage: result.usage } : undefined),
+        })
         activeRun.events.close()
         return
       }
@@ -632,7 +635,9 @@ class SessionRuntimeImpl implements SessionRuntime {
         ...lineage,
         timestamp: Date.now(),
       })
-      this.logRunLifecycle('info', 'run.completed', lineage)
+      this.logRunLifecycle('info', 'run.completed', lineage, {
+        ...(result.usage !== undefined ? { usage: result.usage } : undefined),
+      })
       activeRun.events.close()
     } catch (error) {
       if (isCancellationError(error, context.signal)) {
