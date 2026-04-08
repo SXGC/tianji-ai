@@ -26,7 +26,6 @@ import {
   TimeoutError,
   ToolError,
   type ToolInvocation,
-  type ToolResult,
 } from '@tianji/shared'
 import { createDeepAgent } from 'deepagents'
 
@@ -146,8 +145,6 @@ export async function executeDeepagentsRun(
   const observedToolCalls: DeepagentsPendingToolCall[] = []
   let aggregatedText = ''
   let finalMessage: AppMessage | undefined
-  /** 跟踪内置工具的 toolCallId，用于关联 on_tool_start 和 on_tool_end */
-  const builtinToolCallQueue = new Map<string, string[]>()
   const threadId = options.threadId ?? options.sessionId
   const createUntypedDeepAgent = createDeepAgent as unknown as DeepAgentFactory
 
@@ -217,49 +214,40 @@ export async function executeDeepagentsRun(
       continue
     }
 
-    // 捕获 LangGraph 内置工具事件。
-    // 外部工具（ToolCatalog 中注册的）由 executeDeepagentsToolCall 处理，此处跳过。
+    // 捕获 LangGraph 工具事件（内置 + 外部），统一在流式层 emit。
     if (event.event === 'on_tool_start') {
-      if (!options.toolCatalog.hasTool(event.name)) {
-        const toolCallId = `builtin_tool_${randomUUID()}`
-        const queue = builtinToolCallQueue.get(event.name) ?? []
-        queue.push(toolCallId)
-        builtinToolCallQueue.set(event.name, queue)
-
-        options.emitEvent({
-          type: 'tool.started',
-          runId: options.runId,
+      const toolCallId = `builtin_tool_${randomUUID()}`
+      options.emitEvent({
+        type: 'tool.started',
+        runId: options.runId,
+        toolCallId,
+        invocation: {
           toolCallId,
-          invocation: {
-            toolCallId,
-            toolName: event.name,
-            args: (event.data?.input ?? {}) as Record<string, unknown>,
-          },
-          timestamp: Date.now(),
-        })
-      }
+          toolName: event.name,
+          args: (event.data?.input ?? {}) as Record<string, unknown>,
+        },
+        timestamp: Date.now(),
+      })
       continue
     }
 
     if (event.event === 'on_tool_end') {
-      if (!options.toolCatalog.hasTool(event.name)) {
-        const queue = builtinToolCallQueue.get(event.name)
-        const toolCallId = queue?.shift() ?? `builtin_tool_${randomUUID()}`
-        if (queue !== undefined && queue.length === 0) {
-          builtinToolCallQueue.delete(event.name)
-        }
-
-        options.emitEvent({
-          type: 'tool.completed',
-          runId: options.runId,
+      const toolCallId = `builtin_tool_${randomUUID()}`
+      options.emitEvent({
+        type: 'tool.completed',
+        runId: options.runId,
+        toolCallId,
+        invocation: {
           toolCallId,
-          result: {
-            toolCallId,
-            result: event.data?.output,
-          },
-          timestamp: Date.now(),
-        })
-      }
+          toolName: event.name,
+          args: {},
+        },
+        result: {
+          toolCallId,
+          result: event.data?.output,
+        },
+        timestamp: Date.now(),
+      })
     }
   }
 
@@ -448,13 +436,6 @@ async function executeDeepagentsToolCall(
     status: 'running',
     timestamp,
   })
-  options.emitEvent({
-    type: 'tool.started',
-    runId: options.runId,
-    toolCallId,
-    invocation,
-    timestamp,
-  })
 
   try {
     const result = await executeWithTimeout(
@@ -468,11 +449,6 @@ async function executeDeepagentsToolCall(
       options.policy.tool.timeoutMs,
       options.signal
     )
-    const toolResult: ToolResult = {
-      toolCallId,
-      result,
-    }
-
     options.pendingOperations.set(toolCallId, {
       id: toolCallId,
       invocation,
@@ -483,14 +459,6 @@ async function executeDeepagentsToolCall(
     if (definition.sideEffect === 'destructive') {
       options.destructiveOperationIds.add(toolCallId)
     }
-
-    options.emitEvent({
-      type: 'tool.completed',
-      runId: options.runId,
-      toolCallId,
-      result: toolResult,
-      timestamp: Date.now(),
-    })
 
     return result
   } catch (error) {

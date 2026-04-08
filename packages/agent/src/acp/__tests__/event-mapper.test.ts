@@ -70,6 +70,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       type: 'tool.completed',
       runId,
       toolCallId: 'tc-1',
+      invocation: { toolCallId: 'tc-1', toolName: 'readFile', args: {} },
       result: { toolCallId: 'tc-1', result: { output: 'file contents' } },
       timestamp: Date.now(),
     }

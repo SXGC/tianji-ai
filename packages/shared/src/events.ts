@@ -101,6 +101,7 @@ export interface ToolCompletedEvent {
   readonly type: 'tool.completed'
   readonly runId: RunId
   readonly toolCallId: string
+  readonly invocation: ToolInvocation
   readonly result: ToolResult
   readonly timestamp: number
 }

@@ -59,6 +59,11 @@ export function mapSessionUpdateToRuntimeEvent(
           type: 'tool.completed',
           runId,
           toolCallId: update.toolCallId,
+          invocation: {
+            toolCallId: update.toolCallId,
+            toolName: update.title ?? 'unknown',
+            args: {},
+          },
           result: {
             toolCallId: update.toolCallId,
             result: '',

@@ -182,8 +182,7 @@ function extractTextContent(event: MessageCompletedEvent): string {
 
 function extractToolCallLabel(event: ToolCompletedEvent | ToolFailedEvent): string {
   const status = event.type === 'tool.completed' ? 'completed' : 'failed'
-  const name = event.type === 'tool.failed' ? event.invocation.toolName : event.toolCallId
-  return `${name} [${status}]`
+  return `${event.invocation.toolName} [${status}]`
 }
 
 function handleEvent(

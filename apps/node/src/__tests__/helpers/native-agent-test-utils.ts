@@ -119,6 +119,7 @@ export function toolCompletedEvent(): RuntimeEvent {
     type: 'tool.completed',
     runId: RUN_ID,
     toolCallId: 'tc-001',
+    invocation: { toolCallId: 'tc-001', toolName: 'readFile', args: { path: '/tmp/x' } },
     result: { toolCallId: 'tc-001', result: 'file contents' },
     timestamp: Date.now(),
   }

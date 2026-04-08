@@ -813,20 +813,19 @@ class SessionRuntimeImpl implements SessionRuntime {
       void logger.info(['runtime', 'tool'], 'tool.started', {
         sessionId: fields.sessionId,
         runId: fields.runId,
-        toolCallId: event.toolCallId,
         toolName: event.invocation.toolName,
       })
     } else if (event.type === 'tool.completed') {
       void logger.info(['runtime', 'tool'], 'tool.completed', {
         sessionId: fields.sessionId,
         runId: fields.runId,
-        toolCallId: event.toolCallId,
+        toolName: event.invocation.toolName,
       })
     } else {
       void logger.error(['runtime', 'tool'], 'tool.failed', {
         sessionId: fields.sessionId,
         runId: fields.runId,
-        toolCallId: event.toolCallId,
+        toolName: event.invocation.toolName,
         errorCode: event.error.code,
       })
     }

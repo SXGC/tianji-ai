@@ -189,6 +189,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       type: 'tool.completed',
       runId: 'run-1' as never,
       toolCallId: 'tc-1',
+      invocation: { toolCallId: 'tc-1', toolName: 'readFile', args: {} },
       result: { content: 'done' } as never,
       timestamp: Date.now(),
     }
