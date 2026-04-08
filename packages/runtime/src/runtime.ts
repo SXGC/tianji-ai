@@ -28,9 +28,11 @@ import {
   type SessionId,
   type SessionSnapshot,
   TianjiError,
+  type TokenUsage,
   type ToolCompletedEvent,
   type ToolFailedEvent,
   type ToolStartedEvent,
+  addTokenUsage,
   createRunId,
   createSessionId,
 } from '@tianji/shared'
@@ -556,6 +558,12 @@ class SessionRuntimeImpl implements SessionRuntime {
         checkpointId: result.checkpointId,
       })
 
+      // 将 run 级别的 token 用量写入 metadata，供查询和日志使用。
+      const runMetadataWithUsage =
+        result.usage !== undefined
+          ? { ...completedRunMetadata, usage: result.usage }
+          : completedRunMetadata
+
       if (result.interrupts !== undefined && result.interrupts.length > 0) {
         // deepagents 进入 HITL 中断时将其映射为 cancelled run，并持久化恢复所需 checkpoint/interrupt 信息。
         const interruptedRunSnapshot: RunSnapshot = {
@@ -570,7 +578,7 @@ class SessionRuntimeImpl implements SessionRuntime {
             checkpointId: result.checkpointId,
             interrupts: result.interrupts,
           }),
-          metadata: completedRunMetadata,
+          metadata: runMetadataWithUsage,
         }
 
         await this.snapshotStore.saveRun(interruptedRunSnapshot)
@@ -592,10 +600,20 @@ class SessionRuntimeImpl implements SessionRuntime {
         )
       }
 
+      // 将本次 run 的 token 用量累加到 session 级别。
+      const sessionMetadataWithUsage =
+        result.usage !== undefined
+          ? {
+              ...input.sessionSnapshot.metadata,
+              usage: addTokenUsage(readTokenUsage(input.sessionSnapshot.metadata), result.usage),
+            }
+          : input.sessionSnapshot.metadata
+
       const nextSessionSnapshot: SessionSnapshot = {
         ...input.sessionSnapshot,
         messages: [...input.sessionSnapshot.messages, ...result.turnMessages],
         updatedAt: Date.now(),
+        metadata: sessionMetadataWithUsage,
       }
       const completedRunSnapshot: RunSnapshot = {
         ...runSnapshot,
@@ -603,7 +621,7 @@ class SessionRuntimeImpl implements SessionRuntime {
         messages: nextSessionSnapshot.messages,
         updatedAt: Date.now(),
         pendingOperations: [...context.pendingOperations.values()],
-        metadata: completedRunMetadata,
+        metadata: runMetadataWithUsage,
       }
 
       await this.snapshotStore.saveSession(nextSessionSnapshot)
@@ -1159,4 +1177,35 @@ function hasConfiguredDeepagentsCheckpointer(
   deepagents: SessionRuntimeDeepagentsConfig | undefined
 ): boolean {
   return deepagents?.checkpointer !== undefined && deepagents.checkpointer !== false
+}
+
+/**
+ * 从 metadata 中安全读取 TokenUsage，类型不匹配时返回 undefined。
+ */
+function readTokenUsage(metadata: Record<string, unknown> | undefined): TokenUsage | undefined {
+  const usage = metadata?.usage
+
+  if (typeof usage !== 'object' || usage === null) {
+    return undefined
+  }
+
+  const candidate = usage as {
+    inputTokens?: unknown
+    outputTokens?: unknown
+    totalTokens?: unknown
+  }
+
+  if (
+    typeof candidate.inputTokens !== 'number' ||
+    typeof candidate.outputTokens !== 'number' ||
+    typeof candidate.totalTokens !== 'number'
+  ) {
+    return undefined
+  }
+
+  return {
+    inputTokens: candidate.inputTokens,
+    outputTokens: candidate.outputTokens,
+    totalTokens: candidate.totalTokens,
+  }
 }
