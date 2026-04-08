@@ -171,7 +171,7 @@ export async function executeDeepagentsRun(
     backend: resolveDeepagentsBackend(options.deepagents.backend),
     interruptOn: resolveDeepagentsInterruptOn(options.deepagents.interruptOn),
     skills: options.deepagents.skills ? [...options.deepagents.skills] : undefined,
-    tools: createDeepagentsTools(options, observedToolCalls),
+    tools: createDeepagentsTools(options, observedToolCalls, turnMessages),
   })
 
   const events = await agent.streamEvents(readDeepagentsInput(options), {
@@ -462,7 +462,8 @@ function isDeepagentsInterruptRecord(value: unknown): value is DeepagentsInterru
  */
 function createDeepagentsTools(
   options: ExecuteDeepagentsRunOptions,
-  observedToolCalls: DeepagentsPendingToolCall[]
+  observedToolCalls: DeepagentsPendingToolCall[],
+  turnMessages: AppMessage[]
 ): DynamicStructuredTool[] {
   return options.toolCatalog.getToolSpecs().map(
     (spec) =>
@@ -471,7 +472,7 @@ function createDeepagentsTools(
         description: spec.description,
         schema: spec.parameters,
         func: async (args) =>
-          executeDeepagentsToolCall(options, observedToolCalls, {
+          executeDeepagentsToolCall(options, observedToolCalls, turnMessages, {
             toolName: spec.name,
             args,
           }),
@@ -491,6 +492,7 @@ function createDeepagentsTools(
 async function executeDeepagentsToolCall(
   options: ExecuteDeepagentsRunOptions,
   observedToolCalls: DeepagentsPendingToolCall[],
+  turnMessages: AppMessage[],
   input: {
     readonly toolName: string
     readonly args: unknown
@@ -512,6 +514,14 @@ async function executeDeepagentsToolCall(
     args: input.args,
   }
   const timestamp = Date.now()
+
+  options.emitEvent({
+    type: 'tool.started',
+    runId: options.runId,
+    toolCallId,
+    invocation,
+    timestamp,
+  })
 
   options.pendingOperations.set(toolCallId, {
     id: toolCallId,
@@ -543,6 +553,30 @@ async function executeDeepagentsToolCall(
       options.destructiveOperationIds.add(toolCallId)
     }
 
+    turnMessages.push({
+      id: `msg_${randomUUID()}`,
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId,
+          toolName: input.toolName,
+          result,
+          isError: false,
+        },
+      ],
+      createdAt: Date.now(),
+    })
+
+    options.emitEvent({
+      type: 'tool.completed',
+      runId: options.runId,
+      toolCallId,
+      invocation,
+      result: { toolCallId, result },
+      timestamp: Date.now(),
+    })
+
     return result
   } catch (error) {
     if (isCancellationError(error, options.signal)) {
@@ -567,6 +601,21 @@ async function executeDeepagentsToolCall(
         definition.sideEffect === 'destructive' ? 'aborted-with-side-effect' : 'aborted-clean',
       timestamp,
     })
+    turnMessages.push({
+      id: `msg_${randomUUID()}`,
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          toolCallId,
+          toolName: input.toolName,
+          result: resolvedError.message,
+          isError: true,
+        },
+      ],
+      createdAt: Date.now(),
+    })
+
     options.emitEvent({
       type: 'tool.failed',
       runId: options.runId,
