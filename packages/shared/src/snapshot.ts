@@ -34,6 +34,30 @@ export interface PendingOperation {
   readonly timestamp: number
 }
 
+/**
+ * Token consumption counters for a single run or accumulated across a session.
+ */
+export interface TokenUsage {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly totalTokens: number
+}
+
+/**
+ * Accumulate two TokenUsage records by summing each field.
+ *
+ * @param base - Existing accumulated usage (or undefined for the first addition)
+ * @param delta - New usage to add
+ * @returns Merged TokenUsage with all fields summed
+ */
+export function addTokenUsage(base: TokenUsage | undefined, delta: TokenUsage): TokenUsage {
+  return {
+    inputTokens: (base?.inputTokens ?? 0) + delta.inputTokens,
+    outputTokens: (base?.outputTokens ?? 0) + delta.outputTokens,
+    totalTokens: (base?.totalTokens ?? 0) + delta.totalTokens,
+  }
+}
+
 export interface SessionSnapshot {
   readonly sessionId: SessionId
   readonly messages: AppMessage[]

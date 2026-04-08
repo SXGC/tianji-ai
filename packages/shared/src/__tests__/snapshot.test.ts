@@ -1,7 +1,41 @@
 import { describe, expect, expectTypeOf, it } from 'vitest'
 import type { RunId } from '../identifiers.js'
 import { createRunId, createSessionId } from '../identifiers.js'
-import type { RunSnapshot, RunStatus, RunTriggerType } from '../snapshot.js'
+import type { RunSnapshot, RunStatus, RunTriggerType, TokenUsage } from '../snapshot.js'
+import { addTokenUsage } from '../snapshot.js'
+
+describe('TokenUsage', () => {
+  it('is structurally compatible with expected shape', () => {
+    const usage: TokenUsage = {
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+    }
+
+    expect(usage.inputTokens).toBe(100)
+    expect(usage.outputTokens).toBe(50)
+    expect(usage.totalTokens).toBe(150)
+  })
+})
+
+describe('addTokenUsage', () => {
+  it('sums two TokenUsage records', () => {
+    const base: TokenUsage = { inputTokens: 100, outputTokens: 50, totalTokens: 150 }
+    const delta: TokenUsage = { inputTokens: 200, outputTokens: 100, totalTokens: 300 }
+
+    expect(addTokenUsage(base, delta)).toEqual({
+      inputTokens: 300,
+      outputTokens: 150,
+      totalTokens: 450,
+    })
+  })
+
+  it('treats undefined base as zero', () => {
+    const delta: TokenUsage = { inputTokens: 10, outputTokens: 5, totalTokens: 15 }
+
+    expect(addTokenUsage(undefined, delta)).toEqual(delta)
+  })
+})
 
 describe('snapshot types', () => {
   const sessionId = createSessionId('session_001')
