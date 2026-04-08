@@ -728,8 +728,11 @@ function serializeDeepagentsMessagePart(part: AppMessage['content'][number]): st
   }
 
   if (part.type === 'tool-result') {
-    const status = part.isError ? 'error' : 'success'
-    return `[tool-result id=${part.toolCallId} name=${part.toolName} status=${status} result=${stableSerialize(part.result)}]`
+    const resultPreview =
+      typeof part.result === 'string'
+        ? part.result.slice(0, 200)
+        : stableSerialize(part.result).slice(0, 200)
+    return `[tool-result id=${part.toolCallId} name=${part.toolName} error=${part.isError ?? false} result=${resultPreview}]`
   }
 
   const exhaustiveCheck: never = part
