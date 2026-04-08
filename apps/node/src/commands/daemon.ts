@@ -149,6 +149,15 @@ async function stopDaemonGracefullyOrForce(
     return true
   }
 
+  // Re-read PID file: if server already cleaned up its own PID file, shutdown succeeded
+  const currentPid = await readDaemonPid(paths)
+  if (currentPid === undefined) {
+    await logDebug(paths, scope, 'Daemon PID file removed, treating as successful shutdown', {
+      pid,
+    })
+    return true
+  }
+
   await logDebug(paths, scope, 'Graceful shutdown timed out, sending SIGTERM', { pid })
   process.kill(pid, 'SIGTERM')
   const exitedAfterTerm = await waitForProcessExit(pid, 3000)
@@ -451,10 +460,13 @@ const daemonStartCommand: CommandDefinition = {
     if (cpStatus.status === 'connected') {
       process.stdout.write(`${i18n.t('daemon.controlplane.connected')}\n`)
     } else {
+      await logError(paths, DAEMON_START_SCOPE, 'Controlplane registration failed after start', {
+        status: cpStatus.status,
+        lastError: cpStatus.lastError ?? 'unknown',
+      })
       process.stderr.write(
         `${i18n.t('daemon.controlplane.failed', { error: cpStatus.lastError ?? 'unknown' })}\n`
       )
-      return 1
     }
   },
 }

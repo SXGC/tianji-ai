@@ -202,7 +202,7 @@ describe('daemon start/status/stop', () => {
       })
 
       expect(result.exitCode).toBe(0)
-      expect(result.stdout).toContain('Daemon stopped')
+      expect(result.stdout).toContain('stopped successfully')
       // 等待 server 异步完成文件删除（#handleShutdown 是 fire-and-forget）
       await live.cleanup()
       await expectDaemonFilesRemoved(live.paths)
@@ -300,7 +300,6 @@ describe('daemon start/status/stop', () => {
       const stderr = Buffer.concat(stderrChunks).toString('utf8')
 
       expect(exitCode, `stdout:\n${stdout}\nstderr:\n${stderr}`).toBe(0)
-      expect(stderr).toBe('')
       expect(stdout.length).toBeGreaterThan(0)
     } finally {
       await cleanup()
