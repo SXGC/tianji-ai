@@ -7,7 +7,7 @@
  * @module message
  */
 
-export type MessageRole = 'user' | 'assistant' | 'system'
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
 
 export interface TextContent {
   readonly type: 'text'
@@ -32,7 +32,20 @@ export interface ToolCall {
   readonly args: unknown
 }
 
-export type MessagePart = TextContent | ThinkingContent | ImageContent | ToolCall
+export interface ToolResultContent {
+  readonly type: 'tool-result'
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly result: unknown
+  readonly isError?: boolean
+}
+
+export type MessagePart =
+  | TextContent
+  | ThinkingContent
+  | ImageContent
+  | ToolCall
+  | ToolResultContent
 
 export interface AppMessage {
   readonly id: string

@@ -8,13 +8,14 @@
  * - system: only accepts exactly one text part
  * - user: only accepts text | image
  * - assistant: only accepts text | thinking (maps to reasoning) | tool-call
+ * - tool: AppMessage cannot contain tool-result parts yet (reserved for future use)
  *
  * Unsupported types that throw ConversionError:
  * - file parts
  * - redacted-reasoning parts
  * - binary image payloads (Uint8Array, ArrayBuffer, Buffer)
  * - reasoning parts with signature (cannot be preserved in AppMessage)
- * - tool-result parts (AppMessage has no tool-result type)
+ * - tool-result parts (not yet integrated into conversion pipeline)
  *
  * @module message-conversion
  */
@@ -27,6 +28,7 @@ import type {
   TextContent,
   ThinkingContent,
   ToolCall,
+  ToolResultContent,
 } from '@tianji/shared'
 import type { CoreMessage } from 'ai'
 
@@ -110,6 +112,11 @@ function convertUserPartsToSdk(parts: MessagePart[]): Array<SdkTextPart | SdkIma
           'User message cannot contain tool-call parts',
           'unsupported_part_type'
         )
+      case 'tool-result':
+        throw new ConversionError(
+          'User message cannot contain tool-result parts',
+          'unsupported_part_type'
+        )
       default: {
         const exhaustiveCheck: never = part
         throw new ConversionError(
@@ -155,6 +162,11 @@ function convertAssistantPartsToSdk(
       case 'image':
         throw new ConversionError(
           'Assistant message cannot contain image parts',
+          'unsupported_part_type'
+        )
+      case 'tool-result':
+        throw new ConversionError(
+          'Assistant message cannot contain tool-result parts',
           'unsupported_part_type'
         )
       default: {

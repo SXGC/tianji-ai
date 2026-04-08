@@ -18,6 +18,7 @@ import {
   type AppMessage,
   CancelledError,
   type ExecutionPolicy,
+  type MessageRole,
   type RunId,
   type RunSnapshot,
   type RuntimeEvent,
@@ -550,7 +551,7 @@ function resolveToolCallId(
  * 将 AppMessage 压平为 deepagents 只接受的 role + string content 结构。
  */
 function convertAppMessageToDeepagentsMessage(message: AppMessage): {
-  readonly role: 'user' | 'assistant' | 'system'
+  readonly role: MessageRole
   readonly content: string
 } {
   return {
@@ -578,7 +579,17 @@ function serializeDeepagentsMessagePart(part: AppMessage['content'][number]): st
     return `[image mimeType=${mimeType} source=${source}]`
   }
 
-  return `[tool-call id=${part.toolCallId} name=${part.toolName} args=${stableSerialize(part.args)}]`
+  if (part.type === 'tool-call') {
+    return `[tool-call id=${part.toolCallId} name=${part.toolName} args=${stableSerialize(part.args)}]`
+  }
+
+  if (part.type === 'tool-result') {
+    const status = part.isError ? 'error' : 'success'
+    return `[tool-result id=${part.toolCallId} name=${part.toolName} status=${status} result=${stableSerialize(part.result)}]`
+  }
+
+  const exhaustiveCheck: never = part
+  throw new Error(`Unsupported message part type: ${exhaustiveCheck}`)
 }
 
 /**
