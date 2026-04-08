@@ -543,6 +543,9 @@ class SessionRuntimeImpl implements SessionRuntime {
       destructiveOperationIds: new Set(),
     }
 
+    // 在 try 外声明，使 catch 中的取消路径也能访问已消耗的 token 用量。
+    let capturedUsage: TokenUsage | undefined
+
     try {
       activeRun.events.push({
         type: 'run.started',
@@ -552,6 +555,7 @@ class SessionRuntimeImpl implements SessionRuntime {
       this.logRunLifecycle('info', 'run.started', lineage)
 
       const result = await this.executeDeepagentsTurn(activeRun, input, context)
+      capturedUsage = result.usage
       const completedRunMetadata = writeRunRuntimeMetadata(runSnapshot.metadata, {
         engine: this.engine,
         threadId: result.threadId,
@@ -650,6 +654,10 @@ class SessionRuntimeImpl implements SessionRuntime {
           resumeHint: hasSideEffect(context.pendingOperations, context.destructiveOperationIds)
             ? 'require-user-confirmation'
             : 'replay',
+          metadata:
+            capturedUsage !== undefined
+              ? { ...runSnapshot.metadata, usage: capturedUsage }
+              : runSnapshot.metadata,
         }
 
         await this.snapshotStore.saveRun(cancelledRunSnapshot)
@@ -659,7 +667,9 @@ class SessionRuntimeImpl implements SessionRuntime {
           ...lineage,
           timestamp: Date.now(),
         })
-        this.logRunLifecycle('warn', 'run.cancelled', lineage)
+        this.logRunLifecycle('warn', 'run.cancelled', lineage, {
+          ...(capturedUsage !== undefined ? { usage: capturedUsage } : undefined),
+        })
         activeRun.events.close()
       } else {
         const resolvedError = toTianjiError(error)
@@ -670,6 +680,7 @@ class SessionRuntimeImpl implements SessionRuntime {
           pendingOperations: [...context.pendingOperations.values()],
           metadata: mergeMetadata(runSnapshot.metadata, {
             failureCode: resolvedError.code,
+            ...(capturedUsage !== undefined ? { usage: capturedUsage } : undefined),
           }),
         }
 
