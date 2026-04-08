@@ -1,4 +1,5 @@
 import type { LoadedAgentContext } from '@tianji/agent'
+import type { ObserverLogger } from '@tianji/observer'
 import type {
   AgentInfo,
   Command,
@@ -35,6 +36,8 @@ export interface ControlPlaneRuntimeConfig {
     error?: string
   }) => void
   readonly logger?: RuntimeLogger
+  /** 传给 SessionRuntime 的 observer logger，用于 runtime 层日志（如 token usage）。 */
+  readonly observerLogger?: ObserverLogger
 }
 
 export interface ControlPlaneCallbacks {
@@ -156,6 +159,8 @@ export function createControlPlaneRuntime(
           return new InProcessAgentRunner({
             agentId: command.payload.agentId,
             nativeAgentContext: config.nativeAgentContext,
+            runtimeOptions:
+              config.observerLogger !== undefined ? { logger: config.observerLogger } : undefined,
           })
         }
 

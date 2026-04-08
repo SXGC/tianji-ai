@@ -1,4 +1,5 @@
 import {
+  type AgentRuntimeOptions,
   type AgentSession,
   type LoadedAgentContext,
   createAgentSession,
@@ -12,17 +13,23 @@ import type { RuntimeEvent } from '@tianji/shared'
 export class InProcessAgentRunner {
   readonly agentId: string
   readonly #baseContext: LoadedAgentContext
+  readonly #runtimeOptions?: AgentRuntimeOptions
   #session: AgentSession | null = null
   #activeGeneration = 0
 
-  constructor(config: { agentId: string; nativeAgentContext: LoadedAgentContext }) {
+  constructor(config: {
+    agentId: string
+    nativeAgentContext: LoadedAgentContext
+    runtimeOptions?: AgentRuntimeOptions
+  }) {
     this.agentId = config.agentId
     this.#baseContext = config.nativeAgentContext
+    this.#runtimeOptions = config.runtimeOptions
   }
 
   async connect(): Promise<void> {
     const context = await loadAgentContextForName(this.agentId, this.#baseContext)
-    this.#session = await createAgentSession(context)
+    this.#session = await createAgentSession(context, this.#runtimeOptions)
     this.#activeGeneration += 1
   }
 

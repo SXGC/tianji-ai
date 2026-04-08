@@ -93,6 +93,7 @@ export async function runDaemonEntry(): Promise<void> {
       nativeAgentContext: context,
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
       logger,
+      observerLogger: logger.observerLogger,
       onConnectionStateChange: (event) => {
         if (event.status === 'connecting') {
           updateControlPlaneStatus({
