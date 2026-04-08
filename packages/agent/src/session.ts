@@ -1,9 +1,13 @@
 import { LocalShellBackend } from 'deepagents'
 
-import { type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
+import { type ObserverLogger, type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
 import type { AppMessage, RunId, RuntimeEvent, SessionId } from '@tianji/shared'
 
 import { type LoadedAgentContext, injectProviderEnv } from './context.js'
+
+export interface AgentRuntimeOptions {
+  readonly logger?: ObserverLogger
+}
 
 export interface ChatOptions {
   readonly systemPrompt?: string
@@ -24,7 +28,10 @@ export interface AgentSession {
  * @param context - The resolved agent bootstrap context
  * @returns A session runtime configured for the selected provider and model
  */
-export async function createAgentRuntime(context: LoadedAgentContext): Promise<SessionRuntime> {
+export async function createAgentRuntime(
+  context: LoadedAgentContext,
+  options?: AgentRuntimeOptions
+): Promise<SessionRuntime> {
   injectProviderEnv(context)
 
   const backend = await LocalShellBackend.create({
@@ -45,6 +52,7 @@ export async function createAgentRuntime(context: LoadedAgentContext): Promise<S
       backend,
     },
     snapshotStore: context.snapshotStore,
+    logger: options?.logger,
   })
 }
 
@@ -54,8 +62,11 @@ export async function createAgentRuntime(context: LoadedAgentContext): Promise<S
  * @param context - The resolved agent bootstrap context
  * @returns A session wrapper that emits runtime events for each prompt
  */
-export async function createAgentSession(context: LoadedAgentContext): Promise<AgentSession> {
-  const runtime = await createAgentRuntime(context)
+export async function createAgentSession(
+  context: LoadedAgentContext,
+  options?: AgentRuntimeOptions
+): Promise<AgentSession> {
+  const runtime = await createAgentRuntime(context, options)
   const sessionId = `session_${Date.now()}` as SessionId
   let activeRunId: RunId | null = null
 

@@ -27,6 +27,7 @@ export {
 export {
   createAgentRuntime,
   createAgentSession,
+  type AgentRuntimeOptions,
   type AgentSession,
   type ChatOptions,
 } from './session.js'

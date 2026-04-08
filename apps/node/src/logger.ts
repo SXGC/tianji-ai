@@ -4,6 +4,7 @@ import type {
   ObserverLogLevel,
   ObserverLogScope,
   ObserverLogSink,
+  ObserverLogger,
 } from '@tianji/observer'
 import { createObserverLogger } from '@tianji/observer'
 import type { UserConfigPaths } from './config.js'
@@ -13,6 +14,8 @@ export type CliLogScope = ObserverLogScope
 export type CliLogEntry = ObserverLogEntry
 
 export interface CliLogger {
+  /** 底层 observer logger 实例，可直接传给需要 ObserverLogger 的组件（如 SessionRuntime）。 */
+  readonly observerLogger: ObserverLogger
   readonly appendCliLog: (entry: CliLogEntry) => Promise<void>
   readonly logDebug: (
     scope: CliLogScope,
@@ -55,6 +58,7 @@ export function createCliLogger(options: CreateCliLoggerOptions): CliLogger {
   })
 
   return {
+    observerLogger,
     appendCliLog(entry) {
       return options.sink.write(entry)
     },

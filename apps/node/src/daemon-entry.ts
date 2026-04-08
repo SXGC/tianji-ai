@@ -42,7 +42,9 @@ export async function runDaemonEntry(): Promise<void> {
   const context = await loadUserConfigContext()
   const i18n = createI18n(detectLocale(context.config))
   const logger = getCliLogger(context.paths)
-  const session = await createAgentSession(context)
+  const session = await createAgentSession(context, {
+    logger: logger.observerLogger,
+  })
   let controlPlaneStatus: ControlPlaneStatusSnapshot = DEFAULT_CONTROL_PLANE_STATUS
 
   const updateControlPlaneStatus = (
