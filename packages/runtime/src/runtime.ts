@@ -20,6 +20,7 @@ import {
   CancelledError,
   DEFAULT_EXECUTION_POLICY,
   type ExecutionPolicy,
+  type MessageCompletedEvent,
   ProviderError,
   type RunId,
   type RunSnapshot,
@@ -721,6 +722,9 @@ class SessionRuntimeImpl implements SessionRuntime {
             lineage
           )
         }
+        if (event.type === 'message.completed') {
+          this.logMessageEvent(event as MessageCompletedEvent, lineage)
+        }
         if (event.type === 'tool.started') {
           const typedEvent = event as ToolStartedEvent
           const span = startToolSpan({
@@ -807,22 +811,57 @@ class SessionRuntimeImpl implements SessionRuntime {
       void logger.info(['runtime', 'tool'], 'tool.started', {
         sessionId: fields.sessionId,
         runId: fields.runId,
+        toolCallId: event.toolCallId,
         toolName: event.invocation.toolName,
+        args: event.invocation.args,
       })
     } else if (event.type === 'tool.completed') {
       void logger.info(['runtime', 'tool'], 'tool.completed', {
         sessionId: fields.sessionId,
         runId: fields.runId,
+        toolCallId: event.toolCallId,
         toolName: event.invocation.toolName,
+        result: event.result.result,
       })
     } else {
       void logger.error(['runtime', 'tool'], 'tool.failed', {
         sessionId: fields.sessionId,
         runId: fields.runId,
+        toolCallId: event.toolCallId,
         toolName: event.invocation.toolName,
+        args: event.invocation.args,
         errorCode: event.error.code,
+        errorMessage: event.error.message,
       })
     }
+  }
+
+  /**
+   * 将 message.completed 事件写入 observer logger，scope 为 ['runtime', 'message']。
+   * 记录消息摘要，包含 thinking/tool-call 标记与文本预览。
+   */
+  private logMessageEvent(event: MessageCompletedEvent, fields: RunLineageFields): void {
+    const logger = this.options.logger
+
+    if (logger === undefined) {
+      return
+    }
+
+    const hasThinking = event.message.content.some((p) => p.type === 'thinking')
+    const hasToolCalls = event.message.content.some((p) => p.type === 'tool-call')
+    const textParts = event.message.content
+      .filter((p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text')
+      .map((p) => p.text)
+
+    void logger.info(['runtime', 'message'], 'message.completed', {
+      sessionId: fields.sessionId,
+      runId: fields.runId,
+      messageId: event.messageId,
+      role: event.message.role,
+      hasThinking,
+      hasToolCalls,
+      textPreview: textParts.join('').slice(0, 200),
+    })
   }
 }
 

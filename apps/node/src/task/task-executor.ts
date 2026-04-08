@@ -217,6 +217,8 @@ function handleEvent(
       runId: event.runId,
       toolCallId: event.toolCallId,
       toolCall: extractToolCallLabel(event),
+      args: event.invocation.args,
+      result: event.result.result,
     })
   } else if (event.type === 'tool.failed') {
     turn.toolCallCount += 1
@@ -225,6 +227,7 @@ function handleEvent(
       runId: event.runId,
       toolCallId: event.toolCallId,
       toolCall: extractToolCallLabel(event),
+      args: event.invocation.args,
       errorCode: event.error.code,
       errorMessage: event.error.message,
     })
