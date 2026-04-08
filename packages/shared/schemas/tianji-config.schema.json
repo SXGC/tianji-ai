@@ -1,0 +1,191 @@
+{
+  "type": "object",
+  "properties": {
+    "locale": {
+      "type": "string",
+      "enum": ["en", "zh-CN"],
+      "description": "界面语言。可选值：en, zh-CN"
+    },
+    "providers": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "apiKey": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": true
+      },
+      "description": "LLM 提供商连接配置。key 为提供商名称（如 openai），value 包含 apiKey 等连接参数。支持 ${env:VAR_NAME} 占位符引用环境变量"
+    },
+    "agents": {
+      "type": "object",
+      "properties": {
+        "defaultAgent": {
+          "type": "string",
+          "description": "默认 agent 名称，必须在 items 中有对应定义。默认值：default"
+        },
+        "items": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string",
+                "description": "模型引用，格式为 provider/modelName（如 openai/gpt-4.1）。原生 agent 必填"
+              },
+              "command": {
+                "type": "string",
+                "description": "执行命令。原生 agent 默认为 tianji-agent，外部 agent 填写对应命令（如 claude、codex）"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "命令行参数数组"
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "环境变量键值对，会注入到 agent 运行环境中"
+              },
+              "workspace": {
+                "type": "string",
+                "description": "Agent 的工作目录。deepagents 在此目录下执行文件操作和 shell 命令。默认为 process.cwd()"
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "Agent 配置项。key 为 agent 名称（小写字母、数字、连字符、下划线），value 为该 agent 的配置"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Agent 定义集合"
+    },
+    "runtime": {
+      "type": "object",
+      "properties": {
+        "retry": {
+          "type": "object",
+          "properties": {
+            "maxAttempts": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "最大重试次数。默认值：2"
+            },
+            "baseDelayMs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "基础重试延迟（毫秒）。默认值：300"
+            },
+            "maxDelayMs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "最大重试延迟（毫秒）。默认值：3000"
+            }
+          },
+          "additionalProperties": false,
+          "description": "重试策略配置"
+        },
+        "tool": {
+          "type": "object",
+          "properties": {
+            "timeoutMs": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "单次工具执行超时时间（毫秒）。默认值：120000"
+            },
+            "maxConcurrency": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "description": "工具最大并发数。默认值：4"
+            },
+            "allowDestructive": {
+              "type": "boolean",
+              "description": "是否允许执行破坏性操作。默认值：false"
+            },
+            "pathPolicy": {
+              "type": "object",
+              "properties": {
+                "forbidDirectories": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "禁止访问的目录列表。默认值：[\".git/\", \"node_modules/\"]"
+                },
+                "filenameDenyPatterns": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "禁止访问的文件名正则列表。默认拒绝 .env 文件和 SSH 密钥"
+                }
+              },
+              "additionalProperties": false,
+              "description": "路径安全策略"
+            }
+          },
+          "additionalProperties": false,
+          "description": "工具执行策略配置"
+        }
+      },
+      "additionalProperties": false,
+      "description": "运行时配置"
+    },
+    "observer": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "是否启用观测日志。默认值：true"
+        },
+        "redactSecrets": {
+          "type": "boolean",
+          "description": "日志中是否脱敏敏感信息。默认值：true"
+        }
+      },
+      "additionalProperties": false,
+      "description": "可观测性配置"
+    },
+    "controlPlane": {
+      "type": "object",
+      "properties": {
+        "baseUrl": {
+          "type": "string",
+          "description": "控制面服务地址"
+        },
+        "enrollmentToken": {
+          "type": "string",
+          "description": "节点注册令牌"
+        },
+        "nodeId": {
+          "type": "string",
+          "description": "节点唯一标识"
+        },
+        "hostname": {
+          "type": "string",
+          "description": "节点主机名。可选，默认自动检测"
+        },
+        "platform": {
+          "type": "string",
+          "description": "节点操作系统平台。可选，默认自动检测"
+        },
+        "version": {
+          "type": "string",
+          "description": "节点版本号。可选"
+        }
+      },
+      "required": ["baseUrl", "enrollmentToken", "nodeId"],
+      "additionalProperties": false,
+      "description": "控制面连接配置。配置后节点会注册到控制面并接受任务下发"
+    }
+  },
+  "additionalProperties": false,
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "天机 AI 配置文件。支持三层配置合并：默认 < 用户 < 工作区"
+}

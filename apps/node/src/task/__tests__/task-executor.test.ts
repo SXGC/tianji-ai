@@ -27,6 +27,13 @@ function createRunnerStub(): IAgentRunner {
     disconnect: async () => undefined,
     async *query() {
       yield {
+        type: 'run.started',
+        runId: 'run-test' as never,
+        sessionId: 'session-test' as never,
+        triggerType: 'new',
+        timestamp: Date.now(),
+      }
+      yield {
         type: 'run.completed',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,

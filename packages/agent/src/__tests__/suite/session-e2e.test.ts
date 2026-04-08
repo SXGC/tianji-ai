@@ -35,6 +35,7 @@ function createTestContext(): LoadedAgentContext {
       providerConfig: { apiKey: 'test-key' },
       soulPath: '/tmp/tianji-test/config/agents/default/SOUL.md',
       soul: 'You are a test agent.',
+      workspace: undefined,
     },
     resolvedEnvVars: [],
     snapshotStore: new InMemorySnapshotStore() as never,
@@ -105,7 +106,7 @@ describe('agent session e2e', () => {
     const mockRuntime = createMockRuntime()
     vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
 
-    const session = createAgentSession(createTestContext())
+    const session = await createAgentSession(createTestContext())
     const events = await collectChatEvents(session, 'hi')
     const types = events.map((e) => e.type)
 
@@ -120,7 +121,7 @@ describe('agent session e2e', () => {
     vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
 
     const context = createTestContext()
-    const session = createAgentSession(context)
+    const session = await createAgentSession(context)
     await collectChatEvents(session, 'hi')
 
     expect(mockRuntime.runTurn).toHaveBeenCalledWith(
@@ -134,7 +135,7 @@ describe('agent session e2e', () => {
     const mockRuntime = createMockRuntime()
     vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
 
-    const session = createAgentSession(createTestContext())
+    const session = await createAgentSession(createTestContext())
     await collectChatEvents(session, 'hi', { systemPrompt: 'custom prompt' })
 
     expect(mockRuntime.runTurn).toHaveBeenCalledWith(
@@ -144,11 +145,11 @@ describe('agent session e2e', () => {
     )
   })
 
-  it('session uses a stable sessionId matching expected pattern', () => {
+  it('session uses a stable sessionId matching expected pattern', async () => {
     const mockRuntime = createMockRuntime()
     vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
 
-    const session = createAgentSession(createTestContext())
+    const session = await createAgentSession(createTestContext())
 
     expect(session.sessionId).toMatch(/^session_\d+$/)
   })

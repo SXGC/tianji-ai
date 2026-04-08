@@ -206,7 +206,7 @@ describe('CLI integration', () => {
         },
       })
 
-      const runtime = createAgentRuntime(fakeContext)
+      const runtime = await createAgentRuntime(fakeContext)
       const runtimeRecord = runtime as unknown as {
         options?: {
           deepagents?: {
@@ -236,7 +236,7 @@ describe('CLI integration', () => {
         },
       })
 
-      const runtime = createAgentRuntime(fakeContext)
+      const runtime = await createAgentRuntime(fakeContext)
       const runtimeRecord = runtime as unknown as {
         options?: {
           deepagents?: {

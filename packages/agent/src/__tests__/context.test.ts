@@ -36,6 +36,7 @@ function createTestContext(provider: string, apiKey?: string): LoadedAgentContex
       providerConfig: apiKey !== undefined ? { apiKey } : undefined,
       soulPath: '/tmp/test/agents/default/SOUL.md',
       soul: 'test',
+      workspace: undefined,
     },
     resolvedEnvVars: [],
     snapshotStore: new FileSnapshotStore('/tmp/test/runtime-snapshots'),

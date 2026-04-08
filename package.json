@@ -8,6 +8,7 @@
     "check": "pnpm exec biome check --files-ignore-unknown=true --error-on-warnings . && pnpm typecheck && pnpm check:boundaries && pnpm check:deps",
     "build": "turbo build",
     "test": "turbo test",
+    "test:smoke": "SMOKE_E2E=1 turbo test:smoke",
     "test:coverage": "turbo test:coverage",
     "lint": "pnpm exec biome lint --files-ignore-unknown=true --error-on-warnings .",
     "format": "pnpm exec biome format --write --files-ignore-unknown=true .",

@@ -47,6 +47,7 @@ export interface AgentContext {
   readonly providerConfig: TianjiProviderConfig | undefined
   readonly soulPath: string
   readonly soul: string
+  readonly workspace: string | undefined
 }
 
 export interface LoadedAgentContext {
@@ -231,6 +232,7 @@ async function createLoadedAgentContext(input: {
       providerConfig: input.config.providers?.[provider],
       soulPath,
       soul,
+      workspace: agent.workspace,
     },
     resolvedEnvVars: input.resolvedEnvVars,
     snapshotStore: input.snapshotStore,

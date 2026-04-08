@@ -1,3 +1,5 @@
+import { LocalShellBackend } from 'deepagents'
+
 import { type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
 import type { AppMessage, RunId, RuntimeEvent, SessionId } from '@tianji/shared'
 
@@ -16,11 +18,19 @@ export interface AgentSession {
 /**
  * Creates a runtime instance from an already loaded agent context.
  *
+ * The runtime uses {@link LocalShellBackend} to give the agent real filesystem
+ * and shell access in the configured workspace directory.
+ *
  * @param context - The resolved agent bootstrap context
  * @returns A session runtime configured for the selected provider and model
  */
-export function createAgentRuntime(context: LoadedAgentContext): SessionRuntime {
+export async function createAgentRuntime(context: LoadedAgentContext): Promise<SessionRuntime> {
   injectProviderEnv(context)
+
+  const backend = await LocalShellBackend.create({
+    rootDir: context.agent.workspace ?? process.cwd(),
+    inheritEnv: true,
+  })
 
   return createSessionRuntime({
     deepagents: {
@@ -32,6 +42,7 @@ export function createAgentRuntime(context: LoadedAgentContext): SessionRuntime 
         baseUrl: readProviderBaseUrl(context),
         headers: readProviderHeaders(context),
       },
+      backend,
     },
     snapshotStore: context.snapshotStore,
   })
@@ -43,8 +54,8 @@ export function createAgentRuntime(context: LoadedAgentContext): SessionRuntime 
  * @param context - The resolved agent bootstrap context
  * @returns A session wrapper that emits runtime events for each prompt
  */
-export function createAgentSession(context: LoadedAgentContext): AgentSession {
-  const runtime = createAgentRuntime(context)
+export async function createAgentSession(context: LoadedAgentContext): Promise<AgentSession> {
+  const runtime = await createAgentRuntime(context)
   const sessionId = `session_${Date.now()}` as SessionId
   let activeRunId: RunId | null = null
 

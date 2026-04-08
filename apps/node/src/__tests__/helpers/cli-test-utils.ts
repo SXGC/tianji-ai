@@ -45,6 +45,7 @@ export function createFakeContext(
       providerConfig: undefined,
       soulPath: '/tmp/tianji-test/config/agents/default/SOUL.md',
       soul: '# Test Agent\n\nYou are a test agent.\n',
+      workspace: undefined,
     },
     resolvedEnvVars: [],
     snapshotStore: new FileSnapshotStore('/tmp/tianji-test/runtime-snapshots'),

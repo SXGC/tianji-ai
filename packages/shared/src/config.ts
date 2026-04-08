@@ -291,6 +291,7 @@ export const TianjiAgentConfigSchema = z
     command: z.string().optional(),
     args: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
+    workspace: z.string().optional(),
   })
   .refine((data) => data.model !== undefined || data.command !== undefined, {
     message: 'Agent must have at least one of "model" or "command"',

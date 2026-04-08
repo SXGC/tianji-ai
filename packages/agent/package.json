@@ -29,6 +29,9 @@
     "@tianji/runtime": "workspace:*",
     "@tianji/shared": "workspace:*"
   },
+  "peerDependencies": {
+    "deepagents": "^1.8.4"
+  },
   "devDependencies": {
     "@langchain/core": "^1.1.33",
     "@types/node": "^22.0.0"

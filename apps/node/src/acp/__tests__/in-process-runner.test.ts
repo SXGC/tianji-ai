@@ -31,6 +31,7 @@ function createContext(): LoadedAgentContext {
       providerConfig: undefined,
       soulPath: '/tmp/test/agents/default/SOUL.md',
       soul: 'test soul',
+      workspace: undefined,
     },
     resolvedEnvVars: [],
     snapshotStore: {} as never,

@@ -22,7 +22,7 @@ export class InProcessAgentRunner {
 
   async connect(): Promise<void> {
     const context = await loadAgentContextForName(this.agentId, this.#baseContext)
-    this.#session = createAgentSession(context)
+    this.#session = await createAgentSession(context)
     this.#activeGeneration += 1
   }
 

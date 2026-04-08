@@ -34,6 +34,7 @@ export function createFakeContext(): LoadedAgentContext {
       providerConfig: undefined,
       soulPath: '/tmp/agents/test-agent/soul.md',
       soul: '',
+      workspace: undefined,
     },
     resolvedEnvVars: [],
     snapshotStore: {} as never,

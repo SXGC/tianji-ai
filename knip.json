@@ -2,6 +2,11 @@
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignoreExportsUsedInFile": true,
   "ignore": ["apps/controlplane/src/server.ts", "apps/node/src/bin.ts"],
+  "workspaces": {
+    "packages/shared": {
+      "entry": ["scripts/*.ts"]
+    }
+  },
   "ignoreIssues": {
     "apps/node/src/__tests__/helpers/**": ["exports", "types"],
     "packages/agent/src/__tests__/helpers/**": ["exports", "types"],

@@ -45,6 +45,7 @@ describe('runAcpAgent', () => {
         providerConfig: undefined,
         soulPath: '/tmp/SOUL.md',
         soul: 'test',
+        workspace: undefined,
       },
       paths: {} as never,
       resolvedEnvVars: [],

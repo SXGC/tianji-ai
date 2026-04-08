@@ -23,7 +23,7 @@ import type {
 import type { AgentSession } from '../session.js'
 import { mapRuntimeEventToSessionUpdate } from './event-mapper.js'
 
-type SessionFactory = () => AgentSession
+type SessionFactory = () => AgentSession | Promise<AgentSession>
 
 /**
  * ACP 协议到 AgentSession 的桥接实现。
@@ -50,7 +50,7 @@ export class TianjiAcpAgent {
   }
 
   async newSession(_params: NewSessionRequest): Promise<NewSessionResponse> {
-    this.#currentSession = this.#sessionFactory()
+    this.#currentSession = await this.#sessionFactory()
 
     console.error('[acp-agent] New session created:', this.#currentSession.sessionId)
 

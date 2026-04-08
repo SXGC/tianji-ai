@@ -25,6 +25,7 @@ function createTestContext(provider: string, apiKey?: string): LoadedUserConfigC
       providerConfig: apiKey !== undefined ? { apiKey } : undefined,
       soulPath: '/tmp/test/agents/default/SOUL.md',
       soul: 'test',
+      workspace: undefined,
     },
     resolvedEnvVars: [],
     snapshotStore: {} as LoadedUserConfigContext['snapshotStore'],

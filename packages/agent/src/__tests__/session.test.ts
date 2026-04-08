@@ -41,6 +41,7 @@ function createFakeContext(): LoadedAgentContext {
       },
       soulPath: '/tmp/tianji-test/config/agents/default/SOUL.md',
       soul: '# Test Agent\n\nYou are a test agent.\n',
+      workspace: undefined,
     },
     resolvedEnvVars: [],
     snapshotStore: new FileSnapshotStore('/tmp/tianji-test/runtime-snapshots'),
@@ -48,15 +49,15 @@ function createFakeContext(): LoadedAgentContext {
 }
 
 describe('agent session', () => {
-  it('creates runtime from loaded agent context', () => {
-    const runtime = createAgentRuntime(createFakeContext())
+  it('creates runtime from loaded agent context', async () => {
+    const runtime = await createAgentRuntime(createFakeContext())
 
     expect(runtime.createSession).toBeDefined()
     expect(runtime.runTurn).toBeDefined()
   })
 
-  it('normalizes openai runtime model into a configured model instance', () => {
-    const runtime = createAgentRuntime(createFakeContext()) as SessionRuntime & {
+  it('normalizes openai runtime model into a configured model instance', async () => {
+    const runtime = (await createAgentRuntime(createFakeContext())) as SessionRuntime & {
       readonly options?: {
         readonly deepagents?: {
           readonly model?: {
@@ -115,7 +116,7 @@ describe('agent session', () => {
       .spyOn(runtimeModule, 'createSessionRuntime')
       .mockReturnValue(runtime)
 
-    const session = createAgentSession(context)
+    const session = await createAgentSession(context)
     const events = []
 
     for await (const event of session.query('hello', { systemPrompt: context.agent.soul })) {
@@ -139,6 +140,7 @@ describe('agent session', () => {
             'x-test-header': 'enabled',
           },
         },
+        backend: expect.any(Object),
       },
       snapshotStore: context.snapshotStore,
     })
