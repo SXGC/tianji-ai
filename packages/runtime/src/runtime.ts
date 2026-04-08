@@ -14,7 +14,7 @@
 import { randomUUID } from 'node:crypto'
 
 import { ChatOpenAI } from '@langchain/openai'
-import type { ObserverLogger } from '@tianji/observer'
+import { type ObserverLogger, type ObserverStartedSpan, startToolSpan } from '@tianji/observer'
 import {
   type AppMessage,
   CancelledError,
@@ -27,6 +27,9 @@ import {
   type SessionId,
   type SessionSnapshot,
   TianjiError,
+  type ToolCompletedEvent,
+  type ToolFailedEvent,
+  type ToolStartedEvent,
   createRunId,
   createSessionId,
 } from '@tianji/shared'
@@ -577,7 +580,7 @@ class SessionRuntimeImpl implements SessionRuntime {
           ...lineage,
           timestamp: Date.now(),
         })
-        this.logRunLifecycle('warn', 'run.cancelled', lineage)
+        this.logRunLifecycle('info', 'run.cancelled', lineage)
         activeRun.events.close()
         return
       }
@@ -686,6 +689,16 @@ class SessionRuntimeImpl implements SessionRuntime {
       )
     }
 
+    const lineage = createRunLineageFields({
+      sessionId: activeRun.sessionId,
+      runId: activeRun.runId,
+      triggerType: input.triggerType,
+      parentRunId: input.parentRunId,
+    })
+
+    /** per-run 工具 span 跟踪，run 结束后闭包释放自动 GC */
+    const toolSpans = new Map<string, ObserverStartedSpan>()
+
     return executeDeepagentsRun({
       sessionId: activeRun.sessionId,
       runId: activeRun.runId,
@@ -702,7 +715,37 @@ class SessionRuntimeImpl implements SessionRuntime {
       pendingOperations: context.pendingOperations,
       destructiveOperationIds: context.destructiveOperationIds,
       sequence: context.sequence,
-      emitEvent: (event) => activeRun.events.push(event),
+      emitEvent: (event) => {
+        activeRun.events.push(event)
+        if (
+          event.type === 'tool.started' ||
+          event.type === 'tool.completed' ||
+          event.type === 'tool.failed'
+        ) {
+          this.logToolEvent(
+            event as ToolStartedEvent | ToolCompletedEvent | ToolFailedEvent,
+            lineage
+          )
+        }
+        if (event.type === 'tool.started') {
+          const typedEvent = event as ToolStartedEvent
+          const span = startToolSpan({
+            toolName: typedEvent.invocation.toolName,
+            runId: event.runId,
+          })
+          if (span !== undefined) {
+            toolSpans.set(typedEvent.toolCallId, span)
+          }
+        }
+        if (event.type === 'tool.completed' || event.type === 'tool.failed') {
+          const typedEvent = event as ToolCompletedEvent | ToolFailedEvent
+          const span = toolSpans.get(typedEvent.toolCallId)
+          if (span !== undefined) {
+            span.end()
+            toolSpans.delete(typedEvent.toolCallId)
+          }
+        }
+      },
     })
   }
 
@@ -750,6 +793,43 @@ class SessionRuntimeImpl implements SessionRuntime {
     }
 
     void logger[level](['runtime', 'run'], message, data)
+  }
+
+  /**
+   * 将工具事件写入 observer logger，scope 为 ['runtime', 'tool']。
+   * runtime 层记录所有 session 的工具事件，与 TaskExecutor 层的单任务摘要日志互补。
+   */
+  private logToolEvent(
+    event: ToolStartedEvent | ToolCompletedEvent | ToolFailedEvent,
+    fields: RunLineageFields
+  ): void {
+    const logger = this.options.logger
+
+    if (logger === undefined) {
+      return
+    }
+
+    if (event.type === 'tool.started') {
+      void logger.info(['runtime', 'tool'], 'tool.started', {
+        sessionId: fields.sessionId,
+        runId: fields.runId,
+        toolCallId: event.toolCallId,
+        toolName: event.invocation.toolName,
+      })
+    } else if (event.type === 'tool.completed') {
+      void logger.info(['runtime', 'tool'], 'tool.completed', {
+        sessionId: fields.sessionId,
+        runId: fields.runId,
+        toolCallId: event.toolCallId,
+      })
+    } else {
+      void logger.error(['runtime', 'tool'], 'tool.failed', {
+        sessionId: fields.sessionId,
+        runId: fields.runId,
+        toolCallId: event.toolCallId,
+        errorCode: event.error.code,
+      })
+    }
   }
 }
 
