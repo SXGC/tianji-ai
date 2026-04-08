@@ -115,6 +115,208 @@ function isLangGraphChainEnd(event: { event: string; name?: string }): boolean {
   return event.event === 'on_chain_end' && event.name === 'LangGraph'
 }
 
+/** 事件循环中共享的可变状态。 */
+interface StreamLoopState {
+  readonly messageId: string
+  readonly messageStartedAt: number
+  readonly observedToolCalls: DeepagentsPendingToolCall[]
+  readonly turnMessages: AppMessage[]
+  readonly builtinToolInvocations: Map<string, ToolInvocation>
+  currentThinking: string
+  currentText: string
+}
+
+/** 处理 on_chat_model_stream：累积文本和 thinking 增量并发射 delta 事件。 */
+function processChatModelStreamEvent(
+  state: StreamLoopState,
+  event: DeepagentsAgentEvent,
+  options: ExecuteDeepagentsRunOptions
+): void {
+  const text = readChunkText(event.data?.chunk)
+  if (text.length > 0) {
+    state.currentText += text
+    options.emitEvent({
+      type: 'message.delta',
+      runId: options.runId,
+      messageId: state.messageId,
+      sequence: nextSequence(options.sequence),
+      channel: 'text',
+      payload: { content: text },
+      timestamp: Date.now(),
+    })
+  }
+
+  const thinking = readChunkThinking(event.data?.chunk)
+  if (thinking.length > 0) {
+    state.currentThinking += thinking
+    options.emitEvent({
+      type: 'message.delta',
+      runId: options.runId,
+      messageId: state.messageId,
+      sequence: nextSequence(options.sequence),
+      channel: 'thinking',
+      payload: { content: thinking },
+      timestamp: Date.now(),
+    })
+  }
+
+  registerObservedToolCalls(event.data?.chunk, state.observedToolCalls)
+}
+
+/** 处理 on_chat_model_end：将累积内容打包为 turn message 并重置状态。 */
+function processChatModelEndEvent(state: StreamLoopState, event: DeepagentsAgentEvent): void {
+  registerObservedToolCalls(event.data?.output, state.observedToolCalls)
+
+  const parts: MessagePart[] = []
+  if (state.currentThinking.length > 0) {
+    parts.push({ type: 'thinking', thinking: state.currentThinking })
+  }
+  if (state.currentText.length > 0) {
+    parts.push({ type: 'text', text: state.currentText })
+  }
+  for (const tc of state.observedToolCalls.filter((c) => !c.consumed)) {
+    parts.push({
+      type: 'tool-call',
+      toolCallId: tc.toolCallId,
+      toolName: tc.toolName,
+      args: tc.args,
+    })
+  }
+
+  if (parts.length > 0) {
+    state.turnMessages.push({
+      id: `msg_${randomUUID()}`,
+      role: 'assistant',
+      content: parts,
+      createdAt: Date.now(),
+    })
+  }
+
+  state.currentThinking = ''
+  state.currentText = ''
+}
+
+/** 处理 LangGraph chain end：当 on_chat_model_end 未触发时从 output 构建兜底消息。 */
+function processChainEndEvent(state: StreamLoopState, event: DeepagentsAgentEvent): void {
+  const hasAssistantWithText = state.turnMessages.some(
+    (m) => m.role === 'assistant' && m.content.some((p) => p.type === 'text')
+  )
+  if (!hasAssistantWithText) {
+    const fallbackMessage = buildAssistantMessageFromDeepagentsOutput(
+      state.messageId,
+      state.messageStartedAt,
+      state.currentText,
+      event.data?.output
+    )
+    state.turnMessages.push(fallbackMessage)
+  }
+}
+
+/** 处理 on_tool_start：为内置工具（非 ToolCatalog 中的工具）发射 started 事件。 */
+function processToolStartEvent(
+  state: StreamLoopState,
+  event: DeepagentsAgentEvent,
+  options: ExecuteDeepagentsRunOptions
+): void {
+  if (options.toolCatalog.getTool(event.name) !== undefined) {
+    return
+  }
+  const toolCallId = event.run_id
+  const invocation: ToolInvocation = {
+    toolCallId,
+    toolName: event.name,
+    args: (event.data?.input ?? {}) as Record<string, unknown>,
+  }
+  state.builtinToolInvocations.set(toolCallId, invocation)
+  options.emitEvent({
+    type: 'tool.started',
+    runId: options.runId,
+    toolCallId,
+    invocation,
+    timestamp: Date.now(),
+  })
+}
+
+/** 处理 on_tool_end：为内置工具发射 completed 事件并记录 tool-result 消息。 */
+function processToolEndEvent(
+  state: StreamLoopState,
+  event: DeepagentsAgentEvent,
+  options: ExecuteDeepagentsRunOptions
+): void {
+  if (options.toolCatalog.getTool(event.name) !== undefined) {
+    return
+  }
+  const toolCallId = event.run_id
+  const invocation = state.builtinToolInvocations.get(toolCallId)
+  if (invocation === undefined) {
+    throw new TianjiError(
+      'internal',
+      'TOOL_EVENT_ORPHAN',
+      `on_tool_end without matching on_tool_start: run_id=${toolCallId}`
+    )
+  }
+  state.builtinToolInvocations.delete(toolCallId)
+
+  state.turnMessages.push({
+    id: `msg_${randomUUID()}`,
+    role: 'tool',
+    content: [
+      {
+        type: 'tool-result',
+        toolCallId,
+        toolName: invocation.toolName,
+        result: event.data?.output,
+      },
+    ],
+    createdAt: Date.now(),
+  })
+
+  options.emitEvent({
+    type: 'tool.completed',
+    runId: options.runId,
+    toolCallId,
+    invocation,
+    result: {
+      toolCallId,
+      result: event.data?.output,
+    },
+    timestamp: Date.now(),
+  })
+}
+
+/**
+ * 将单个流式事件分发到对应的处理函数。
+ *
+ * 从 {@link executeDeepagentsRun} 的事件循环中提取，负责根据事件类型将
+ * `on_chat_model_stream`、`on_chat_model_end`、LangGraph chain end、
+ * `on_tool_start`、`on_tool_end` 路由到各自的处理器。
+ */
+function dispatchStreamEvent(
+  loopState: StreamLoopState,
+  event: DeepagentsAgentEvent,
+  options: ExecuteDeepagentsRunOptions
+): void {
+  if (event.event === 'on_chat_model_stream') {
+    processChatModelStreamEvent(loopState, event, options)
+    return
+  }
+  if (event.event === 'on_chat_model_end') {
+    processChatModelEndEvent(loopState, event)
+    return
+  }
+  if (isLangGraphChainEnd(event)) {
+    processChainEndEvent(loopState, event)
+    return
+  }
+  if (event.event === 'on_tool_start') {
+    processToolStartEvent(loopState, event, options)
+    return
+  }
+  if (event.event === 'on_tool_end') {
+    processToolEndEvent(loopState, event, options)
+  }
+}
+
 /**
  * 执行一次 deepagents 运行并将其完整映射为 RuntimeEvent / RunResult。
  *
@@ -147,7 +349,6 @@ export async function executeDeepagentsRun(
   }
   const observedToolCalls: DeepagentsPendingToolCall[] = []
   const turnMessages: AppMessage[] = []
-  let currentThinking = ''
   let currentText = ''
   const builtinToolInvocations = new Map<string, ToolInvocation>()
   const threadId = options.threadId ?? options.sessionId
@@ -183,157 +384,21 @@ export async function executeDeepagentsRun(
     signal: options.signal,
   })
 
-  for await (const event of events) {
-    if (event.event === 'on_chat_model_stream') {
-      const text = readChunkText(event.data?.chunk)
-      if (text.length > 0) {
-        currentText += text
-        options.emitEvent({
-          type: 'message.delta',
-          runId: options.runId,
-          messageId,
-          sequence: nextSequence(options.sequence),
-          channel: 'text',
-          payload: { content: text },
-          timestamp: Date.now(),
-        })
-      }
-
-      const thinking = readChunkThinking(event.data?.chunk)
-      if (thinking.length > 0) {
-        currentThinking += thinking
-        options.emitEvent({
-          type: 'message.delta',
-          runId: options.runId,
-          messageId,
-          sequence: nextSequence(options.sequence),
-          channel: 'thinking',
-          payload: { content: thinking },
-          timestamp: Date.now(),
-        })
-      }
-
-      registerObservedToolCalls(event.data?.chunk, observedToolCalls)
-      continue
-    }
-
-    if (event.event === 'on_chat_model_end') {
-      registerObservedToolCalls(event.data?.output, observedToolCalls)
-
-      const parts: MessagePart[] = []
-      if (currentThinking.length > 0) {
-        parts.push({ type: 'thinking', thinking: currentThinking })
-      }
-      if (currentText.length > 0) {
-        parts.push({ type: 'text', text: currentText })
-      }
-      for (const tc of observedToolCalls.filter((c) => !c.consumed)) {
-        parts.push({
-          type: 'tool-call',
-          toolCallId: tc.toolCallId,
-          toolName: tc.toolName,
-          args: tc.args,
-        })
-      }
-
-      if (parts.length > 0) {
-        turnMessages.push({
-          id: `msg_${randomUUID()}`,
-          role: 'assistant',
-          content: parts,
-          createdAt: Date.now(),
-        })
-      }
-
-      currentThinking = ''
-      currentText = ''
-      continue
-    }
-
-    if (isLangGraphChainEnd(event)) {
-      // 兜底：某些 LLM provider 不触发 on_chat_model_end，最终文本只能从 LangGraph output 中提取。
-      // 检查 turnMessages 中是否已有包含文本的 assistant 消息；若无则从 output 构建。
-      const hasAssistantWithText = turnMessages.some(
-        (m) => m.role === 'assistant' && m.content.some((p) => p.type === 'text')
-      )
-      if (!hasAssistantWithText) {
-        const fallbackMessage = buildAssistantMessageFromDeepagentsOutput(
-          messageId,
-          messageStartedAt,
-          currentText,
-          event.data?.output
-        )
-        turnMessages.push(fallbackMessage)
-      }
-      continue
-    }
-
-    // 内置工具事件：不在 ToolCatalog 中的工具（deepagents middleware 注入的 ls/read/write/edit/execute）
-    // 外部工具事件：由 executeDeepagentsToolCall 负责 emit，这里跳过
-    if (event.event === 'on_tool_start') {
-      if (options.toolCatalog.getTool(event.name) !== undefined) {
-        continue
-      }
-      const toolCallId = event.run_id
-      const invocation: ToolInvocation = {
-        toolCallId,
-        toolName: event.name,
-        args: (event.data?.input ?? {}) as Record<string, unknown>,
-      }
-      builtinToolInvocations.set(toolCallId, invocation)
-      options.emitEvent({
-        type: 'tool.started',
-        runId: options.runId,
-        toolCallId,
-        invocation,
-        timestamp: Date.now(),
-      })
-      continue
-    }
-
-    if (event.event === 'on_tool_end') {
-      if (options.toolCatalog.getTool(event.name) !== undefined) {
-        continue
-      }
-      const toolCallId = event.run_id
-      const invocation = builtinToolInvocations.get(toolCallId)
-      if (invocation === undefined) {
-        throw new TianjiError(
-          'internal',
-          'TOOL_EVENT_ORPHAN',
-          `on_tool_end without matching on_tool_start: run_id=${toolCallId}`
-        )
-      }
-      builtinToolInvocations.delete(toolCallId)
-
-      // 内置工具的 tool-result 消息
-      turnMessages.push({
-        id: `msg_${randomUUID()}`,
-        role: 'tool',
-        content: [
-          {
-            type: 'tool-result',
-            toolCallId,
-            toolName: invocation.toolName,
-            result: event.data?.output,
-          },
-        ],
-        createdAt: Date.now(),
-      })
-
-      options.emitEvent({
-        type: 'tool.completed',
-        runId: options.runId,
-        toolCallId,
-        invocation,
-        result: {
-          toolCallId,
-          result: event.data?.output,
-        },
-        timestamp: Date.now(),
-      })
-    }
+  const loopState: StreamLoopState = {
+    messageId,
+    messageStartedAt,
+    observedToolCalls,
+    turnMessages,
+    builtinToolInvocations,
+    currentThinking: '',
+    currentText: '',
   }
+
+  for await (const event of events) {
+    dispatchStreamEvent(loopState, event, options)
+  }
+
+  currentText = loopState.currentText
 
   const stateSnapshot = await maybeReadDeepagentsStateSnapshot(agent, options, threadId)
   const stateMetadata =
@@ -806,7 +871,7 @@ function readContentBlocks(chunk: unknown): Array<Record<string, unknown>> {
   if (!isRecord(chunk)) return []
   if (Array.isArray(chunk.content)) return chunk.content.filter(isRecord)
   const kwargs = readChunkKwargs(chunk)
-  if (Array.isArray(kwargs?.content)) return kwargs!.content.filter(isRecord)
+  if (kwargs !== undefined && Array.isArray(kwargs.content)) return kwargs.content.filter(isRecord)
   return []
 }
 
@@ -826,10 +891,11 @@ function readChunkThinking(chunk: unknown): string {
   }
 
   const kwargs = readChunkKwargs(chunk)
-  const additionalKwargs = isRecord(kwargs?.additional_kwargs)
-    ? (kwargs!.additional_kwargs as Record<string, unknown>)
-    : undefined
-  if (typeof additionalKwargs?.reasoning_content === 'string') {
+  const additionalKwargs =
+    kwargs !== undefined && isRecord(kwargs.additional_kwargs)
+      ? kwargs.additional_kwargs
+      : undefined
+  if (additionalKwargs !== undefined && typeof additionalKwargs.reasoning_content === 'string') {
     return additionalKwargs.reasoning_content
   }
 

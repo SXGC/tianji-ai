@@ -131,7 +131,9 @@ export class ControlPlaneConnection {
 
       try {
         const command = await this.#client.pollCommand(30000, this.#pollAbortController.signal)
-        if (command !== null) {
+        if (command === null) {
+          await sleep(this.#config.emptyPollBackoffMs ?? 25)
+        } else {
           await this.#config.logger?.logInfo(this.#scope, 'Received control plane task', {
             commandId: command.commandId,
             taskId: command.payload.taskId,
@@ -142,8 +144,6 @@ export class ControlPlaneConnection {
             command,
           })
           this.#config.onCommand(command)
-        } else {
-          await sleep(this.#config.emptyPollBackoffMs ?? 25)
         }
       } catch (error) {
         if (error instanceof Error && error.name === 'AbortError') {

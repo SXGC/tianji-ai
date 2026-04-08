@@ -41,7 +41,7 @@ import type { LlmGenerationConfig } from './llm/index.js'
 import type { SnapshotStore } from './snapshot-store.js'
 import { InMemorySnapshotStore } from './snapshot-store.js'
 import { type RuntimeToolDefinition, type ToolCatalog, ToolRegistry } from './tool-catalog.js'
-import type { RuntimeProviderConfig, SessionRuntimeDeepagentsConfig } from './types.js'
+import type { SessionRuntimeDeepagentsConfig } from './types.js'
 
 export interface CreateSessionOptions {
   readonly sessionId?: SessionId
@@ -717,30 +717,25 @@ class SessionRuntimeImpl implements SessionRuntime {
           event.type === 'tool.completed' ||
           event.type === 'tool.failed'
         ) {
-          this.logToolEvent(
-            event as ToolStartedEvent | ToolCompletedEvent | ToolFailedEvent,
-            lineage
-          )
+          this.logToolEvent(event, lineage)
         }
         if (event.type === 'message.completed') {
-          this.logMessageEvent(event as MessageCompletedEvent, lineage)
+          this.logMessageEvent(event, lineage)
         }
         if (event.type === 'tool.started') {
-          const typedEvent = event as ToolStartedEvent
           const span = startToolSpan({
-            toolName: typedEvent.invocation.toolName,
+            toolName: event.invocation.toolName,
             runId: event.runId,
           })
           if (span !== undefined) {
-            toolSpans.set(typedEvent.toolCallId, span)
+            toolSpans.set(event.toolCallId, span)
           }
         }
         if (event.type === 'tool.completed' || event.type === 'tool.failed') {
-          const typedEvent = event as ToolCompletedEvent | ToolFailedEvent
-          const span = toolSpans.get(typedEvent.toolCallId)
+          const span = toolSpans.get(event.toolCallId)
           if (span !== undefined) {
             span.end()
-            toolSpans.delete(typedEvent.toolCallId)
+            toolSpans.delete(event.toolCallId)
           }
         }
       },

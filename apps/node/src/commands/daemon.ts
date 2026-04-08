@@ -20,7 +20,9 @@ import { parseRegisterUrl } from './register.js'
 
 import type { TianjiConfig } from '@tianji/shared'
 
-import type { CommandDefinition } from './types.js'
+import type { CliDependencies, CommandDefinition } from './types.js'
+
+import type { I18n } from '../i18n/index.js'
 
 const DAEMON_START_SCOPE = ['cli', 'daemon', 'start'] as const
 const DAEMON_STOP_SCOPE = ['cli', 'daemon', 'stop'] as const
@@ -254,6 +256,123 @@ async function waitForControlPlaneSettled(
   }
 }
 
+/**
+ * 处理 --register URL 参数：解析、确认覆盖、保存配置。
+ *
+ * @returns 0 表示用户拒绝覆盖，undefined 表示成功
+ */
+async function handleRegisterUrl(
+  paths: UserConfigPaths,
+  registerUrl: string,
+  config: Partial<TianjiConfig>,
+  storedControlPlaneConfig: ReturnType<typeof readStoredControlPlaneConfig>,
+  deps: CliDependencies | undefined,
+  i18n: I18n
+): Promise<number | undefined> {
+  const parsed = parseRegisterUrl(registerUrl)
+  const candidate = buildStoredControlPlaneConfig(parsed)
+  const stored = storedControlPlaneConfig
+
+  await logDebug(paths, DAEMON_START_SCOPE, 'Parsed register URL', {
+    baseUrl: candidate.baseUrl,
+    nodeId: candidate.nodeId,
+  })
+
+  if (stored && !areStoredControlPlaneConfigsEqual(stored, candidate)) {
+    await logInfo(
+      paths,
+      DAEMON_START_SCOPE,
+      'Stored control plane config differs from register URL',
+      { baseUrl: candidate.baseUrl, nodeId: candidate.nodeId }
+    )
+    const confirm =
+      deps?.confirmOverwrite ??
+      (async (message: string) => {
+        const readline = await import('node:readline/promises')
+        const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
+        const answer = await rl.question(`${message} [y/N] `)
+        rl.close()
+        return answer.toLowerCase() === 'y'
+      })
+    const accepted = await confirm(i18n.t('daemon.register.confirm_overwrite'))
+    if (!accepted) {
+      await logInfo(paths, DAEMON_START_SCOPE, 'Registration config overwrite declined', {
+        baseUrl: candidate.baseUrl,
+        nodeId: candidate.nodeId,
+      })
+      process.stderr.write(`${i18n.t('daemon.register.declined')}\n`)
+      return 0
+    }
+  }
+
+  if (!stored || !areStoredControlPlaneConfigsEqual(stored, candidate)) {
+    const saveConfig =
+      deps?.saveConfig ??
+      (async (c: Partial<TianjiConfig>) => {
+        await writeFile(paths.configFilePath, `${JSON.stringify(c, null, 2)}\n`, 'utf8')
+      })
+    await saveConfig({
+      ...config,
+      controlPlane: {
+        baseUrl: candidate.baseUrl,
+        enrollmentToken: candidate.enrollmentToken,
+        nodeId: String(candidate.nodeId),
+        hostname: candidate.hostname,
+        platform: candidate.platform,
+        version: candidate.version,
+      },
+    })
+    await logInfo(paths, DAEMON_START_SCOPE, 'Saved control plane registration config', {
+      baseUrl: candidate.baseUrl,
+      nodeId: candidate.nodeId,
+    })
+    process.stdout.write(`${i18n.t('daemon.register.saved')}\n`)
+  } else {
+    await logDebug(paths, DAEMON_START_SCOPE, 'Reusing existing control plane config', {
+      baseUrl: candidate.baseUrl,
+      nodeId: candidate.nodeId,
+    })
+  }
+
+  return undefined
+}
+
+/**
+ * 检查已有 daemon 进程状态，确保可以安全启动新进程。
+ *
+ * @returns 非 undefined 时表示应提前退出并使用该退出码
+ */
+async function ensureDaemonSlotAvailable(
+  paths: UserConfigPaths,
+  i18n: I18n
+): Promise<number | undefined> {
+  const existingClient = await tryCreateDaemonClient(paths)
+  if (existingClient !== undefined) {
+    try {
+      const ping = await existingClient.ping()
+      await logInfo(paths, DAEMON_START_SCOPE, 'Daemon already running', { pid: ping.pid })
+      process.stdout.write(`${i18n.t('daemon.already_running', { pid: ping.pid })}\n`)
+      return 0
+    } catch {
+      if (await ensureNoOrphanedDaemon(paths)) {
+        process.stderr.write(
+          'Daemon process is still running but not responding. Stop it before starting a new one.\n'
+        )
+        return 1
+      }
+      await logDebug(paths, DAEMON_START_SCOPE, 'Removing stale daemon files before start')
+      await cleanupStaleDaemonFiles(paths)
+    }
+  } else if (await ensureNoOrphanedDaemon(paths)) {
+    process.stderr.write(
+      'Daemon process is still running but state files are inconsistent. Stop it before starting a new one.\n'
+    )
+    return 1
+  }
+
+  return undefined
+}
+
 const daemonStartCommand: CommandDefinition = {
   name: 'start',
   description: 'cmd.daemon.start.description',
@@ -281,72 +400,16 @@ const daemonStartCommand: CommandDefinition = {
     })
 
     if (registerUrl) {
-      const parsed = parseRegisterUrl(registerUrl)
-      const candidate = buildStoredControlPlaneConfig(parsed)
-      const stored = storedControlPlaneConfig
-
-      await logDebug(paths, DAEMON_START_SCOPE, 'Parsed register URL', {
-        baseUrl: candidate.baseUrl,
-        nodeId: candidate.nodeId,
-      })
-
-      if (stored && !areStoredControlPlaneConfigsEqual(stored, candidate)) {
-        await logInfo(
-          paths,
-          DAEMON_START_SCOPE,
-          'Stored control plane config differs from register URL',
-          {
-            baseUrl: candidate.baseUrl,
-            nodeId: candidate.nodeId,
-          }
-        )
-        const confirm =
-          deps?.confirmOverwrite ??
-          (async (message: string) => {
-            const readline = await import('node:readline/promises')
-            const rl = readline.createInterface({ input: process.stdin, output: process.stderr })
-            const answer = await rl.question(`${message} [y/N] `)
-            rl.close()
-            return answer.toLowerCase() === 'y'
-          })
-        const accepted = await confirm(i18n.t('daemon.register.confirm_overwrite'))
-        if (!accepted) {
-          await logInfo(paths, DAEMON_START_SCOPE, 'Registration config overwrite declined', {
-            baseUrl: candidate.baseUrl,
-            nodeId: candidate.nodeId,
-          })
-          process.stderr.write(`${i18n.t('daemon.register.declined')}\n`)
-          return 0
-        }
-      }
-
-      if (!stored || !areStoredControlPlaneConfigsEqual(stored, candidate)) {
-        const saveConfig =
-          deps?.saveConfig ??
-          (async (c: Partial<TianjiConfig>) => {
-            await writeFile(paths.configFilePath, `${JSON.stringify(c, null, 2)}\n`, 'utf8')
-          })
-        await saveConfig({
-          ...config,
-          controlPlane: {
-            baseUrl: candidate.baseUrl,
-            enrollmentToken: candidate.enrollmentToken,
-            nodeId: String(candidate.nodeId),
-            hostname: candidate.hostname,
-            platform: candidate.platform,
-            version: candidate.version,
-          },
-        })
-        await logInfo(paths, DAEMON_START_SCOPE, 'Saved control plane registration config', {
-          baseUrl: candidate.baseUrl,
-          nodeId: candidate.nodeId,
-        })
-        process.stdout.write(`${i18n.t('daemon.register.saved')}\n`)
-      } else {
-        await logDebug(paths, DAEMON_START_SCOPE, 'Reusing existing control plane config', {
-          baseUrl: candidate.baseUrl,
-          nodeId: candidate.nodeId,
-        })
+      const registerResult = await handleRegisterUrl(
+        paths,
+        registerUrl,
+        config,
+        storedControlPlaneConfig,
+        deps,
+        i18n
+      )
+      if (registerResult !== undefined) {
+        return registerResult
       }
     } else {
       const stored = storedControlPlaneConfig
@@ -362,31 +425,9 @@ const daemonStartCommand: CommandDefinition = {
       })
     }
 
-    const existingClient = await tryCreateDaemonClient(paths)
-    if (existingClient !== undefined) {
-      try {
-        const ping = await existingClient.ping()
-        await logInfo(paths, DAEMON_START_SCOPE, 'Daemon already running', {
-          pid: ping.pid,
-        })
-        process.stdout.write(`${i18n.t('daemon.already_running', { pid: ping.pid })}\n`)
-        return undefined
-      } catch {
-        if (await ensureNoOrphanedDaemon(paths)) {
-          process.stderr.write(
-            'Daemon process is still running but not responding. Stop it before starting a new one.\n'
-          )
-          return 1
-        }
-
-        await logDebug(paths, DAEMON_START_SCOPE, 'Removing stale daemon files before start')
-        await cleanupStaleDaemonFiles(paths)
-      }
-    } else if (await ensureNoOrphanedDaemon(paths)) {
-      process.stderr.write(
-        'Daemon process is still running but state files are inconsistent. Stop it before starting a new one.\n'
-      )
-      return 1
+    const slotResult = await ensureDaemonSlotAvailable(paths, i18n)
+    if (slotResult !== undefined) {
+      return slotResult
     }
 
     if (options.fg === true) {

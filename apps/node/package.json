@@ -17,7 +17,7 @@
     "test:smoke": "vitest run src/__tests__/run-e2e.test.ts",
     "test:watch": "vitest",
     "clean": "rm -rf dist",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage --pool threads --no-file-parallelism --maxWorkers 1"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.18.0",

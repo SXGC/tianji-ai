@@ -44,6 +44,30 @@ function fillEmptyMessage(
   )
 }
 
+/**
+ * 将目标消息的文本替换为指定内容，保留已有文本作为兜底。
+ *
+ * @param messages - 当前消息列表
+ * @param targetId - 目标消息 id
+ * @param text - 替换文本
+ * @param fallbackText - 当 text 为空且消息文本也为空时的兜底文本
+ */
+function replaceMessageText(
+  messages: ChatMessage[],
+  targetId: string,
+  text: string | null,
+  fallbackText: string
+): ChatMessage[] {
+  return messages.map((message) =>
+    message.id === targetId
+      ? {
+          ...message,
+          text: text ?? (message.text.trim().length > 0 ? message.text : fallbackText),
+        }
+      : message
+  )
+}
+
 export const Route = createRoute({
   getParentRoute: () => RootRoute,
   path: '/',
@@ -124,16 +148,7 @@ export function IndexRouteComponent() {
         onError: (errorMessage) => {
           setSending(false)
           setMessages((current) =>
-            current.map((message) =>
-              message.id === assistantId
-                ? {
-                    ...message,
-                    text:
-                      errorMessage ??
-                      (message.text.trim().length > 0 ? message.text : '任务执行失败。'),
-                  }
-                : message
-            )
+            replaceMessageText(current, assistantId, errorMessage, '任务执行失败。')
           )
         },
       })

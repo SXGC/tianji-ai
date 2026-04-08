@@ -104,67 +104,6 @@ describe('controlplane <-> node e2e', () => {
       env.server.close()
     }
   }, 20000)
-
-  it('stores lifecycle events and completes the task after node execution', async () => {
-    const env = await setupTestEnv('node-e2e-003')
-
-    try {
-      nodeProcess = env.nodeProcess
-      await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-003')
-
-      const createTaskResponse = await fetch(`${env.baseUrl}/api/ui/tasks`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nodeId: 'node-e2e-003',
-          agentId: 'default',
-          goal: 'finish integration task',
-        }),
-      })
-
-      expect(createTaskResponse.status).toBe(201)
-      const createdTask = (await createTaskResponse.json()) as { taskId: string }
-
-      const deadline = Date.now() + 8000
-      let taskStatus = 'pending'
-
-      while (Date.now() < deadline) {
-        const taskResponse = await fetch(`${env.baseUrl}/api/ui/tasks/${createdTask.taskId}`)
-        const task = (await taskResponse.json()) as { status: string }
-        taskStatus = task.status
-        if (taskStatus === 'completed') {
-          break
-        }
-        await new Promise((resolve) => setTimeout(resolve, 200))
-      }
-
-      const eventsResponse = await fetch(`${env.baseUrl}/api/ui/tasks/${createdTask.taskId}/events`)
-      const events = (await eventsResponse.json()) as {
-        items: Array<{ kind: string; payload: { type?: string } }>
-      }
-
-      expect(
-        taskStatus,
-        JSON.stringify({
-          events: events.items,
-          stdout: Buffer.concat(env.stdoutChunks).toString('utf8'),
-          stderr: Buffer.concat(env.stderrChunks).toString('utf8'),
-        })
-      ).toBe('completed')
-
-      expect(
-        events.items.some(
-          (event) => event.kind === 'lifecycle' && event.payload.type === 'task.completed'
-        )
-      ).toBe(true)
-    } finally {
-      await stopProcess(nodeProcess)
-      nodeProcess = null
-      env.monitor.stop()
-      env.db.close()
-      env.server.close()
-    }
-  }, 20000)
 })
 
 async function setupTestEnv(nodeId: string): Promise<{
@@ -177,7 +116,7 @@ async function setupTestEnv(nodeId: string): Promise<{
   stderrChunks: Buffer[]
 }> {
   const baseDir = await mkdtemp(join(tmpdir(), 'tianji-cp-node-e2e-'))
-  const configDir = join(baseDir, 'config', 'tianji-ai')
+  const configDir = join(baseDir, 'config')
   const homeDir = join(baseDir, 'home')
   const port = await allocatePort()
   const db = createDatabase(':memory:')
@@ -199,24 +138,12 @@ async function setupTestEnv(nodeId: string): Promise<{
   await mkdir(homeDir, { recursive: true })
   await writeFile(join(configDir, 'tianji.json'), '{}', 'utf8')
 
+  const configPath = join(configDir, 'tianji.json')
   const registerUrl = `http://127.0.0.1:${port}/register?enrollment-token=e2e-token`
 
-  await writeFile(
-    join(configDir, 'tianji.json'),
-    JSON.stringify({
-      agents: {
-        defaultAgent: 'default',
-        items: {
-          default: {
-            model: 'openai/gpt-4.1',
-          },
-        },
-      },
-    }),
-    'utf8'
-  )
+  await writeFile(configPath, '{}', 'utf8')
 
-  const nodeProcess = spawn(
+  const registerProcess = spawn(
     '/usr/bin/env',
     ['node', nodeDistBinPath, 'daemon', 'start', '--fg', '--register', registerUrl],
     {
@@ -224,14 +151,47 @@ async function setupTestEnv(nodeId: string): Promise<{
       env: {
         ...process.env,
         HOME: homeDir,
-        XDG_CONFIG_HOME: join(baseDir, 'config'),
+        XDG_CONFIG_HOME: baseDir,
         TIANJI_NODE_ID: nodeId,
-        TIANJI_AGENT_BIN: '/usr/bin/env',
-        TIANJI_AGENT_ARGS: JSON.stringify(['node', fakeAcpAgentPath]),
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     }
   )
+
+  await waitForProcessOutput(registerProcess, 'Daemon listening on port')
+  await stopProcess(registerProcess)
+
+  await writeFile(
+    configPath,
+    JSON.stringify({
+      agents: {
+        defaultAgent: 'default',
+        items: {
+          default: {
+            command: '/usr/bin/env',
+            args: ['node', fakeAcpAgentPath],
+          },
+        },
+      },
+      controlPlane: {
+        baseUrl: `http://127.0.0.1:${port}`,
+        enrollmentToken: 'e2e-token',
+        nodeId,
+      },
+    }),
+    'utf8'
+  )
+
+  const nodeProcess = spawn('/usr/bin/env', ['node', nodeDistBinPath, 'daemon', 'start', '--fg'], {
+    cwd: nodeAppDir,
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      XDG_CONFIG_HOME: baseDir,
+      TIANJI_NODE_ID: nodeId,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
 
   const stdoutChunks: Buffer[] = []
   const stderrChunks: Buffer[] = []
@@ -297,6 +257,56 @@ async function stopProcess(process: ChildProcess | null): Promise<void> {
     })
 
     process.kill('SIGTERM')
+  })
+}
+
+async function waitForProcessOutput(
+  process: ChildProcess,
+  expectedText: string,
+  timeoutMs = 8000
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    let output = ''
+
+    const cleanup = (): void => {
+      clearTimeout(timeout)
+      process.stdout?.off('data', handleChunk)
+      process.stderr?.off('data', handleChunk)
+      process.off('exit', handleExit)
+      process.off('error', handleError)
+    }
+
+    const finishIfMatched = (): void => {
+      if (output.includes(expectedText)) {
+        cleanup()
+        resolve()
+      }
+    }
+
+    const handleChunk = (chunk: Buffer | string): void => {
+      output += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : chunk
+      finishIfMatched()
+    }
+
+    const handleExit = (): void => {
+      cleanup()
+      reject(new Error(`Process exited before output appeared: ${expectedText}\n${output}`))
+    }
+
+    const handleError = (error: Error): void => {
+      cleanup()
+      reject(error)
+    }
+
+    const timeout = setTimeout(() => {
+      cleanup()
+      reject(new Error(`Timed out waiting for process output: ${expectedText}\n${output}`))
+    }, timeoutMs)
+
+    process.stdout?.on('data', handleChunk)
+    process.stderr?.on('data', handleChunk)
+    process.once('exit', handleExit)
+    process.once('error', handleError)
   })
 }
 

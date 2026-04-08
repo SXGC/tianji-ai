@@ -105,7 +105,7 @@ export class TaskExecutor {
 
       for await (const event of runner.query(command.payload.goal)) {
         if (event != null) {
-          turn = handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
+          turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
         }
 
         await eventStream.write(
@@ -185,13 +185,13 @@ function extractToolCallLabel(event: ToolCompletedEvent | ToolFailedEvent): stri
   return `${event.invocation.toolName} [${status}]`
 }
 
-function handleEvent(
+async function handleEvent(
   logger: RuntimeLogger | undefined,
   scope: ObserverLogScope,
   taskId: string,
   turn: TurnSummary | null,
   event: RuntimeEvent
-): TurnSummary | null {
+): Promise<TurnSummary | null> {
   if (event.type === 'run.started') {
     return { runId: event.runId, eventCount: 1, messageCount: 0, toolCallCount: 0 }
   }
@@ -204,7 +204,7 @@ function handleEvent(
 
   if (event.type === 'message.completed') {
     turn.messageCount += 1
-    void logger?.logInfo(scope, 'Message completed', {
+    await logger?.logInfo(scope, 'Message completed', {
       taskId,
       runId: event.runId,
       messageId: event.messageId,
@@ -212,7 +212,7 @@ function handleEvent(
     })
   } else if (event.type === 'tool.completed') {
     turn.toolCallCount += 1
-    void logger?.logInfo(scope, 'Tool call completed', {
+    await logger?.logInfo(scope, 'Tool call completed', {
       taskId,
       runId: event.runId,
       toolCallId: event.toolCallId,
@@ -222,7 +222,7 @@ function handleEvent(
     })
   } else if (event.type === 'tool.failed') {
     turn.toolCallCount += 1
-    void logger?.logError(scope, 'Tool call failed', {
+    await logger?.logError(scope, 'Tool call failed', {
       taskId,
       runId: event.runId,
       toolCallId: event.toolCallId,
@@ -236,7 +236,7 @@ function handleEvent(
     event.type === 'run.failed' ||
     event.type === 'run.cancelled'
   ) {
-    void logger?.logInfo(scope, 'Run turn summary', {
+    await logger?.logInfo(scope, 'Run turn summary', {
       taskId,
       runId: turn.runId,
       endReason: event.type,

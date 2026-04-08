@@ -67,13 +67,8 @@ export async function followCliLog(
     }
 
     if (!hasReplayedInitialLines) {
-      const initialReadOffset = await replayLatestCliLogLines(
-        logFilePath,
-        nextStat.size,
-        options.lines ?? 100,
-        i18n
-      )
-      offset = initialReadOffset
+      await replayLatestCliLogLines(logFilePath, nextStat.size, options.lines ?? 100, i18n)
+      offset = nextStat.size
       lastIno = nextStat.ino
       hasReplayedInitialLines = true
       await sleep(LOG_FOLLOW_POLL_INTERVAL_MS)
@@ -271,6 +266,33 @@ export async function readCliLogChunk(
  * @param lineCount - 需要的尾部行数
  * @returns 尾部文本内容
  */
+/**
+ * 在 chunk 中从后向前扫描换行符，统计行数。
+ * 找到目标行数时提前返回结果字符串，否则返回 null。
+ */
+function scanChunkForNewlines(
+  chunk: Buffer,
+  bytesRead: number,
+  startLinesFound: number,
+  lineCount: number,
+  collectedChunks: Buffer[]
+): { linesFound: number; result: string | null } {
+  let linesFound = startLinesFound
+  for (let i = bytesRead - 1; i >= 0; i--) {
+    if (chunk[i] === 0x0a) {
+      linesFound++
+      if (linesFound >= lineCount) {
+        const collected = chunk.subarray(i + 1)
+        if (collected.length > 0) {
+          collectedChunks.unshift(collected)
+        }
+        return { linesFound, result: Buffer.concat(collectedChunks).toString('utf8') }
+      }
+    }
+  }
+  return { linesFound, result: null }
+}
+
 export async function readCliLogTail(
   logFilePath: string,
   fileSize: number,
@@ -303,17 +325,16 @@ export async function readCliLogTail(
 
       const readChunk = buffer.subarray(0, bytesRead)
 
-      for (let i = bytesRead - 1; i >= 0; i--) {
-        if (readChunk[i] === 0x0a) {
-          linesFound++
-          if (linesFound >= lineCount) {
-            const collected = readChunk.slice(i + 1)
-            if (collected.length > 0) {
-              collectedChunks.unshift(collected)
-            }
-            return Buffer.concat(collectedChunks).toString('utf8')
-          }
-        }
+      const scan = scanChunkForNewlines(
+        readChunk,
+        bytesRead,
+        linesFound,
+        lineCount,
+        collectedChunks
+      )
+      linesFound = scan.linesFound
+      if (scan.result !== null) {
+        return scan.result
       }
 
       collectedChunks.unshift(readChunk)
@@ -341,9 +362,9 @@ export async function replayLatestCliLogLines(
   fileSize: number,
   lineCount: number,
   i18n: I18n
-): Promise<number> {
+): Promise<void> {
   if (fileSize === 0 || lineCount <= 0) {
-    return fileSize
+    return
   }
 
   const tailText = await readCliLogTail(logFilePath, fileSize, lineCount)
@@ -364,8 +385,6 @@ export async function replayLatestCliLogLines(
 
     process.stdout.write(`${formatCliLogEntry(parsedEntry, supportsColor())}\n`)
   }
-
-  return fileSize
 }
 
 function renderCliLogChunk(remainder: string, chunk: string, i18n: I18n): string {

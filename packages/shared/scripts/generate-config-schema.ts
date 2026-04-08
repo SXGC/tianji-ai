@@ -60,6 +60,36 @@ const descriptions: Record<string, string> = {
 }
 
 /**
+ * 收集 JSON Schema 节点的子 schema（properties + additionalProperties）。
+ */
+function collectChildSchemas(
+  schema: Record<string, unknown>,
+  pointer: string
+): Array<{ schema: Record<string, unknown>; pointer: string }> {
+  const children: Array<{ schema: Record<string, unknown>; pointer: string }> = []
+
+  if (typeof schema.properties === 'object' && schema.properties !== null) {
+    for (const [key, value] of Object.entries(schema.properties as Record<string, unknown>)) {
+      if (typeof value === 'object' && value !== null) {
+        children.push({
+          schema: value as Record<string, unknown>,
+          pointer: `${pointer}/properties/${key}`,
+        })
+      }
+    }
+  }
+
+  if (typeof schema.additionalProperties === 'object' && schema.additionalProperties !== null) {
+    children.push({
+      schema: schema.additionalProperties as Record<string, unknown>,
+      pointer: `${pointer}/additionalProperties`,
+    })
+  }
+
+  return children
+}
+
+/**
  * Iteratively inject Chinese descriptions into the generated JSON Schema.
  * Uses an explicit stack instead of recursion.
  */
@@ -75,23 +105,7 @@ function applyDescriptions(root: Record<string, unknown>): void {
       schema.description = descriptions[pointer]
     }
 
-    if (typeof schema.properties === 'object' && schema.properties !== null) {
-      for (const [key, value] of Object.entries(schema.properties as Record<string, unknown>)) {
-        if (typeof value === 'object' && value !== null) {
-          stack.push({
-            schema: value as Record<string, unknown>,
-            pointer: `${pointer}/properties/${key}`,
-          })
-        }
-      }
-    }
-
-    if (typeof schema.additionalProperties === 'object' && schema.additionalProperties !== null) {
-      stack.push({
-        schema: schema.additionalProperties as Record<string, unknown>,
-        pointer: `${pointer}/additionalProperties`,
-      })
-    }
+    stack.push(...collectChildSchemas(schema, pointer))
   }
 }
 

@@ -127,7 +127,7 @@ export async function ensureDefaultUserConfig(
 export async function loadAgentContext(): Promise<LoadedAgentContext> {
   const paths = await ensureDefaultUserConfig()
   const resolvedConfig = await loadResolvedConfig()
-  const { agentName, agent } = getDefaultAgentDefinition(resolvedConfig.config)
+  const { agentName } = getDefaultAgentDefinition(resolvedConfig.config)
   return createLoadedAgentContext({
     paths,
     config: resolvedConfig.config,

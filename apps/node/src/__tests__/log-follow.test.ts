@@ -273,8 +273,7 @@ describe('replayLatestCliLogLines', () => {
     const i18n = createI18n('en')
 
     const output = await captureStdout(async () => {
-      const offset = await replayLatestCliLogLines(paths.cliLogFilePath, fileStat.size, 3, i18n)
-      expect(offset).toBe(fileStat.size)
+      await replayLatestCliLogLines(paths.cliLogFilePath, fileStat.size, 3, i18n)
     })
 
     const outputLines = output.trim().split('\n')
@@ -283,18 +282,14 @@ describe('replayLatestCliLogLines', () => {
     expect(outputLines[2]).toContain('line 9')
   })
 
-  it('returns fileSize when file is empty', async () => {
+  it('returns without error when file is empty', async () => {
     await writeFile(paths.cliLogFilePath, '')
     const { stat } = await import('node:fs/promises')
     const fileStat = await stat(paths.cliLogFilePath)
 
-    const offset = await replayLatestCliLogLines(
-      paths.cliLogFilePath,
-      fileStat.size,
-      10,
-      createI18n('en')
-    )
-    expect(offset).toBe(0)
+    await expect(
+      replayLatestCliLogLines(paths.cliLogFilePath, fileStat.size, 10, createI18n('en'))
+    ).resolves.toBeUndefined()
   })
 
   it('outputs all lines when lineCount exceeds total', async () => {

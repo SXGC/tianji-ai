@@ -28,7 +28,6 @@ import type {
   TextContent,
   ThinkingContent,
   ToolCall,
-  ToolResultContent,
 } from '@tianji/shared'
 import type { CoreMessage } from 'ai'
 

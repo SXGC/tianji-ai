@@ -1,8 +1,8 @@
 # Deep Agent 全量事件可观测性设计文档
 
 **日期：** 2026-04-08  
-**状态：** 待实现  
-**最后更新：** 2026-04-08（review 后修订）
+**状态：** 部分实现  
+**最后更新：** 2026-04-08（review 后修订，对照代码勘误）
 
 ---
 
@@ -10,131 +10,123 @@
 
 ### 现状
 
-当前 `deepagents-engine.ts` 中的事件循环只处理 3 种 LangGraph streamEvents v2 事件：
+`deepagents-engine.ts` 中的事件循环已处理 5 种 LangGraph streamEvents v2 事件：
 
-| 事件 | 处理方式 |
-|------|----------|
-| `on_chat_model_stream` | 提取文本增量 → `message.delta`；注册 observed tool calls |
-| `on_chat_model_end` | 注册 observed tool calls |
-| `on_chain_end`（name=LangGraph） | 提取最终消息 |
+| 事件 | 处理方式 | 状态 |
+|------|----------|------|
+| `on_chat_model_stream` | 提取文本增量 → `message.delta`；注册 observed tool calls | 已实现 |
+| `on_chat_model_end` | 注册 observed tool calls | 已实现 |
+| `on_chain_end`（name=LangGraph） | 提取最终消息 | 已实现 |
+| `on_tool_start` | 映射为 `tool.started` | 已实现，有 bug |
+| `on_tool_end` | 映射为 `tool.completed` | 已实现，有 bug |
 
-其余事件（`on_tool_start`、`on_tool_end`、`on_chain_start`、`on_chat_model_start` 等）全部被静默丢弃。
+其余事件（`on_chain_start`、`on_chat_model_start` 等）仍被静默丢弃（设计上暂不处理，见"已移除"章节）。
 
-### 问题
+### 已解决的问题
 
-1. Deep Agent 通过 `createFilesystemMiddleware` 自动注入的内置工具（ls、read、write、edit、execute）执行时，走的是 LangGraph 内部的 tool node，不经过 runtime 的 `executeDeepagentsToolCall`，因此不会产生 `tool.started` / `tool.completed` 事件。
-2. LLM 调用的开始时间、模型名称等信息未被捕获。
-3. 子图（subagent）的执行过程完全不可见。
-4. 已有的 `@tianji/observer` 的 `startToolSpan` 等 OpenTelemetry span 从未在 runtime 中被调用。
+1. ~~Deep Agent 内置工具不产生 `tool.started` / `tool.completed` 事件~~ — 事件循环已捕获 `on_tool_start` / `on_tool_end`。
+2. ~~`@tianji/observer` 的 `startToolSpan` 从未被调用~~ — `runtime.ts` 的 `emitEvent` 回调已接入 OTel span。
+3. ~~`tool.failed` 日志级别错误~~ — 已在 `b26b497` 中修复。
+
+### 遗留问题
+
+1. **`on_tool_start` 和 `on_tool_end` 的 `toolCallId` 无法关联**：两个事件各自生成独立的 `randomUUID()`，同一次工具调用的 start 和 end 的 ID 不同。导致 `runtime.ts` 中的 OTel span 在 `tool.completed` 时找不到对应的 span，永远无法关闭。
+2. **`on_tool_end` 丢失工具入参**：`tool.completed` 事件的 `invocation.args` 硬编码为 `{}`，无法追溯调用参数。
+3. **`DeepagentsAgentEvent` 接口缺少 `run_id` 字段**：langgraph 的 `StreamEvent` 实际包含 `run_id`（每个 runnable 执行的唯一 ID），但当前接口未声明，无法用于关联同一次工具调用的 start/end。
+4. LLM 调用的开始时间、模型名称等信息未被捕获（暂不处理，见"已移除"章节）。
+5. 子图（subagent）的执行过程完全不可见（暂不处理）。
 
 ### 影响
 
-- TaskExecutor 日志中 `toolCallCount: 0`，即使 agent 实际执行了工具。
-- 无法追踪 agent 的决策链路：模型思考 → 调用工具 → 获取结果 → 继续思考。
-- 运维排障缺少关键信息。
+- OTel tool span 泄漏：每次工具调用创建的 span 永远不会被 end()。
+- `tool.completed` 事件缺少入参信息，排障时无法看到工具被调用时的参数。
 
 ---
 
 ## 设计目标
 
-1. 捕获 LangGraph streamEvents v2 的所有事件类型，不丢弃任何行为信息。
-2. 将 `on_tool_start` / `on_tool_end` 映射为已有的 `tool.started` / `tool.completed` / `tool.failed`，使现有消费者（TaskExecutor、observer logger）无需改动即可生效。
-3. 为 LLM 调用、chain 执行等非工具事件提供统一的事件类型，供上层按需消费。
-4. 在 runtime 层接入 observer 的 OpenTelemetry span。
+1. 修复 `on_tool_start` / `on_tool_end` 的 `toolCallId` 关联问题，确保同一次工具调用的事件可追踪。
+2. 补全 `tool.completed` 事件中的 `invocation.args`。
+3. 保持现有消费者（TaskExecutor、observer logger、OTel span）无需改动。
 
 ---
 
 ## 设计方案
 
-### ~~第一步：在 RuntimeEvent 中新增 `agent.activity` 事件类型~~ [已移除]
+### ~~`agent.activity` 事件类型~~ [推迟]
 
 > **Review 结论：违反 KISS 原则，推迟实施。**
 >
-> `agent.activity`（`llm.start` / `llm.end` / `chain.start` / `chain.end`）当前没有任何消费者：
-> - TaskExecutor 只关心 `tool.*` / `run.*` / `message.*`
-> - observer logger 没有对 LLM/chain 事件的处理逻辑
->
-> 在没有明确消费者之前，新增事件类型只会增加维护负担。待后续有具体需求（如 LLM 调用耗时监控、子图可视化）时再引入。
+> `agent.activity`（`llm.start` / `llm.end` / `chain.start` / `chain.end`）当前没有任何消费者。
+> 待后续有具体需求（如 LLM 调用耗时监控、子图可视化）时再引入。
 
-### 第一步：修改 deepagents-engine.ts 事件循环
+### 第一步：扩展 `DeepagentsAgentEvent` 接口，增加 `run_id` [未实现]
 
-当前循环结构：
+langgraph 的 `StreamEvent` 包含 `run_id` 字段（每个 runnable 执行的唯一 ID），同一次工具调用的 `on_tool_start` 和 `on_tool_end` 共享同一个 `run_id`。当前 `DeepagentsAgentEvent` 接口未声明该字段。
 
 ```typescript
-for await (const event of events) {
-  if (event.event === 'on_chat_model_stream') { ... continue }
-  if (event.event === 'on_chat_model_end') { ... continue }
-  if (isLangGraphChainEnd(event)) { ... }
+// 当前（缺少 run_id）
+interface DeepagentsAgentEvent {
+  readonly event: string
+  readonly name: string
+  readonly data?: Record<string, unknown>
+}
+
+// 修改后
+interface DeepagentsAgentEvent {
+  readonly event: string
+  readonly name: string
+  readonly run_id: string   // langgraph 为每个 runnable 执行分配的唯一 ID
+  readonly data?: Record<string, unknown>
 }
 ```
 
-改为：
+### 第二步：用 `run_id` 关联 start/end，用 Map 缓存入参 [未实现]
 
-```typescript
-for await (const event of events) {
-  // ── 现有逻辑保持不变 ──
-  if (event.event === 'on_chat_model_stream') { ... continue }
-  if (event.event === 'on_chat_model_end') { ... continue }
-  if (isLangGraphChainEnd(event)) { ... }
+当前代码的两个 bug：
+1. `on_tool_start` 和 `on_tool_end` 各自生成独立的 `randomUUID()`，同一次工具调用的 ID 对不上
+2. `on_tool_end` 的 `invocation.args` 硬编码为 `{}`，丢失入参
 
-  // ── 新增：捕获工具事件 ──
-  if (event.event === 'on_tool_start') {
-    // 映射为 tool.started，复用已有 RuntimeEvent 类型
-    emitEvent({ type: 'tool.started', ... })
-    continue
-  }
-  if (event.event === 'on_tool_end') {
-    // 映射为 tool.completed
-    emitEvent({ type: 'tool.completed', ... })
-    continue
-  }
-
-  // 注意：on_chat_model_start / on_chain_start / on_chain_end 等事件
-  // 暂不处理，待有明确消费者需求时再引入 agent.activity 事件类型
-}
-```
-
-### 第二步：处理内置工具与外部工具的事件去重
-
-当前外部工具（通过 `createDeepagentsTools` 注册的）会产生两次事件：
-- LangGraph 的 `on_tool_start` / `on_tool_end`（第一步新增）
-- `executeDeepagentsToolCall` 中的 `tool.started` / `tool.completed`（已有）
-
-需要去重。
-
-#### 原方案（已否决）
-
-按 ToolCatalog 名字查询判断是否跳过。问题：依赖"内置工具名字不会和 ToolCatalog 中注册的工具重名"这个脆弱假设，一旦命名冲突就会导致事件丢失。
-
-#### 修订方案：基于 toolCallId 的 Set 去重
-
-在 `executeDeepagentsToolCall` 中，每次 emit `tool.started` 时将 `toolCallId` 记录到一个 `Set<string>`。在 `on_tool_start` / `on_tool_end` 处理中，检查该 `run_id`（即 toolCallId）是否已在 Set 中。如果已存在，跳过；否则 emit。
+修复方案：用 `event.run_id` 作为 `toolCallId`，用 Map 缓存 start 时的 invocation 供 end 时复用。
 
 ```typescript
 // 在事件循环外部初始化（per-turn 作用域）
-const emittedToolCallIds = new Set<string>()
+const builtinToolInvocations = new Map<string, ToolInvocation>()
 
-// executeDeepagentsToolCall 中，emit tool.started 时同步记录
-emittedToolCallIds.add(toolCallId)
-emitEvent({ type: 'tool.started', ... })
-
-// 事件循环中
 if (event.event === 'on_tool_start') {
-  const toolCallId = event.run_id
-  // 已由 executeDeepagentsToolCall 处理的工具，跳过
-  if (emittedToolCallIds.has(toolCallId)) {
-    continue
+  const toolCallId = event.run_id  // 用 langgraph 的 run_id，不再 randomUUID()
+  const invocation: ToolInvocation = {
+    toolCallId,
+    toolName: event.name,
+    args: (event.data?.input ?? {}) as Record<string, unknown>,
   }
-  // 内置工具：构造 tool.started 事件
-  emittedToolCallIds.add(toolCallId)
-  emitEvent({
+  builtinToolInvocations.set(toolCallId, invocation)
+  options.emitEvent({
     type: 'tool.started',
     runId: options.runId,
     toolCallId,
-    invocation: {
+    invocation,
+    timestamp: Date.now(),
+  })
+  continue
+}
+
+if (event.event === 'on_tool_end') {
+  const toolCallId = event.run_id
+  const invocation = builtinToolInvocations.get(toolCallId)
+  if (invocation === undefined) {
+    // start 事件丢失，不应发生，let it crash
+    throw new TianjiError('engine', 'TOOL_EVENT_ORPHAN', `on_tool_end without matching on_tool_start: ${toolCallId}`)
+  }
+  builtinToolInvocations.delete(toolCallId)
+  options.emitEvent({
+    type: 'tool.completed',
+    runId: options.runId,
+    toolCallId,
+    invocation,   // 复用 start 时缓存的完整 invocation
+    result: {
       toolCallId,
-      toolName: event.name,
-      args: event.data?.input ?? {},
+      result: event.data?.output,
     },
     timestamp: Date.now(),
   })
@@ -142,83 +134,37 @@ if (event.event === 'on_tool_start') {
 }
 ```
 
-**优势：** 按唯一 ID 去重，不依赖任何命名约定，即使工具名重复也不会误判。
+**解决的问题：**
 
-### 第三步：在 runtime.ts 中补充 tool 事件的 observer 日志
+| 问题 | 修复方式 |
+|------|----------|
+| start/end 的 toolCallId 对不上 | 统一使用 `event.run_id` |
+| `on_tool_end` 丢失入参 | Map 缓存 start 时的 invocation |
+| OTel span 无法关闭 | toolCallId 一致后，runtime 的 `toolSpans.get()` 能正确匹配 |
 
-在 `executeRun` 方法中，对 `ReplayableEventStream` 的事件增加日志记录。在事件 push 到 stream 后，同时写入 observer logger：
+### ~~第三步：事件去重~~ [已移除]
 
-```typescript
-emitEvent: (event) => {
-  activeRun.events.push(event)
-  // 新增：tool 事件写入 observer logger
-  if (event.type === 'tool.started' || event.type === 'tool.completed' || event.type === 'tool.failed') {
-    this.logToolEvent(event, lineage)
-  }
-}
-```
+> **勘误：去重方案解决的是一个不存在的问题。**
+>
+> 原设计假设 `executeDeepagentsToolCall` 会 emit `tool.started` / `tool.completed`，与事件循环的 `on_tool_start` / `on_tool_end` 产生重复。但实际代码中 `executeDeepagentsToolCall` 只 emit `tool.failed`（发生异常时），不 emit `tool.started` 和 `tool.completed`。
+>
+> 因此：
+> - **内置工具**（ls/read 等）：事件只来自事件循环的 `on_tool_start` / `on_tool_end`，无重复。
+> - **外部工具**（ToolCatalog 注册的）：事件也只来自事件循环的 `on_tool_start` / `on_tool_end`，无重复。`tool.failed` 只在异常时由 `executeDeepagentsToolCall` emit，且 `on_tool_end` 不会在工具执行失败时触发（langgraph 在异常时不产生 `on_tool_end`），也无重复。
+>
+> 不需要 `emittedToolCallIds` Set，不需要去重逻辑。
+>
+> 原设计中 `run_id === toolCallId` 的假设也是错误的：langgraph 的 `run_id` 是 runnable 执行 ID，与 LLM 输出的 `tool_call.id` 是两套 ID 体系。
 
-新增 `logToolEvent` 方法：
+### ~~第三步：observer 日志~~ [已实现]
 
-```typescript
-private logToolEvent(
-  event: ToolStartedEvent | ToolCompletedEvent | ToolFailedEvent,
-  fields: RunLineageFields
-): void {
-  const logger = this.options.logger
-  if (logger === undefined) return
+> 已在 `runtime.ts:718-748` 中实现。`emitEvent` 回调中对 `tool.started` / `tool.completed` / `tool.failed` 调用 `logToolEvent`。
 
-  if (event.type === 'tool.started') {
-    void logger.info(['runtime', 'tool'], 'tool.started', {
-      sessionId: fields.sessionId,
-      runId: fields.runId,
-      toolCallId: event.toolCallId,
-      toolName: event.invocation.toolName,
-    })
-  } else if (event.type === 'tool.completed') {
-    void logger.info(['runtime', 'tool'], 'tool.completed', {
-      sessionId: fields.sessionId,
-      runId: fields.runId,
-      toolCallId: event.toolCallId,
-    })
-  } else {
-    void logger.error(['runtime', 'tool'], 'tool.failed', {
-      sessionId: fields.sessionId,
-      runId: fields.runId,
-      toolCallId: event.toolCallId,
-      errorCode: event.error.code,
-    })
-  }
-}
-```
+### ~~第四步：OpenTelemetry span~~ [已实现]
 
-> **与 TaskExecutor 日志的关系说明：**
-> 这是有意的分层日志设计。runtime 层记录所有 session 的工具事件（scope `['runtime', 'tool']`），TaskExecutor 层只记录 task 维度的汇总（scope 为 task 自身）。两者的消费场景不同：runtime 日志用于全局链路追踪，TaskExecutor 日志用于单任务执行摘要。
-
-### 第四步：接入 OpenTelemetry span
-
-在 `emitEvent` 回调中，对 tool 事件调用 observer 已定义的 `startToolSpan`：
-
-```typescript
-// toolSpans 是 per-run 的局部变量，在 executeRun 闭包内定义，
-// run 结束后自动 GC，不存在多 run 并发时的隔离问题。
-const toolSpans = new Map<string, Span>()
-
-if (event.type === 'tool.started') {
-  const span = startToolSpan({
-    toolName: event.invocation.toolName,
-    runId: event.runId,
-  })
-  // 存储 span 引用，在 tool.completed/failed 时 end
-  toolSpans.set(event.toolCallId, span)
-}
-if (event.type === 'tool.completed' || event.type === 'tool.failed') {
-  toolSpans.get(event.toolCallId)?.end()
-  toolSpans.delete(event.toolCallId)
-}
-```
-
-> **生命周期说明：** `toolSpans` 必须定义在 `executeRun` 方法的闭包内（而非类实例属性），确保 per-run 隔离。run 结束时闭包释放，Map 自动回收。
+> 已在 `runtime.ts:699-747` 中实现。`toolSpans` Map 在 `executeRun` 闭包内定义，per-run 隔离。
+>
+> **注意：** 当前因为第二步的 bug（start/end 的 toolCallId 不一致），span 实际上无法被正确关闭。第二步修复后此问题自动解决。
 
 ---
 
@@ -228,55 +174,38 @@ if (event.type === 'tool.completed' || event.type === 'tool.failed') {
 |---|---|---|
 | `event` | 事件类型判断 | `on_tool_start` → `tool.started`，`on_tool_end` → `tool.completed` |
 | `name` | `invocation.toolName` | runnable 名称（工具名） |
-| `run_id` | `toolCallId` | LangGraph 内部执行 ID，同时用于 Set 去重 |
-| `data.input` | `invocation.args` | 工具输入参数 |
-| `data.output` | `result.result` | 工具输出结果 |
-| `data.error` | `error.message` | 错误信息 |
+| `run_id` | `toolCallId` | 同一次工具调用的 start/end 共享同一个 `run_id`，用于关联 |
+| `data.input` | `invocation.args` | 工具输入参数（仅 `on_tool_start` 携带） |
+| `data.output` | `result.result` | 工具输出结果（仅 `on_tool_end` 携带） |
+
+> **注意：** `run_id` 和 LLM 输出的 `tool_call.id` 是两套 ID 体系。`run_id` 是 langgraph 为每个 runnable 执行分配的 ID，`tool_call.id` 是模型在生成工具调用时分配的 ID。两者没有对应关系。
 
 ---
 
 ## 涉及文件
 
-| 文件 | 改动 |
-|------|------|
-| `packages/runtime/src/engines/deepagents-engine.ts` | 扩展事件循环，处理 `on_tool_start`/`on_tool_end`；新增 `emittedToolCallIds` Set 用于去重 |
-| `packages/runtime/src/runtime.ts` | emitEvent 回调中增加 observer logger 和 OpenTelemetry span；新增 `logToolEvent` 方法 |
-| `packages/observer/src/tracing/spans.ts` | 无改动（已有 `startToolSpan`，只需被调用） |
-| `apps/node/src/task/task-executor.ts` | **前置清理：** 修复 `tool.failed` 日志级别（info → error）和消息文案 |
-
-> **注意：** `packages/shared/src/events.ts` 不需要改动。`agent.activity` 事件类型推迟引入，当前所有新事件都映射到已有的 `tool.started` / `tool.completed` / `tool.failed` 类型。
+| 文件 | 改动 | 状态 |
+|------|------|------|
+| `packages/runtime/src/engines/deepagents-engine.ts` | 扩展 `DeepagentsAgentEvent` 接口增加 `run_id`；用 `run_id` 关联 start/end；用 Map 缓存 invocation | 未实现 |
+| `packages/runtime/src/runtime.ts` | emitEvent 回调中增加 observer logger 和 OTel span | 已实现 |
+| `packages/observer/src/tracing/spans.ts` | 无改动 | — |
+| `apps/node/src/task/task-executor.ts` | `tool.failed` 日志级别修复 | 已实现（`b26b497`） |
 
 ---
 
 ## 实现顺序
 
-1. **前置清理：task-executor 日志修复**
-   - `tool.failed` 分支改用 `logError`，消息改为 "Tool call failed"，附带错误信息
-   - 评估 `serializeRuntimeEvent` identity function 是否可删除
-2. **deepagents-engine**：扩展事件循环，映射 `on_tool_start`/`on_tool_end` 为 `tool.started`/`tool.completed`；实现基于 `emittedToolCallIds` Set 的去重
-3. **runtime**：emitEvent 回调中接入 observer logger（`logToolEvent`）
-4. **runtime**：接入 OpenTelemetry span（`toolSpans` Map，per-run 闭包作用域）
-5. **测试**：验证内置工具（ls/execute）出现在事件流和日志中；验证外部工具不产生重复事件
+1. ~~**前置清理：task-executor 日志修复**~~ — 已完成（`b26b497`）
+2. **deepagents-engine**：扩展 `DeepagentsAgentEvent` 接口增加 `run_id`；用 `run_id` 替代 `randomUUID()` 关联 start/end；用 `builtinToolInvocations` Map 缓存入参
+3. ~~**runtime observer 日志**~~ — 已完成（`58f55ee`）
+4. ~~**runtime OTel span**~~ — 已完成（`58f55ee`），但因 bug #1 当前 span 无法正确关闭，第 2 步修复后自动生效
+5. **测试**：验证内置工具（ls/execute）的 `tool.started` 和 `tool.completed` 的 `toolCallId` 一致；验证 OTel span 被正确关闭
 
 ---
 
 ## 验收标准
 
-1. agent 执行 `ls` 命令后，TaskExecutor 日志中 `toolCallCount >= 1`。
-2. observer JSONL 日志中出现 `tool.started` 和 `tool.completed` 条目，包含工具名称。
-3. 外部工具（ToolCatalog 注册的）不会产生重复事件（通过 `emittedToolCallIds` Set 去重验证）。
-4. `tool.failed` 事件在 TaskExecutor 日志中为 error 级别，消息为 "Tool call failed"。
-5. `pnpm check` 通过，无类型错误。
-
----
-
-## 前置清理项
-
-在实施主方案之前，需要先清理以下现有日志问题：
-
-| 位置 | 问题 | 修复 |
-|------|------|------|
-| `task-executor.ts:214-221` | `tool.completed` 和 `tool.failed` 共用 `logInfo`，失败事件用 info 级别违反日志分层规则 | 拆分：`tool.completed` 用 `logInfo`，`tool.failed` 用 `logError` 并附带错误信息 |
-| `task-executor.ts:216` | 日志消息 "Tool call completed" 对 `tool.failed` 语义错误 | `tool.failed` 改为 "Tool call failed" |
-| `task-executor.ts:241-243` | `serializeRuntimeEvent` 是 identity function，无实际序列化逻辑 | 评估是否可直接删除（如无扩展计划则删除） |
-| `runtime.ts:580` | HITL 中断用 `warn` 级别，但这是正常业务流程 | 改为 `info`（用户主动暂停不是告警） |
+1. 同一次工具调用的 `tool.started` 和 `tool.completed` 事件的 `toolCallId` 相同。
+2. `tool.completed` 事件的 `invocation.args` 包含实际入参，不为空对象。
+3. `runtime.ts` 中的 `toolSpans` Map 在工具完成后被正确清理（span 被 end）。
+4. `pnpm check` 通过，无类型错误。

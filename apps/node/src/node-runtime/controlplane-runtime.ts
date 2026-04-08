@@ -98,13 +98,15 @@ export function createControlPlaneRuntime(
     }
 
     const taskCommand = toCommand(command)
-    void taskExecutorRef.execute(taskCommand).catch((error) => {
-      void config.logger?.logError(['daemon', 'controlplane'], 'Failed to execute task command', {
-        commandId: taskCommand.commandId,
-        taskId: taskCommand.payload.taskId,
-        agentId: taskCommand.payload.agentId,
-        error: error instanceof Error ? error.message : String(error),
-      })
+    taskExecutorRef.execute(taskCommand).catch((error) => {
+      config.logger
+        ?.logError(['daemon', 'controlplane'], 'Failed to execute task command', {
+          commandId: taskCommand.commandId,
+          taskId: taskCommand.payload.taskId,
+          agentId: taskCommand.payload.agentId,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        ?.catch(() => {})
     })
   }
 

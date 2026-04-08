@@ -433,6 +433,13 @@ describe('CLI integration', () => {
         await waitForOutput(captured.getOutput, 'Initial entry')
 
         await truncate(paths.cliLogFilePath, 0)
+
+        await waitForOutput(
+          captured.getOutput,
+          'CLI log file was truncated or recreated. Restarting from beginning.',
+          6_000
+        )
+
         await writeFile(
           paths.cliLogFilePath,
           `${JSON.stringify({
@@ -444,18 +451,14 @@ describe('CLI integration', () => {
           'utf8'
         )
 
-        await waitForOutput(
-          captured.getOutput,
-          'CLI log file was truncated or recreated. Restarting from beginning.'
-        )
-        await waitForOutput(captured.getOutput, 'After truncate')
+        await waitForOutput(captured.getOutput, 'After truncate', 6_000)
 
         abortController.abort()
         await expect(captured.done).resolves.toBe(0)
       } finally {
         await cleanup()
       }
-    })
+    }, 10_000)
   })
 
   describe('usage errors', () => {

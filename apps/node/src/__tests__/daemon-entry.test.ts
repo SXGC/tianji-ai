@@ -156,11 +156,13 @@ describe('runDaemonEntry', () => {
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
     const { runDaemonEntry } = await import('../daemon-entry.js')
+    const controlPlaneRuntimeModule = await import('../node-runtime/controlplane-runtime.js')
     await runDaemonEntry()
 
-    const runtimeConfig = createControlPlaneRuntimeMock.mock.calls.at(0)?.at(0) as
-      | Record<string, unknown>
-      | undefined
+    const runtimeConfig = vi
+      .mocked(controlPlaneRuntimeModule.createControlPlaneRuntime)
+      .mock.calls.at(0)
+      ?.at(0) as Record<string, unknown> | undefined
 
     expect(runtimeConfig).toEqual(
       expect.objectContaining({
@@ -195,6 +197,7 @@ describe('runDaemonEntry', () => {
 
   it('logs info when daemon receives SIGTERM and exits cleanly', async () => {
     const processOnSpy = vi.spyOn(process, 'on')
+    const processExitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
     const { runDaemonEntry } = await import('../daemon-entry.js')
@@ -217,12 +220,14 @@ describe('runDaemonEntry', () => {
       signal: 'SIGTERM',
     })
     expect(stopConnectionMock).toHaveBeenCalled()
+    expect(processExitSpy).toHaveBeenCalledWith(0)
 
     stdoutSpy.mockRestore()
   })
 
   it('logs error when daemon catches uncaughtException and exits non-zero', async () => {
     const processOnSpy = vi.spyOn(process, 'on')
+    const processExitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
     const { runDaemonEntry } = await import('../daemon-entry.js')
@@ -252,12 +257,14 @@ describe('runDaemonEntry', () => {
       reason: 'uncaughtException',
       signal: undefined,
     })
+    expect(processExitSpy).toHaveBeenCalledWith(1)
 
     stdoutSpy.mockRestore()
   })
 
   it('logs error when daemon catches unhandledRejection and exits non-zero', async () => {
     const processOnSpy = vi.spyOn(process, 'on')
+    const processExitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
     const { runDaemonEntry } = await import('../daemon-entry.js')
@@ -286,6 +293,7 @@ describe('runDaemonEntry', () => {
       reason: 'unhandledRejection',
       signal: undefined,
     })
+    expect(processExitSpy).toHaveBeenCalledWith(1)
 
     stdoutSpy.mockRestore()
   })
