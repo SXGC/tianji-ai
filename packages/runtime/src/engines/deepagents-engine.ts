@@ -654,6 +654,43 @@ function readChunkText(chunk: unknown): string {
 }
 
 /**
+ * 从 chunk 中提取 content 数组（兼容直接属性和 kwargs 嵌套两种结构）。
+ */
+function readContentBlocks(chunk: unknown): Array<Record<string, unknown>> {
+  if (!isRecord(chunk)) return []
+  if (Array.isArray(chunk.content)) return chunk.content.filter(isRecord)
+  const kwargs = readChunkKwargs(chunk)
+  if (Array.isArray(kwargs?.content)) return kwargs!.content.filter(isRecord)
+  return []
+}
+
+/**
+ * 读取单个模型流式 chunk 中的 thinking 增量。
+ *
+ * 兼容多种模型提供者的 thinking 字段路径：
+ * - Anthropic (Claude): content 数组中 type 为 'thinking' 的 block
+ * - OpenAI (o-series) / DeepSeek: additional_kwargs.reasoning_content
+ */
+function readChunkThinking(chunk: unknown): string {
+  const contentBlocks = readContentBlocks(chunk)
+  for (const block of contentBlocks) {
+    if (block.type === 'thinking' && typeof block.thinking === 'string') {
+      return block.thinking
+    }
+  }
+
+  const kwargs = readChunkKwargs(chunk)
+  const additionalKwargs = isRecord(kwargs?.additional_kwargs)
+    ? (kwargs!.additional_kwargs as Record<string, unknown>)
+    : undefined
+  if (typeof additionalKwargs?.reasoning_content === 'string') {
+    return additionalKwargs.reasoning_content
+  }
+
+  return ''
+}
+
+/**
  * 读取 chunk 中按片段返回的 tool_call_chunks。
  */
 function readToolCallChunks(chunk: unknown): Array<Record<string, unknown>> {
