@@ -8,6 +8,7 @@ import type { IAgentRunner } from '../acp/index.js'
 import type { NdjsonWriter } from '../controlplane/index.js'
 import type { RuntimeLogger } from '../logger.js'
 
+import type { ObserverLogScope } from '@tianji/observer'
 import type {
   Command,
   MessageCompletedEvent,
@@ -20,9 +21,9 @@ import type {
 
 interface TurnSummary {
   runId: string
-  events: string[]
-  messages: string[]
-  toolCalls: string[]
+  eventCount: number
+  messageCount: number
+  toolCallCount: number
 }
 
 export interface TaskExecutorConfig {
@@ -100,35 +101,18 @@ export class TaskExecutor {
         taskId,
       })
 
-      let currentTurn: TurnSummary | null = null
+      let turn: TurnSummary | null = null
 
       for await (const event of runner.query(command.payload.goal)) {
         if (event != null) {
-          currentTurn = collectTurnEvent(currentTurn, event)
-        }
-
-        const isRunEnd =
-          event?.type === 'run.completed' ||
-          event?.type === 'run.failed' ||
-          event?.type === 'run.cancelled'
-
-        if (isRunEnd && currentTurn !== null) {
-          await this.#config.logger?.logInfo(this.#scope, 'Run turn summary', {
-            taskId,
-            runId: currentTurn.runId,
-            endReason: event.type,
-            events: currentTurn.events,
-            messages: currentTurn.messages,
-            toolCalls: currentTurn.toolCalls,
-          })
-          currentTurn = null
+          turn = handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
         }
 
         await eventStream.write(
           JSON.stringify({
             kind: 'agent',
             sequence,
-            event: serializeRuntimeEvent(event),
+            event,
           })
         )
         sequence += 1
@@ -189,46 +173,77 @@ export class TaskExecutor {
   }
 }
 
-function extractTextSummary(event: MessageCompletedEvent): string {
+function extractTextContent(event: MessageCompletedEvent): string {
   const parts = event.message.content
     .filter((p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text')
     .map((p) => p.text)
   return parts.length > 0 ? parts.join('\n') : '(no text content)'
 }
 
-function extractToolCallSummary(event: ToolCompletedEvent | ToolFailedEvent): string {
+function extractToolCallLabel(event: ToolCompletedEvent | ToolFailedEvent): string {
   const status = event.type === 'tool.completed' ? 'completed' : 'failed'
   const name = event.type === 'tool.failed' ? event.invocation.toolName : event.toolCallId
   return `${name} [${status}]`
 }
 
-function collectTurnEvent(turn: TurnSummary | null, event: RuntimeEvent): TurnSummary | null {
-  if (
-    event.type === 'run.started' ||
-    event.type === 'run.completed' ||
-    event.type === 'run.failed' ||
-    event.type === 'run.cancelled'
-  ) {
-    const current = turn ?? { runId: event.runId, events: [], messages: [], toolCalls: [] }
-    current.events.push(event.type)
-    return current
+function handleEvent(
+  logger: RuntimeLogger | undefined,
+  scope: ObserverLogScope,
+  taskId: string,
+  turn: TurnSummary | null,
+  event: RuntimeEvent
+): TurnSummary | null {
+  if (event.type === 'run.started') {
+    return { runId: event.runId, eventCount: 1, messageCount: 0, toolCallCount: 0 }
   }
 
   if (turn === null) {
     return null
   }
 
-  turn.events.push(event.type)
+  turn.eventCount += 1
 
   if (event.type === 'message.completed') {
-    turn.messages.push(extractTextSummary(event))
-  } else if (event.type === 'tool.completed' || event.type === 'tool.failed') {
-    turn.toolCalls.push(extractToolCallSummary(event))
+    turn.messageCount += 1
+    void logger?.logInfo(scope, 'Message completed', {
+      taskId,
+      runId: event.runId,
+      messageId: event.messageId,
+      content: extractTextContent(event),
+    })
+  } else if (event.type === 'tool.completed') {
+    turn.toolCallCount += 1
+    void logger?.logInfo(scope, 'Tool call completed', {
+      taskId,
+      runId: event.runId,
+      toolCallId: event.toolCallId,
+      toolCall: extractToolCallLabel(event),
+    })
+  } else if (event.type === 'tool.failed') {
+    turn.toolCallCount += 1
+    void logger?.logError(scope, 'Tool call failed', {
+      taskId,
+      runId: event.runId,
+      toolCallId: event.toolCallId,
+      toolCall: extractToolCallLabel(event),
+      errorCode: event.error.code,
+      errorMessage: event.error.message,
+    })
+  } else if (
+    event.type === 'run.completed' ||
+    event.type === 'run.failed' ||
+    event.type === 'run.cancelled'
+  ) {
+    void logger?.logInfo(scope, 'Run turn summary', {
+      taskId,
+      runId: turn.runId,
+      endReason: event.type,
+      eventCount: turn.eventCount,
+      messageCount: turn.messageCount,
+      toolCallCount: turn.toolCallCount,
+    })
+    return null
   }
 
   return turn
-}
-
-function serializeRuntimeEvent(event: RuntimeEvent): unknown {
-  return event
 }
