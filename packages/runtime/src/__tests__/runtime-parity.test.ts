@@ -234,6 +234,10 @@ describe('SessionRuntime deepagents regressions', () => {
     expect(observedToolContext?.abortSignal?.aborted).toBe(false)
 
     const sessionSnapshot = await runtime.getSessionSnapshot(session.sessionId)
-    expect(readTextContent(sessionSnapshot?.messages[1])).toBe('7')
+    // user + assistant(tool-call) + tool(tool-result) + assistant(final text)
+    expect(sessionSnapshot?.messages).toHaveLength(4)
+    const lastMessage = sessionSnapshot?.messages[3]
+    expect(lastMessage).toBeDefined()
+    expect(readTextContent(lastMessage!)).toBe('7')
   })
 })

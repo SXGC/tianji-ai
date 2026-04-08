@@ -122,8 +122,25 @@ describe('SessionRuntime', () => {
     ])
 
     const sessionSnapshot = await runtime.getSessionSnapshot(session.sessionId)
-    expect(sessionSnapshot?.messages).toHaveLength(2)
-    expect(readTextContent(sessionSnapshot?.messages[1] ?? userMessage)).toBe('3')
+    // user + assistant(tool-call) + tool(tool-result) + assistant(final text)
+    expect(sessionSnapshot?.messages).toHaveLength(4)
+    expect(sessionSnapshot?.messages[1]?.role).toBe('assistant')
+    expect(sessionSnapshot?.messages[1]?.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: 'tool-call', toolCallId: 'tool-1', toolName: 'sum' }),
+      ])
+    )
+    expect(sessionSnapshot?.messages[2]?.role).toBe('tool')
+    expect(sessionSnapshot?.messages[2]?.content).toEqual([
+      expect.objectContaining({
+        type: 'tool-result',
+        toolCallId: 'tool-1',
+        toolName: 'sum',
+        result: 3,
+        isError: false,
+      }),
+    ])
+    expect(readTextContent(sessionSnapshot?.messages[3] ?? userMessage)).toBe('3')
     expect(readTextContent(messageCompletedEvent?.message)).toBe('3')
   })
 
@@ -335,5 +352,51 @@ describe('SessionRuntime', () => {
     }
 
     expect(runtimeRecord.options?.deepagents?.model).toBeInstanceOf(ChatOpenAI)
+  })
+
+  it('emits observer tool logs with consistent toolCallId across started and completed', async () => {
+    const memorySink = createMemorySink()
+    const toolRegistry = new ToolRegistry().registerTool({
+      spec: {
+        name: 'greet',
+        description: 'Say hello',
+        parameters: { type: 'object' },
+      },
+      execute: async () => 'hello',
+      sideEffect: 'none',
+    })
+
+    const runtime = createSessionRuntime({
+      deepagents: {
+        model: fakeModel()
+          .respondWithTools([{ name: 'greet', args: {}, id: 'greet-1' }])
+          .respond(new AIMessage('Done')),
+      },
+      snapshotStore: new InMemorySnapshotStore(),
+      toolCatalog: toolRegistry,
+      logger: createObserverLogger({ sinks: [memorySink] }),
+    })
+
+    const session = await runtime.createSession({
+      sessionId: createSessionId('session-tool-observer'),
+    })
+    const runId = await runtime.runTurn({
+      sessionId: session.sessionId,
+      message: createUserMessage('msg-tool-observer', 'greet me'),
+    })
+    await collectRuntimeEvents(runId, runtime)
+
+    const toolLogEntries = memorySink.entries.filter(
+      (entry: ObserverLogEntry): entry is ObserverLogEntry & { data: Record<string, unknown> } =>
+        entry.scope.join('.') === 'runtime.tool'
+    )
+    const startedLog = toolLogEntries.find((entry) => entry.message === 'tool.started')
+    const completedLog = toolLogEntries.find((entry) => entry.message === 'tool.completed')
+
+    expect(startedLog).toBeDefined()
+    expect(completedLog).toBeDefined()
+    expect(startedLog?.data.toolCallId).toBe(completedLog?.data.toolCallId)
+    expect(startedLog?.data.toolName).toBe('greet')
+    expect(completedLog?.data.result).toBe('hello')
   })
 })

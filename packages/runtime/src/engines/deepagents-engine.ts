@@ -251,10 +251,12 @@ export async function executeDeepagentsRun(
     }
 
     if (isLangGraphChainEnd(event)) {
-      // on_chat_model_end 已构建消息。这里只做兜底：
-      // 如果 turnMessages 为空（某些 LangGraph 版本不触发 on_chat_model_end），
-      // 用 output 构建最终消息。
-      if (turnMessages.length === 0 || turnMessages.every((m) => m.role !== 'assistant')) {
+      // 兜底：某些 LLM provider 不触发 on_chat_model_end，最终文本只能从 LangGraph output 中提取。
+      // 检查 turnMessages 中是否已有包含文本的 assistant 消息；若无则从 output 构建。
+      const hasAssistantWithText = turnMessages.some(
+        (m) => m.role === 'assistant' && m.content.some((p) => p.type === 'text')
+      )
+      if (!hasAssistantWithText) {
         const fallbackMessage = buildAssistantMessageFromDeepagentsOutput(
           messageId,
           messageStartedAt,
@@ -359,7 +361,7 @@ export async function executeDeepagentsRun(
     options.emitEvent({
       type: 'message.completed',
       runId: options.runId,
-      messageId: lastAssistantMessage.id,
+      messageId,
       message: lastAssistantMessage,
       timestamp: Date.now(),
     })
@@ -382,7 +384,10 @@ function readDeepagentsInput(options: ExecuteDeepagentsRunOptions): unknown {
   }
 
   return {
-    messages: options.messages.map(convertAppMessageToDeepagentsMessage),
+    // tool role 消息仅用于快照持久化，不回传给 LangGraph（LangGraph 通过内部状态管理工具调用历史）
+    messages: options.messages
+      .filter((m) => m.role !== 'tool')
+      .map(convertAppMessageToDeepagentsMessage),
   }
 }
 
