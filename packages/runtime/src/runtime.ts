@@ -34,7 +34,7 @@ import {
   createSessionId,
 } from '@tianji/shared'
 
-import { executeDeepagentsRun } from './engines/deepagents-engine.js'
+import { type DeepagentsRunResult, executeDeepagentsRun } from './engines/deepagents-engine.js'
 import { ReplayableEventStream } from './event-stream.js'
 import type { LlmGenerationConfig } from './llm/index.js'
 import type { SnapshotStore } from './snapshot-store.js'
@@ -549,7 +549,6 @@ class SessionRuntimeImpl implements SessionRuntime {
       this.logRunLifecycle('info', 'run.started', lineage)
 
       const result = await this.executeDeepagentsTurn(activeRun, input, context)
-      const finalMessage = result.finalMessage
       const completedRunMetadata = writeRunRuntimeMetadata(runSnapshot.metadata, {
         engine: this.engine,
         threadId: result.threadId,
@@ -585,16 +584,16 @@ class SessionRuntimeImpl implements SessionRuntime {
         return
       }
 
-      if (finalMessage === undefined) {
+      if (result.turnMessages.length === 0) {
         throw new ProviderError(
           'RUN_EMPTY_RESPONSE',
-          'Runtime workflow finished without an assistant message'
+          'Runtime workflow finished without any messages'
         )
       }
 
       const nextSessionSnapshot: SessionSnapshot = {
         ...input.sessionSnapshot,
-        messages: [...input.sessionSnapshot.messages, finalMessage],
+        messages: [...input.sessionSnapshot.messages, ...result.turnMessages],
         updatedAt: Date.now(),
       }
       const completedRunSnapshot: RunSnapshot = {
@@ -673,12 +672,7 @@ class SessionRuntimeImpl implements SessionRuntime {
     activeRun: ActiveRun,
     input: ExecuteRunInput,
     context: RunExecutionContext
-  ): Promise<{
-    finalMessage?: AppMessage
-    threadId: string
-    checkpointId?: string
-    interrupts?: readonly DeepagentsInterruptRecord[]
-  }> {
+  ): Promise<DeepagentsRunResult> {
     const deepagents = this.options.deepagents
 
     if (deepagents === undefined) {
