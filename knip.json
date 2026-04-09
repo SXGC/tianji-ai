@@ -11,6 +11,7 @@
     "apps/node/src/__tests__/helpers/**": ["exports", "types"],
     "packages/agent/src/__tests__/helpers/**": ["exports", "types"],
     "packages/runtime/src/__tests__/helpers/**": ["exports", "types"],
-    "apps/node/src/logger.ts": ["types"]
+    "apps/node/src/logger.ts": ["types"],
+    "packages/agent/src/orchestration/executors/executor-types.ts": ["files"]
   }
 }
