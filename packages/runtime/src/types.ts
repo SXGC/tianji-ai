@@ -28,4 +28,5 @@ export interface SessionRuntimeDeepagentsConfig {
   readonly subagents?: readonly { readonly name: string; [key: string]: unknown }[]
   readonly skills?: readonly string[]
   readonly interruptOn?: Record<string, boolean | InterruptOnConfig>
+  readonly llmRawDir?: string
 }

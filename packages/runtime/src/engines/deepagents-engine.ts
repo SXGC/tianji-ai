@@ -33,9 +33,13 @@ import {
 } from '@tianji/shared'
 import { createDeepAgent } from 'deepagents'
 
+import type { ObserverLogger } from '@tianji/observer'
 import type { LlmGenerationConfig } from '../llm/index.js'
 import type { ToolCatalog } from '../tool-catalog.js'
 import { ensureToolAllowed } from '../tool-catalog.js'
+
+import { LlmCallRecorder, createRecordingMiddleware } from '../llm-call-recorder.js'
+import { LlmRawStore } from '../llm-raw-store.js'
 import type { SessionRuntimeDeepagentsConfig } from '../types.js'
 
 interface DeepagentsPendingToolCall {
@@ -64,6 +68,8 @@ interface ExecuteDeepagentsRunOptions {
   readonly sequence: {
     current: number
   }
+  readonly llmRawDir?: string
+  readonly logger?: ObserverLogger
   readonly emitEvent: (event: RuntimeEvent) => void
 }
 
@@ -410,6 +416,10 @@ export async function executeDeepagentsRun(
   const threadId = options.threadId ?? options.sessionId
   const createUntypedDeepAgent = createDeepAgent as unknown as DeepAgentFactory
 
+  const llmRecorder = options.llmRawDir !== undefined ? new LlmCallRecorder() : undefined
+  const recordingMiddleware =
+    llmRecorder !== undefined ? createRecordingMiddleware(llmRecorder) : undefined
+
   options.emitEvent({
     type: 'message.started',
     runId: options.runId,
@@ -421,7 +431,7 @@ export async function executeDeepagentsRun(
   const agent = createUntypedDeepAgent({
     model: options.deepagents.model,
     systemPrompt: options.systemPrompt,
-    middleware: resolveDeepagentsMiddleware(options.deepagents.middleware),
+    middleware: buildMiddlewareList(options.deepagents.middleware, recordingMiddleware),
     subagents: resolveDeepagentsSubagents(options.deepagents.subagents),
     checkpointer: resolveDeepagentsCheckpointer(options.deepagents.checkpointer),
     store: resolveDeepagentsStore(options.deepagents.store),
@@ -451,8 +461,12 @@ export async function executeDeepagentsRun(
     usage: undefined,
   }
 
-  for await (const event of events) {
-    dispatchStreamEvent(loopState, event, options)
+  try {
+    for await (const event of events) {
+      dispatchStreamEvent(loopState, event, options)
+    }
+  } finally {
+    await persistLlmRaw(options, llmRecorder)
   }
 
   currentText = loopState.currentText
@@ -1332,6 +1346,50 @@ function resolveOptionalArray<T>(value: readonly T[] | undefined): T[] | undefin
  */
 function resolveDeepagentsMiddleware(value: SessionRuntimeDeepagentsConfig['middleware']) {
   return resolveOptionalArray(value)
+}
+
+/**
+ * 将用户 middleware 与录制 middleware 合并。
+ * 录制 middleware 放在末尾，确保录到的是最终发给模型的请求。
+ */
+function buildMiddlewareList(
+  userMiddleware: SessionRuntimeDeepagentsConfig['middleware'],
+  recordingMiddleware: unknown
+): unknown[] | undefined {
+  const user = resolveDeepagentsMiddleware(userMiddleware)
+  if (recordingMiddleware === undefined) {
+    return user
+  }
+  if (user !== undefined) {
+    return [...user, recordingMiddleware]
+  }
+  return [recordingMiddleware]
+}
+
+/**
+ * 将本次 runTurn 的 LLM 调用记录持久化到 raws/ 目录。
+ * 只在配置了 llmRawDir 且有调用记录时才写文件。
+ * 持久化失败不阻断主流程，只记录 error 日志。
+ */
+async function persistLlmRaw(
+  options: ExecuteDeepagentsRunOptions,
+  recorder: LlmCallRecorder | undefined
+): Promise<void> {
+  if (recorder === undefined) return
+
+  const record = recorder.toRecord(options.runId, options.sessionId)
+  if (record.calls.length === 0) return
+
+  const store = new LlmRawStore(options.llmRawDir!)
+  try {
+    await store.write(record)
+  } catch (error) {
+    options.logger?.error(
+      ['runtime', 'llm-raw'],
+      `failed to persist LLM raw record for run ${options.runId}`,
+      { error }
+    )
+  }
 }
 
 /**

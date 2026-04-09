@@ -12,6 +12,7 @@
  * - 依赖 @tianji/shared 提供快照、事件、错误与策略类型。
  */
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 
 import { ChatOpenAI } from '@langchain/openai'
 import { type ObserverLogger, type ObserverStartedSpan, startToolSpan } from '@tianji/observer'
@@ -37,6 +38,7 @@ import {
   createSessionId,
 } from '@tianji/shared'
 
+import { resolveConfigPaths } from './config.js'
 import { type DeepagentsRunResult, executeDeepagentsRun } from './engines/deepagents-engine.js'
 import { ReplayableEventStream } from './event-stream.js'
 import type { LlmGenerationConfig } from './llm/index.js'
@@ -744,6 +746,9 @@ class SessionRuntimeImpl implements SessionRuntime {
       pendingOperations: context.pendingOperations,
       destructiveOperationIds: context.destructiveOperationIds,
       sequence: context.sequence,
+      llmRawDir:
+        deepagents.llmRawDir ?? join(resolveConfigPaths().userConfigDir, 'runtime-snapshots'),
+      logger: this.options.logger,
       emitEvent: (event) => {
         activeRun.events.push(event)
         if (
