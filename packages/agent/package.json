@@ -27,14 +27,16 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.18.0",
     "@tianji/runtime": "workspace:*",
-    "@tianji/shared": "workspace:*"
+    "@tianji/shared": "workspace:*",
+    "turndown": "^7.2.4"
   },
   "peerDependencies": {
     "deepagents": "^1.8.4"
   },
   "devDependencies": {
     "@langchain/core": "^1.1.33",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "@types/turndown": "^5.0.6"
   },
   "keywords": ["tianji", "agent"],
   "license": "MIT"

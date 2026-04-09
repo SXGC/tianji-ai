@@ -56,6 +56,18 @@ describe('agent session', () => {
     expect(runtime.runTurn).toBeDefined()
   })
 
+  it('registers fetch_url tool in the runtime tool catalog', async () => {
+    const createSessionRuntimeSpy = vi.spyOn(runtimeModule, 'createSessionRuntime')
+
+    await createAgentRuntime(createFakeContext())
+
+    const callArgs = createSessionRuntimeSpy.mock.calls.at(-1)?.[0]
+    expect(callArgs?.toolCatalog).toBeDefined()
+    expect(callArgs?.toolCatalog?.hasTool('fetch_url')).toBe(true)
+
+    createSessionRuntimeSpy.mockRestore()
+  })
+
   it('normalizes openai runtime model into a configured model instance', async () => {
     const runtime = (await createAgentRuntime(createFakeContext())) as SessionRuntime & {
       readonly options?: {
@@ -143,6 +155,7 @@ describe('agent session', () => {
         backend: expect.any(Object),
       },
       snapshotStore: context.snapshotStore,
+      toolCatalog: expect.any(Object),
     })
     expect(runtime.createSession).toHaveBeenCalledWith({ sessionId: session.sessionId })
     expect(events.some((event) => event.type === 'run.completed')).toBe(true)

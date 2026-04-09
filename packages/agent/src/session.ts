@@ -1,9 +1,15 @@
 import { LocalShellBackend } from 'deepagents'
 
-import { type ObserverLogger, type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
+import {
+  type ObserverLogger,
+  type SessionRuntime,
+  ToolRegistry,
+  createSessionRuntime,
+} from '@tianji/runtime'
 import type { AppMessage, RunId, RuntimeEvent, SessionId } from '@tianji/shared'
 
 import { type LoadedAgentContext, injectProviderEnv } from './context.js'
+import { createFetchUrlTool } from './tools/fetch-url-tool.js'
 
 export interface AgentRuntimeOptions {
   readonly logger?: ObserverLogger
@@ -39,6 +45,9 @@ export async function createAgentRuntime(
     inheritEnv: true,
   })
 
+  // 通过 ToolCatalog 注册 fetch_url,自动获得 runtime 的策略门、超时控制、HITL pending 与 tool.* 事件流。
+  const toolCatalog = new ToolRegistry().registerTool(createFetchUrlTool())
+
   return createSessionRuntime({
     deepagents: {
       model: `${context.agent.provider}:${context.agent.modelName}`,
@@ -52,6 +61,7 @@ export async function createAgentRuntime(
       backend,
     },
     snapshotStore: context.snapshotStore,
+    toolCatalog,
     logger: options?.logger,
   })
 }
