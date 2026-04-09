@@ -1,0 +1,91 @@
+/**
+ * orchestration e2e 测试。
+ *
+ * 业务职责：
+ * - 验证 runOrchestrationGraph + 真实 createDeepagentsExecutorFactory + FakeListChatModel
+ *   能完整跑通一个多节点编排，并广播图级事件。
+ * - 不使用任何 mock：走完整的 graph-runner / graph-compiler / deepagents-executor 路径。
+ */
+import { FakeListChatModel } from '@langchain/core/utils/testing'
+import type { GraphEvent, RunId } from '@tianji/shared'
+import { describe, expect, it } from 'vitest'
+
+import { createDeepagentsExecutorFactory } from '../executors/deepagents-executor.js'
+import { runOrchestrationGraph } from '../graph-runner.js'
+import type { OrchestrationGraph } from '../graph-schema.js'
+
+describe('orchestration e2e', () => {
+  it('两节点串行管线 planner→coder', async () => {
+    // FakeListChatModel.bindTools() 会克隆模型实例并把 i 重置在克隆体上独立递增。
+    // deepagents 内部调用 bindTools 后，原实例的计数器与执行链分离，
+    // 因此共享同一个实例无法在不同节点之间推进 responses 序列。
+    // 解决方案：每次 resolveModel 被调用时按顺序发放下一条 response，
+    // 让每个节点拿到只含自己那一条 response 的全新模型实例。
+    const responses = ['plan: do A then B', 'code: console.log("done")']
+    let responseIndex = 0
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => {
+        const next = responses[responseIndex] ?? ''
+        responseIndex += 1
+        return new FakeListChatModel({ responses: [next] })
+      },
+    })
+
+    const graph: OrchestrationGraph = {
+      id: 'pipeline',
+      name: 'planner-coder',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: {
+        plan: { type: 'string' },
+        code: { type: 'string' },
+      },
+      nodes: [
+        {
+          id: 'planner',
+          type: 'agent',
+          agent: { model: 'fake', systemPrompt: '你是规划者' },
+          output: ['plan'],
+        },
+        {
+          id: 'coder',
+          type: 'agent',
+          agent: { model: 'fake', systemPrompt: '你是编码者' },
+          input: ['plan'],
+          output: ['code'],
+        },
+      ],
+      edges: [
+        { from: '__start__', to: 'planner' },
+        { from: 'planner', to: 'coder' },
+        { from: 'coder', to: '__end__' },
+      ],
+    }
+
+    const result = runOrchestrationGraph({
+      graph,
+      runId: 'run_e2e_1' as RunId,
+      compileOptions: { agentExecutorFactory: factory },
+    })
+
+    const collectedEvents: GraphEvent[] = []
+    const collectionPromise = (async () => {
+      for await (const event of result.events) {
+        collectedEvents.push(event)
+      }
+    })()
+
+    const finalState = await result.finished
+    await collectionPromise
+
+    expect(finalState.plan).toContain('plan')
+    expect(finalState.code).toContain('console.log')
+
+    const eventTypes = collectedEvents.map((event) => event.type)
+    expect(eventTypes).toContain('graph.started')
+    expect(eventTypes).toContain('graph.node.started')
+    expect(eventTypes).toContain('graph.node.completed')
+    expect(eventTypes).toContain('graph.completed')
+  })
+})
