@@ -71,6 +71,12 @@ export function mapRuntimeEventToSessionUpdate(
     case 'run.completed':
     case 'run.failed':
     case 'run.cancelled':
+    // Graph 编排事件属于顶层观测层，不映射为 ACP session update。
+    case 'graph.started':
+    case 'graph.node.started':
+    case 'graph.node.completed':
+    case 'graph.node.failed':
+    case 'graph.completed':
       return null
   }
 }
