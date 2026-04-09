@@ -1209,6 +1209,8 @@ function readTokenUsage(metadata: Record<string, unknown> | undefined): TokenUsa
     inputTokens?: unknown
     outputTokens?: unknown
     totalTokens?: unknown
+    cacheReadTokens?: unknown
+    cacheCreationTokens?: unknown
   }
 
   if (
@@ -1219,9 +1221,16 @@ function readTokenUsage(metadata: Record<string, unknown> | undefined): TokenUsa
     return undefined
   }
 
+  const cacheRead =
+    typeof candidate.cacheReadTokens === 'number' ? candidate.cacheReadTokens : undefined
+  const cacheCreation =
+    typeof candidate.cacheCreationTokens === 'number' ? candidate.cacheCreationTokens : undefined
+
   return {
     inputTokens: candidate.inputTokens,
     outputTokens: candidate.outputTokens,
     totalTokens: candidate.totalTokens,
+    ...(cacheRead !== undefined && { cacheReadTokens: cacheRead }),
+    ...(cacheCreation !== undefined && { cacheCreationTokens: cacheCreation }),
   }
 }

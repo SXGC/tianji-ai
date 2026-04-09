@@ -153,15 +153,11 @@ describe('@tianji/runtime', () => {
     })
     expect(dependencies['@tianji/shared']).toBe('workspace:*')
     expect(dependencyNames).toEqual([
-      '@ai-sdk/anthropic',
-      '@ai-sdk/google',
-      '@ai-sdk/openai',
       '@langchain/core',
       '@langchain/langgraph',
       '@langchain/openai',
       '@tianji/observer',
       '@tianji/shared',
-      'ai',
       'deepagents',
       'langchain',
     ])
