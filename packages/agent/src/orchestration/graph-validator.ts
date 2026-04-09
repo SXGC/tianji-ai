@@ -35,10 +35,12 @@ export function validateOrchestrationGraph(graph: OrchestrationGraph): Validatio
 
   const knownIds = new Set<string>([...seenIds, GRAPH_START, GRAPH_END])
 
-  // 2. 必须有且仅有一条 __start__ 入边
+  // 2. 必须有且仅有一条从 __start__ 出发的边
   const startEdges = graph.edges.filter((e) => e.from === GRAPH_START)
   if (startEdges.length === 0) {
     errors.push('图必须包含一条从 __start__ 出发的边')
+  } else if (startEdges.length > 1) {
+    errors.push(`__start__ 只能有一条出边，当前 ${startEdges.length} 条`)
   }
 
   // 3. 边的两端都必须存在

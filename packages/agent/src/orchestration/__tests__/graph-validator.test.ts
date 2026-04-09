@@ -110,4 +110,54 @@ describe('validateOrchestrationGraph', () => {
     const result = validateOrchestrationGraph(makeGraph({ locked: true }))
     expect(result.ok).toBe(true)
   })
+
+  it('拒绝节点 id 重复', () => {
+    const result = validateOrchestrationGraph(
+      makeGraph({
+        nodes: [
+          { id: 'a', type: 'agent', agent: { model: 'fake', systemPrompt: 'sp' } },
+          { id: 'a', type: 'agent', agent: { model: 'fake', systemPrompt: 'sp' } },
+        ],
+      })
+    )
+    expect(result.ok).toBe(false)
+    expect(result.errors.some((e) => e.includes('重复'))).toBe(true)
+  })
+
+  it('拒绝 fork.join 指向不存在的节点', () => {
+    const result = validateOrchestrationGraph(
+      makeGraph({
+        nodes: [
+          { id: 'a', type: 'agent', agent: { model: 'fake', systemPrompt: 'sp' } },
+          { id: 'b', type: 'agent', agent: { model: 'fake', systemPrompt: 'sp' } },
+          { id: 'f', type: 'fork', targets: ['b'], join: 'ghost_join' },
+        ],
+        edges: [
+          { from: '__start__', to: 'a' },
+          { from: 'a', to: 'f' },
+        ],
+      })
+    )
+    expect(result.ok).toBe(false)
+    expect(result.errors.some((e) => e.includes('ghost_join'))).toBe(true)
+  })
+
+  it('拒绝多条 __start__ 出边', () => {
+    const result = validateOrchestrationGraph(
+      makeGraph({
+        nodes: [
+          { id: 'a', type: 'agent', agent: { model: 'fake', systemPrompt: 'sp' } },
+          { id: 'b', type: 'agent', agent: { model: 'fake', systemPrompt: 'sp' } },
+        ],
+        edges: [
+          { from: '__start__', to: 'a' },
+          { from: '__start__', to: 'b' },
+          { from: 'a', to: '__end__' },
+          { from: 'b', to: '__end__' },
+        ],
+      })
+    )
+    expect(result.ok).toBe(false)
+    expect(result.errors.some((e) => e.includes('__start__'))).toBe(true)
+  })
 })
