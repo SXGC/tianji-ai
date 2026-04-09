@@ -15,7 +15,6 @@ import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { DEFAULT_EXECUTION_POLICY, createSessionId } from '@tianji/shared'
 
-import { createSessionRuntime } from '../../runtime.js'
 import { InMemorySnapshotStore } from '../../snapshot-store.js'
 import { ToolRegistry } from '../../tool-catalog.js'
 import {
@@ -26,6 +25,7 @@ import {
   createAbortError,
   createDeferred,
   createMockTool,
+  createTestRuntime,
   createToolRegistry,
   createUserMessage,
   waitForRunStatus,
@@ -35,7 +35,7 @@ describe('suite/error-recovery', () => {
   it('工具 execute 抛异常 → run.failed', async () => {
     const explodeTool = createMockTool('explode', { error: new Error('boom') })
     const toolRegistry = createToolRegistry(explodeTool)
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'explode', args: {}, id: 'tool-explode' }]),
       },
@@ -73,7 +73,7 @@ describe('suite/error-recovery', () => {
       },
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'conditional', args: {}, id: 'tool-fail-1' }])
@@ -126,7 +126,7 @@ describe('suite/error-recovery', () => {
       sideEffect: 'idempotent',
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'slow', args: {}, id: 'tc-slow-cancel' }]),
       },
@@ -172,7 +172,7 @@ describe('suite/error-recovery', () => {
       sideEffect: 'destructive',
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'danger', args: {}, id: 'tc-danger-cancel' }]),
       },
@@ -225,7 +225,7 @@ describe('suite/error-recovery', () => {
       sideEffect: 'none',
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'pure', args: {}, id: 'tc-pure-cancel' }]),
       },
@@ -274,7 +274,7 @@ describe('suite/error-recovery', () => {
       sideEffect: 'idempotent',
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'idem', args: {}, id: 'tc-idem-cancel' }]),
       },

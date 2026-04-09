@@ -15,7 +15,6 @@ import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { createSessionId } from '@tianji/shared'
 
-import { createSessionRuntime } from '../../runtime.js'
 import { InMemorySnapshotStore } from '../../snapshot-store.js'
 import { ToolRegistry } from '../../tool-catalog.js'
 import {
@@ -25,6 +24,7 @@ import {
   createAbortError,
   createDeferred,
   createMockTool,
+  createTestRuntime,
   createToolRegistry,
   createUserMessage,
   readTextContent,
@@ -34,12 +34,12 @@ describe('suite/concurrency', () => {
   it('两个不同 session 同时 runTurn，各自 run.completed', async () => {
     const snapshotStore = new InMemorySnapshotStore()
 
-    const runtimeA = createSessionRuntime({
+    const runtimeA = createTestRuntime({
       deepagents: { model: fakeModel().respond(new AIMessage('reply-a')) },
       snapshotStore,
       toolCatalog: new ToolRegistry(),
     })
-    const runtimeB = createSessionRuntime({
+    const runtimeB = createTestRuntime({
       deepagents: { model: fakeModel().respond(new AIMessage('reply-b')) },
       snapshotStore,
       toolCatalog: new ToolRegistry(),
@@ -83,12 +83,12 @@ describe('suite/concurrency', () => {
   it('并发 run 各自的 session snapshot 独立更新', async () => {
     const snapshotStore = new InMemorySnapshotStore()
 
-    const runtimeA = createSessionRuntime({
+    const runtimeA = createTestRuntime({
       deepagents: { model: fakeModel().respond(new AIMessage('answer-alpha')) },
       snapshotStore,
       toolCatalog: new ToolRegistry(),
     })
-    const runtimeB = createSessionRuntime({
+    const runtimeB = createTestRuntime({
       deepagents: { model: fakeModel().respond(new AIMessage('answer-beta')) },
       snapshotStore,
       toolCatalog: new ToolRegistry(),
@@ -133,14 +133,14 @@ describe('suite/concurrency', () => {
     const snapshotStore = new InMemorySnapshotStore()
 
     const bombTool = createMockTool('bomb', { error: new Error('boom') })
-    const runtimeA = createSessionRuntime({
+    const runtimeA = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'bomb', args: {}, id: 'tc-bomb' }]),
       },
       snapshotStore,
       toolCatalog: createToolRegistry(bombTool),
     })
-    const runtimeB = createSessionRuntime({
+    const runtimeB = createTestRuntime({
       deepagents: { model: fakeModel().respond(new AIMessage('ok-b')) },
       snapshotStore,
       toolCatalog: new ToolRegistry(),
@@ -195,14 +195,14 @@ describe('suite/concurrency', () => {
       sideEffect: 'idempotent',
     })
 
-    const runtimeA = createSessionRuntime({
+    const runtimeA = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'block', args: {}, id: 'tc-block' }]),
       },
       snapshotStore,
       toolCatalog: blockRegistry,
     })
-    const runtimeB = createSessionRuntime({
+    const runtimeB = createTestRuntime({
       deepagents: { model: fakeModel().respond(new AIMessage('ok-cancel-b')) },
       snapshotStore,
       toolCatalog: new ToolRegistry(),

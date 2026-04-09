@@ -14,7 +14,6 @@ import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { createSessionId } from '@tianji/shared'
 
-import { createSessionRuntime } from '../../runtime.js'
 import { InMemorySnapshotStore } from '../../snapshot-store.js'
 import { ToolRegistry } from '../../tool-catalog.js'
 import {
@@ -23,6 +22,7 @@ import {
   createAbortError,
   createDeferred,
   createMockTool,
+  createTestRuntime,
   createToolRegistry,
   createUserMessage,
   waitForRunStatus,
@@ -31,7 +31,7 @@ import {
 describe('suite/snapshot-consistency', () => {
   it('run completed 后 RunSnapshot 正确', async () => {
     const snapshotStore = new InMemorySnapshotStore()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage('hello')),
       },
@@ -82,7 +82,7 @@ describe('suite/snapshot-consistency', () => {
       sideEffect: 'idempotent',
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'slow', args: {}, id: 'tc-slow-cancel' }]),
       },
@@ -119,7 +119,7 @@ describe('suite/snapshot-consistency', () => {
     const failingTool = createMockTool('boom', { error: new Error('kaboom') })
     const toolRegistry = createToolRegistry(failingTool)
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'boom', args: {}, id: 'tc-boom' }])
@@ -146,7 +146,7 @@ describe('suite/snapshot-consistency', () => {
 
   it('run completed 后 SessionSnapshot 追加 assistant 消息', async () => {
     const snapshotStore = new InMemorySnapshotStore()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage('response-text')),
       },
@@ -174,7 +174,7 @@ describe('suite/snapshot-consistency', () => {
 
   it('closeSession 写入 closedAt', async () => {
     const snapshotStore = new InMemorySnapshotStore()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage('hi')),
       },
@@ -210,7 +210,7 @@ describe('suite/snapshot-consistency', () => {
       sideEffect: 'idempotent',
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'slow', args: {}, id: 'tc-slow-close' }]),
       },
@@ -237,7 +237,7 @@ describe('suite/snapshot-consistency', () => {
 
   it('closed session 拒绝 runTurn', async () => {
     const snapshotStore = new InMemorySnapshotStore()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage('nope')),
       },
@@ -278,7 +278,7 @@ describe('suite/snapshot-consistency', () => {
       sideEffect: 'idempotent',
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'slow', args: {}, id: 'tc-slow-resume' }]),
       },

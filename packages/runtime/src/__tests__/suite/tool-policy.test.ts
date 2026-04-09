@@ -20,7 +20,6 @@ import {
   createSessionId,
 } from '@tianji/shared'
 
-import { createSessionRuntime } from '../../runtime.js'
 import { InMemorySnapshotStore } from '../../snapshot-store.js'
 import { type RuntimeToolDefinition, ToolRegistry, ensureToolAllowed } from '../../tool-catalog.js'
 import {
@@ -28,6 +27,7 @@ import {
   assertToolCalled,
   collectRuntimeOutcome,
   createMockTool,
+  createTestRuntime,
   createToolRegistry,
   createUserMessage,
 } from '../helpers/runtime-test-utils.js'
@@ -36,7 +36,7 @@ describe('suite/tool-policy', () => {
   it('sideEffect=none 工具正常执行', async () => {
     const safeTool = createMockTool('safe', { sideEffect: 'none', result: 'ok' })
     const toolRegistry = createToolRegistry(safeTool)
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'safe', args: {}, id: 'tc-safe-1' }])
@@ -63,7 +63,7 @@ describe('suite/tool-policy', () => {
   it('sideEffect=idempotent 工具正常执行', async () => {
     const idempotentTool = createMockTool('idempotent', { sideEffect: 'idempotent', result: 'ok' })
     const toolRegistry = createToolRegistry(idempotentTool)
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'idempotent', args: {}, id: 'tc-idem-1' }])
@@ -90,7 +90,7 @@ describe('suite/tool-policy', () => {
   it('sideEffect=destructive + 默认策略被拦截', async () => {
     const dangerTool = createMockTool('danger', { sideEffect: 'destructive', result: 'deleted' })
     const toolRegistry = createToolRegistry(dangerTool)
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'danger', args: {}, id: 'tc-danger-1' }])
@@ -120,7 +120,7 @@ describe('suite/tool-policy', () => {
   it('sideEffect=destructive + allowDestructive=true 正常执行', async () => {
     const dangerTool = createMockTool('danger', { sideEffect: 'destructive', result: 'deleted' })
     const toolRegistry = createToolRegistry(dangerTool)
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'danger', args: {}, id: 'tc-danger-2' }])

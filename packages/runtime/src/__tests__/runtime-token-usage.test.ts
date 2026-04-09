@@ -11,11 +11,11 @@ import type { TokenUsage } from '@tianji/shared'
 import { createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
-import { createSessionRuntime } from '../runtime.js'
 import { InMemorySnapshotStore } from '../snapshot-store.js'
 import { ToolRegistry } from '../tool-catalog.js'
 import {
   collectRuntimeEvents,
+  createTestRuntime,
   createUserMessage,
   waitForRunStatus,
 } from './helpers/runtime-test-utils.js'
@@ -28,7 +28,7 @@ describe('Token usage tracking', () => {
       usage_metadata: { input_tokens: 100, output_tokens: 50, total_tokens: 150 },
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: { model: fakeModel().respond(aiMessage) },
       snapshotStore,
       toolCatalog: new ToolRegistry(),
@@ -82,7 +82,7 @@ describe('Token usage tracking', () => {
       return msg
     }
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(responder).respond(responder),
       },
@@ -125,7 +125,7 @@ describe('Token usage tracking', () => {
 
   it('records zero usage when model does not provide usage_metadata', async () => {
     const snapshotStore = new InMemorySnapshotStore()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage({ content: 'No metadata' })),
       },
@@ -149,7 +149,7 @@ describe('Token usage tracking', () => {
   it('logs usage in run.completed observer log entry', async () => {
     const memorySink = createMemorySink()
     const snapshotStore = new InMemorySnapshotStore()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(
           new AIMessage({

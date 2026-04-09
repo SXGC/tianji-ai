@@ -14,13 +14,13 @@ import { fakeModel } from '@langchain/core/testing'
 import { DEFAULT_EXECUTION_POLICY, type RuntimeEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
-import { createSessionRuntime } from '../runtime.js'
 import { InMemorySnapshotStore } from '../snapshot-store.js'
 import { type RuntimeToolExecutionContext, ToolRegistry } from '../tool-catalog.js'
 import {
   collectRuntimeEvents,
   collectRuntimeOutcome,
   createDeferred,
+  createTestRuntime,
   createUserMessage,
   readTextContent,
   waitForRunStatus,
@@ -29,7 +29,7 @@ import {
 describe('deepagents tool adapter', () => {
   it('passes sessionId runId and toolCallId through ToolCatalog', async () => {
     let observedToolContext: RuntimeToolExecutionContext | undefined
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       engine: 'deepagents',
       deepagents: {
         model: fakeModel()
@@ -113,7 +113,7 @@ describe('deepagents tool adapter', () => {
   })
 
   it('preserves tool failure semantics through deepagents', async () => {
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       engine: 'deepagents',
       deepagents: {
         model: fakeModel().respondWithTools([
@@ -186,7 +186,7 @@ describe('deepagents tool adapter', () => {
 
   it('enforces tool timeout semantics through deepagents', async () => {
     const toolSignalSeen = createDeferred<AbortSignal | undefined>()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       engine: 'deepagents',
       deepagents: {
         model: fakeModel().respondWithTools([

@@ -22,11 +22,11 @@ import {
 } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
-import { createSessionRuntime } from '../runtime.js'
 import { InMemorySnapshotStore } from '../snapshot-store.js'
 import { ToolRegistry } from '../tool-catalog.js'
 import {
   collectRuntimeEvents,
+  createTestRuntime,
   createUserMessage,
   readTextContent,
   waitForRunStatus,
@@ -34,7 +34,7 @@ import {
 
 describe('deepagents runtime regressions', () => {
   it('accepts image and tool-call parts in historical session messages', async () => {
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: new FakeListChatModel({ responses: ['history preserved'] }),
       },
@@ -82,7 +82,7 @@ describe('deepagents runtime regressions', () => {
   })
 
   it('cleans up reused external abort listeners after each completed run', async () => {
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'sum', args: { a: 1, b: 2 }, id: 'call_sum_1' }])
@@ -170,7 +170,7 @@ describe('deepagents runtime regressions', () => {
     await snapshotStore.saveSession(session)
     await snapshotStore.saveRun(checkpointedRun)
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: 'openai:gpt-5.1',
       },
@@ -225,7 +225,7 @@ describe('deepagents runtime regressions', () => {
     await snapshotStore.saveSession(session)
     await snapshotStore.saveRun(runNeedingConfirmation)
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: 'openai:gpt-5.1',
       },

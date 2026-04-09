@@ -17,12 +17,12 @@ import { type ObserverLogEntry, createMemorySink, createObserverLogger } from '@
 import { type RuntimeEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
-import { createSessionRuntime } from '../runtime.js'
 import { InMemorySnapshotStore } from '../snapshot-store.js'
 import { ToolRegistry } from '../tool-catalog.js'
 import {
   collectRuntimeEvents,
   collectRuntimeEventsWithAggregation,
+  createTestRuntime,
   createUserMessage,
   readTextContent,
   waitForRunStatus,
@@ -52,7 +52,7 @@ describe('SessionRuntime', () => {
       sideEffect: 'idempotent',
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'sum', args: { a: 1, b: 2 }, id: 'tool-1' }])
@@ -146,7 +146,7 @@ describe('SessionRuntime', () => {
 
   it('replays streamed deltas in order and stores the aggregated final assistant message', async () => {
     const snapshotStore = new InMemorySnapshotStore()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: new FakeStreamingChatModel({
           chunks: ['hel', 'lo ', 'world'].map((content) => new AIMessageChunk({ content })),
@@ -200,7 +200,7 @@ describe('SessionRuntime', () => {
 
   it('marks new runs with triggerType new and no parentRunId', async () => {
     const memorySink = createMemorySink()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: { model: fakeModel().respond(new AIMessage('ok')) },
       logger: createObserverLogger({ sinks: [memorySink] }),
     })
@@ -268,7 +268,7 @@ describe('SessionRuntime', () => {
 
   it('keeps failed lifecycle events and observer logs in the same lineage order', async () => {
     const memorySink = createMemorySink()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([{ name: 'explode', args: {}, id: 'tool-fail' }]),
       },
@@ -328,7 +328,7 @@ describe('SessionRuntime', () => {
   })
 
   it('promotes openai provider config with baseUrl into a ChatOpenAI model', () => {
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: 'openai:gpt-latest-medium',
         providerConfig: {
@@ -366,7 +366,7 @@ describe('SessionRuntime', () => {
       sideEffect: 'none',
     })
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'greet', args: {}, id: 'greet-1' }])

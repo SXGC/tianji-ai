@@ -16,13 +16,13 @@ import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { type RuntimeEvent, createSessionId } from '@tianji/shared'
 
-import { createSessionRuntime } from '../../runtime.js'
 import { InMemorySnapshotStore } from '../../snapshot-store.js'
 import { ToolRegistry } from '../../tool-catalog.js'
 import {
   assertRunCompleted,
   assertToolCalled,
   createMockTool,
+  createTestRuntime,
   createToolRegistry,
   createUserMessage,
   driveMultiTurn,
@@ -48,7 +48,7 @@ describe('suite/multi-turn', () => {
   it('连续 3 轮 runTurn 均正常完成且 session 消息完整', async () => {
     const snapshotStore = new InMemorySnapshotStore()
     const responder = createSequentialResponder(['answer-1', 'answer-2', 'answer-3'])
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(responder).respond(responder).respond(responder),
       },
@@ -84,7 +84,7 @@ describe('suite/multi-turn', () => {
   it('第 2 轮消息历史包含第 1 轮内容', async () => {
     const snapshotStore = new InMemorySnapshotStore()
     const responder = createSequentialResponder(['reply-1', 'reply-2'])
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(responder).respond(responder),
       },
@@ -118,7 +118,7 @@ describe('suite/multi-turn', () => {
     // 第 2 轮：直接回复（model 被调用 1 次）
     // bindTools 会重置 _callIndex，所以第 2 轮又从 index 0 开始
     // 需要 3 个 respond 入队：turn1-tool, turn1-final, turn2-final
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel()
           .respondWithTools([{ name: 'echo', args: { text: 'ping' }, id: 'tool-echo-1' }])
@@ -153,7 +153,7 @@ describe('suite/multi-turn', () => {
   it('每轮的 sessionId 相同，runId 不同', async () => {
     const snapshotStore = new InMemorySnapshotStore()
     const responder = createSequentialResponder(['r1', 'r2'])
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(responder).respond(responder),
       },
@@ -190,7 +190,7 @@ describe('suite/multi-turn', () => {
   it('多轮后 session snapshot 的 updatedAt 单调递增', async () => {
     const snapshotStore = new InMemorySnapshotStore()
     const responder = createSequentialResponder(['t1', 't2', 't3'])
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(responder).respond(responder).respond(responder),
       },

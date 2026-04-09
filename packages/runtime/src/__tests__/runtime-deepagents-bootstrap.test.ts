@@ -20,6 +20,7 @@ import { InMemorySnapshotStore } from '../snapshot-store.js'
 import { ToolRegistry } from '../tool-catalog.js'
 import {
   collectRuntimeEvents,
+  createTestRuntime,
   createUserMessage,
   readTextContent,
   waitForRunStatus,
@@ -27,7 +28,7 @@ import {
 
 describe('deepagents runtime bootstrap', () => {
   it('boots from deepagents config and records thread metadata', async () => {
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       engine: 'deepagents',
       deepagents: {
         model: new FakeListChatModel({ responses: ['hello from deepagents'] }),

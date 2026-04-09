@@ -9,6 +9,10 @@
  * - 被 packages/runtime/src/__tests__ 下多个集成与回归测试直接复用。
  * - 依赖 runtime、snapshot-store、tool-catalog 的公开接口构建测试上下文。
  */
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { FakeListChatModel } from '@langchain/core/utils/testing'
 import {
   type AggregatedMessageDeltaState,
@@ -23,6 +27,7 @@ import {
 import {
   type SessionRuntime,
   type SessionRuntimeDeepagentsConfig,
+  type SessionRuntimeOptions,
   createSessionRuntime,
 } from '../../runtime.js'
 import { InMemorySnapshotStore } from '../../snapshot-store.js'
@@ -47,8 +52,30 @@ type DeepagentsHarnessOptions = {
   readonly toolCatalog?: ToolCatalog
 }
 
-export function createRuntimeHarness(options: DeepagentsHarnessOptions): SessionRuntime {
+function createTestLlmRawDir(): string {
+  return mkdtempSync(join(tmpdir(), 'tianji-runtime-raws-'))
+}
+
+/**
+ * 为 runtime 测试统一注入临时 llmRawDir，避免污染用户配置目录。
+ */
+export function createTestRuntime(options: SessionRuntimeOptions): SessionRuntime {
+  const deepagents =
+    options.deepagents === undefined
+      ? undefined
+      : {
+          ...options.deepagents,
+          llmRawDir: options.deepagents.llmRawDir ?? createTestLlmRawDir(),
+        }
+
   return createSessionRuntime({
+    ...options,
+    deepagents,
+  })
+}
+
+export function createRuntimeHarness(options: DeepagentsHarnessOptions): SessionRuntime {
+  return createTestRuntime({
     deepagents: options.deepagents,
     snapshotStore: options.snapshotStore ?? new InMemorySnapshotStore(),
     toolCatalog: options.toolCatalog ?? new ToolRegistry(),

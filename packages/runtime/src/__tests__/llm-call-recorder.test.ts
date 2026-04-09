@@ -162,6 +162,65 @@ describe('LlmCallRecorder', () => {
 
     expect(recorder.getCalls()[0].request.model).toBe('gpt-4o')
   })
+
+  it('从 model.client.baseURL 提取 baseUrl', () => {
+    const recorder = new LlmCallRecorder()
+    recorder.recordCall(
+      makeModelRequest({
+        model: {
+          modelName: 'gpt-4',
+          client: { baseURL: 'https://api.openai.com/v1' },
+        },
+      }),
+      new AIMessage({ content: 'ok' })
+    )
+
+    expect(recorder.getCalls()[0].request.baseUrl).toBe('https://api.openai.com/v1')
+  })
+
+  it('从 model.clientConfig.baseURL 提取 baseUrl', () => {
+    const recorder = new LlmCallRecorder()
+    recorder.recordCall(
+      makeModelRequest({
+        model: {
+          modelName: 'claude-3.5-sonnet',
+          clientConfig: { baseURL: 'https://api.anthropic.com' },
+        },
+      }),
+      new AIMessage({ content: 'ok' })
+    )
+
+    expect(recorder.getCalls()[0].request.baseUrl).toBe('https://api.anthropic.com')
+  })
+
+  it('model 无 baseURL 时 baseUrl 为 undefined', () => {
+    const recorder = new LlmCallRecorder()
+    recorder.recordCall(makeModelRequest({ model: 'gpt-4o' }), new AIMessage({ content: 'ok' }))
+
+    expect(recorder.getCalls()[0].request.baseUrl).toBeUndefined()
+  })
+
+  it('recordError 记录失败的 LLM 调用', () => {
+    const recorder = new LlmCallRecorder()
+    recorder.recordError(
+      makeModelRequest({ systemPrompt: 'will fail' }) as Record<string, unknown>,
+      new Error('Rate limit exceeded')
+    )
+
+    const calls = recorder.getCalls()
+    expect(calls).toHaveLength(1)
+    expect(calls[0].request.systemPrompt).toBe('will fail')
+    expect(calls[0].response.content).toBeNull()
+    expect(calls[0].response.toolCalls).toEqual([])
+    expect(calls[0].response.error).toBe('Rate limit exceeded')
+  })
+
+  it('recordError 处理非 Error 类型', () => {
+    const recorder = new LlmCallRecorder()
+    recorder.recordError(makeModelRequest() as Record<string, unknown>, 'string error')
+
+    expect(recorder.getCalls()[0].response.error).toBe('string error')
+  })
 })
 
 describe('LlmCallRecorder + LlmRawStore 集成', () => {
@@ -209,5 +268,23 @@ describe('createRecordingMiddleware', () => {
     expect(recorder.getCalls()).toHaveLength(1)
     expect(recorder.getCalls()[0].request.systemPrompt).toBe('mid-test')
     expect(recorder.getCalls()[0].response.content).toBe('from handler')
+  })
+
+  it('wrapModelCall handler 抛异常时记录错误并重新抛出', async () => {
+    const recorder = new LlmCallRecorder()
+    const middleware = createRecordingMiddleware(recorder)
+    const request = makeModelRequest({ systemPrompt: 'will-error' })
+    const apiError = new Error('401 Unauthorized')
+
+    await expect(
+      middleware.wrapModelCall!(request, async () => {
+        throw apiError
+      })
+    ).rejects.toThrow('401 Unauthorized')
+
+    expect(recorder.getCalls()).toHaveLength(1)
+    expect(recorder.getCalls()[0].request.systemPrompt).toBe('will-error')
+    expect(recorder.getCalls()[0].response.error).toBe('401 Unauthorized')
+    expect(recorder.getCalls()[0].response.content).toBeNull()
   })
 })

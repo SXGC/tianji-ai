@@ -13,13 +13,13 @@ import { fakeModel } from '@langchain/core/testing'
 import { createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
-import { createSessionRuntime } from '../runtime.js'
 import { InMemorySnapshotStore } from '../snapshot-store.js'
 import { ToolRegistry } from '../tool-catalog.js'
 import {
   collectRuntimeEvents,
   createAbortError,
   createDeferred,
+  createTestRuntime,
   createUserMessage,
   waitForRunStatus,
 } from './helpers/runtime-test-utils.js'
@@ -28,7 +28,7 @@ describe('SessionRuntime lifecycle', () => {
   it('closes sessions by persisting closedAt, aborting active runs, and blocking future work', async () => {
     const snapshotStore = new InMemorySnapshotStore()
     const toolSignalSeen = createDeferred<AbortSignal | undefined>()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'lookup', args: { city: 'Shanghai' }, id: 'tool-close' },

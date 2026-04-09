@@ -16,17 +16,14 @@ import { type ObserverLogEntry, createMemorySink, createObserverLogger } from '@
 import { DEFAULT_EXECUTION_POLICY, type RuntimeEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
-import {
-  createSessionRuntime,
-  readDeepagentsRunWorkflowState,
-  readRunRuntimeMetadata,
-} from '../runtime.js'
+import { readDeepagentsRunWorkflowState, readRunRuntimeMetadata } from '../runtime.js'
 import { InMemorySnapshotStore } from '../snapshot-store.js'
 import { ToolRegistry } from '../tool-catalog.js'
 import {
   collectRuntimeEvents,
   createAbortError,
   createDeferred,
+  createTestRuntime,
   createUserMessage,
   readTextContent,
   waitForRunStatus,
@@ -59,7 +56,7 @@ describe('SessionRuntime cancel/resume regressions', () => {
       },
       sideEffect: 'idempotent',
     })
-    const cancellationRuntime = createSessionRuntime({
+    const cancellationRuntime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'lookup', args: { city: 'Shanghai' }, id: 'tool-replay' },
@@ -68,7 +65,7 @@ describe('SessionRuntime cancel/resume regressions', () => {
       snapshotStore,
       toolCatalog,
     })
-    const resumeRuntime = createSessionRuntime({
+    const resumeRuntime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage('resumed answer')),
       },
@@ -159,7 +156,7 @@ describe('SessionRuntime cancel/resume regressions', () => {
       sideEffect: 'idempotent',
     })
 
-    const cancellationRuntime = createSessionRuntime({
+    const cancellationRuntime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'lookup', args: { city: 'Shanghai' }, id: 'tool-replay' },
@@ -170,7 +167,7 @@ describe('SessionRuntime cancel/resume regressions', () => {
       logger,
     })
 
-    const resumeRuntime = createSessionRuntime({
+    const resumeRuntime = createTestRuntime({
       deepagents: { model: fakeModel().respond(new AIMessage('resumed answer')) },
       snapshotStore,
       toolCatalog,
@@ -317,7 +314,7 @@ describe('SessionRuntime cancel/resume regressions', () => {
   it('uses require-user-confirmation for destructive side effects in deepagents runs', async () => {
     const snapshotStore = new InMemorySnapshotStore()
     const toolSignalSeen = createDeferred<AbortSignal | undefined>()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'delete-file', args: { path: '/tmp/test.txt' }, id: 'tool-danger' },
@@ -423,7 +420,7 @@ describe('SessionRuntime cancel/resume regressions', () => {
       },
       sideEffect: 'idempotent',
     })
-    const interruptingRuntime = createSessionRuntime({
+    const interruptingRuntime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'sum', args: { a: 2, b: 5 }, id: 'tool-hitl' },
@@ -438,7 +435,7 @@ describe('SessionRuntime cancel/resume regressions', () => {
       snapshotStore,
       toolCatalog,
     })
-    const resumeRuntime = createSessionRuntime({
+    const resumeRuntime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage('approved sum 7')),
         checkpointer,

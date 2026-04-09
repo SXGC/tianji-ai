@@ -15,15 +15,12 @@ import { fakeModel } from '@langchain/core/testing'
 import { MemorySaver } from '@langchain/langgraph'
 import { createSessionId } from '@tianji/shared'
 
-import {
-  createSessionRuntime,
-  readDeepagentsRunWorkflowState,
-  readRunRuntimeMetadata,
-} from '../../runtime.js'
+import { readDeepagentsRunWorkflowState, readRunRuntimeMetadata } from '../../runtime.js'
 import { InMemorySnapshotStore } from '../../snapshot-store.js'
 import { ToolRegistry } from '../../tool-catalog.js'
 import {
   collectRuntimeEvents,
+  createTestRuntime,
   createUserMessage,
   readTextContent,
   waitForRunStatus,
@@ -68,7 +65,7 @@ describe('suite/checkpoint-resume', () => {
     const { tool: sumTool, getExecutions } = createSumTool()
     const toolCatalog = new ToolRegistry().registerTool(sumTool)
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'sum', args: { a: 2, b: 5 }, id: 'tool-hitl-1' },
@@ -105,7 +102,7 @@ describe('suite/checkpoint-resume', () => {
     const { tool: sumTool } = createSumTool()
     const toolCatalog = new ToolRegistry().registerTool(sumTool)
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'sum', args: { a: 3, b: 4 }, id: 'tool-hitl-2' },
@@ -143,7 +140,7 @@ describe('suite/checkpoint-resume', () => {
     const { tool: sumTool, getExecutions } = createSumTool()
     const toolCatalog = new ToolRegistry().registerTool(sumTool)
 
-    const interruptingRuntime = createSessionRuntime({
+    const interruptingRuntime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'sum', args: { a: 2, b: 5 }, id: 'tool-hitl-3' },
@@ -156,7 +153,7 @@ describe('suite/checkpoint-resume', () => {
       snapshotStore,
       toolCatalog,
     })
-    const resumeRuntime = createSessionRuntime({
+    const resumeRuntime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage('approved sum 7')),
         checkpointer,
@@ -200,7 +197,7 @@ describe('suite/checkpoint-resume', () => {
     const { tool: sumTool } = createSumTool()
     const toolCatalog = new ToolRegistry().registerTool(sumTool)
 
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'sum', args: { a: 1, b: 1 }, id: 'tool-hitl-4' },
@@ -231,7 +228,7 @@ describe('suite/checkpoint-resume', () => {
 
   it('resumeRun 对非 cancelled run 报 RUN_NOT_CANCELLABLE', async () => {
     const snapshotStore = new InMemorySnapshotStore()
-    const runtime = createSessionRuntime({
+    const runtime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage('done')),
       },
@@ -260,7 +257,7 @@ describe('suite/checkpoint-resume', () => {
     const { tool: sumTool } = createSumTool()
     const toolCatalog = new ToolRegistry().registerTool(sumTool)
 
-    const interruptingRuntime = createSessionRuntime({
+    const interruptingRuntime = createTestRuntime({
       deepagents: {
         model: fakeModel().respondWithTools([
           { name: 'sum', args: { a: 10, b: 20 }, id: 'tool-hitl-6' },
@@ -273,7 +270,7 @@ describe('suite/checkpoint-resume', () => {
       snapshotStore,
       toolCatalog,
     })
-    const resumeRuntime = createSessionRuntime({
+    const resumeRuntime = createTestRuntime({
       deepagents: {
         model: fakeModel().respond(new AIMessage('sum is 30')),
         checkpointer,

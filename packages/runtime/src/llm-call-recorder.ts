@@ -21,7 +21,7 @@ export class LlmCallRecorder {
   private readonly calls: LlmCallRecord[] = []
 
   /**
-   * 记录一次 LLM 调用，包含完整的 request 和 response。
+   * 记录一次成功的 LLM 调用。
    *
    * @param request - 调用 LLM 时的请求对象（ModelRequest 或兼容结构）
    * @param response - LLM 返回的 AIMessage
@@ -31,6 +31,24 @@ export class LlmCallRecorder {
       index: this.calls.length,
       request: serializeRequest(request),
       response: serializeResponse(response),
+    })
+  }
+
+  /**
+   * 记录一次失败的 LLM 调用。
+   *
+   * @param request - 调用 LLM 时的请求对象
+   * @param error - 抛出的错误
+   */
+  recordError(request: Record<string, unknown>, error: unknown): void {
+    this.calls.push({
+      index: this.calls.length,
+      request: serializeRequest(request),
+      response: {
+        content: null,
+        toolCalls: [],
+        error: error instanceof Error ? error.message : String(error),
+      },
     })
   }
 
@@ -65,9 +83,15 @@ export function createRecordingMiddleware(recorder: LlmCallRecorder): AgentMiddl
   return createMiddleware({
     name: 'tianji-llm-call-recorder',
     wrapModelCall: async (request, handler) => {
-      const response = await handler(request)
-      recorder.recordCall(request as unknown as Record<string, unknown>, response as AIMessage)
-      return response
+      const req = request as unknown as Record<string, unknown>
+      try {
+        const response = await handler(request)
+        recorder.recordCall(req, response as AIMessage)
+        return response
+      } catch (error) {
+        recorder.recordError(req, error)
+        throw error
+      }
     },
   })
 }
@@ -75,6 +99,7 @@ export function createRecordingMiddleware(recorder: LlmCallRecorder): AgentMiddl
 function serializeRequest(request: Record<string, unknown>): LlmCallRequest {
   return {
     model: extractModelName(request.model),
+    baseUrl: extractBaseUrl(request.model),
     systemPrompt: typeof request.systemPrompt === 'string' ? request.systemPrompt : '',
     messages: serializeMessages(request.messages),
     tools: serializeTools(request.tools),
@@ -151,6 +176,23 @@ function serializeResponse(response: AIMessage): LlmCallResponse {
         ? (response.additional_kwargs as Record<string, unknown>)
         : undefined,
   }
+}
+
+/**
+ * 从 model 对象提取 API base URL。
+ * 支持 ChatOpenAI（client.baseURL / clientConfig.baseURL）等 langchain 模型。
+ */
+function extractBaseUrl(model: unknown): string | undefined {
+  if (typeof model !== 'object' || model === null) return undefined
+  const obj = model as Record<string, unknown>
+
+  const client = obj.client as Record<string, unknown> | undefined
+  if (typeof client?.baseURL === 'string') return client.baseURL
+
+  const clientConfig = obj.clientConfig as Record<string, unknown> | undefined
+  if (typeof clientConfig?.baseURL === 'string') return clientConfig.baseURL
+
+  return undefined
 }
 
 /** 从 model 字段提取模型名称字符串。支持字符串直接值或对象中的 modelName/model/name 字段。 */

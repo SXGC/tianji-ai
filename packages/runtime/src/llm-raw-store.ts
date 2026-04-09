@@ -24,6 +24,7 @@ export interface SerializedToolCall {
 
 export interface LlmCallRequest {
   readonly model: string
+  readonly baseUrl?: string
   readonly systemPrompt: string
   readonly messages: readonly SerializedMessage[]
   readonly tools: readonly SerializedTool[]
@@ -40,6 +41,7 @@ export interface LlmCallResponse {
     readonly totalTokens?: number
   }
   readonly additional_kwargs?: Record<string, unknown>
+  readonly error?: string
 }
 
 export interface LlmCallRecord {
