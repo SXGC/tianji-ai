@@ -294,6 +294,76 @@ describe('runCli daemon commands', () => {
     }
   })
 
+  it('daemon restart --fg fails when pid file disappears but process stays alive', async () => {
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      await writeFile(paths.daemonPortPath, '32123', 'utf8')
+      await writeFile(paths.daemonPidPath, '4321', 'utf8')
+
+      const killSpy = vi.spyOn(process, 'kill').mockImplementation(((
+        pid: number,
+        signal?: NodeJS.Signals | number
+      ) => {
+        if (pid === 4321 && signal === 0) {
+          return true
+        }
+
+        return true
+      }) as typeof process.kill)
+
+      vi.resetModules()
+      vi.doMock('@tianji/agent', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@tianji/agent')>()
+        return {
+          ...actual,
+          DaemonClient: vi.fn().mockImplementation(() => ({
+            ping: vi.fn(async () => ({
+              pid: 4321,
+              sessionId: 'session-1',
+              uptime: 10,
+              controlPlane: {
+                enabled: false,
+                status: 'disabled',
+                baseUrl: null,
+                lastSuccessAt: null,
+                lastError: null,
+              },
+            })),
+            shutdown: vi.fn(async () => {
+              await import('node:fs/promises').then((fs) =>
+                fs.unlink(paths.daemonPidPath).catch(() => {})
+              )
+            }),
+            close: vi.fn(),
+          })),
+        }
+      })
+
+      const originalDateNow = Date.now
+      let now = 0
+      vi.spyOn(Date, 'now').mockImplementation(() => {
+        now += 1000
+        return now
+      })
+
+      const { runCli: isolatedRunCli } = await import('../main.js')
+      const exitCode = await isolatedRunCli(['daemon', 'restart', '--fg'], {
+        getUserConfigPaths: () => paths,
+        runDaemonEntry,
+      })
+
+      expect(exitCode).toBe(1)
+      expect(runDaemonEntry).not.toHaveBeenCalled()
+      Date.now = originalDateNow
+      killSpy.mockRestore()
+    } finally {
+      vi.doUnmock('@tianji/agent')
+      await cleanup()
+    }
+  })
+
   it('daemon restart --fg starts replacement after recorded pid exits', async () => {
     const runDaemonEntry = vi.fn(async () => undefined)
     const { paths, cleanup } = await createTempCliPaths()

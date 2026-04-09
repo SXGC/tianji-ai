@@ -194,6 +194,7 @@ export async function runDaemonEntry(): Promise<void> {
         signal: reason.type === 'signal' ? reason.signal : undefined,
       })
 
+      await server.deleteStateFiles()
       process.exit(reason.type === 'signal' ? 0 : 1)
     })()
 

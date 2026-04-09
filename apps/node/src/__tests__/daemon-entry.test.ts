@@ -115,6 +115,7 @@ vi.mock('@tianji/agent', () => ({
     port: 4321,
     listen: listenMock,
     shutdown: shutdownMock,
+    deleteStateFiles: vi.fn(async () => undefined),
   })),
 }))
 

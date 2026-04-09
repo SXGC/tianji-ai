@@ -123,6 +123,9 @@ async function waitForProcessExit(pid: number, timeoutMs = 5000): Promise<boolea
  * 优先使用调用方传入的 pid，避免因 DaemonServer.shutdown() 已删除 pid 文件
  * 而误判进程已退出。
  *
+ * 判定进程是否退出只看 OS 进程状态（`process.kill(pid, 0)`），
+ * 不看 PID 文件是否存在——避免状态文件提前删除导致误判。
+ *
  * @returns 进程是否已退出
  */
 async function stopDaemonGracefullyOrForce(
@@ -146,15 +149,6 @@ async function stopDaemonGracefullyOrForce(
   if (exited) {
     await logDebug(paths, scope, 'Daemon process exited gracefully', { pid })
     await cleanupStaleDaemonFiles(paths)
-    return true
-  }
-
-  // Re-read PID file: if server already cleaned up its own PID file, shutdown succeeded
-  const currentPid = await readDaemonPid(paths)
-  if (currentPid === undefined) {
-    await logDebug(paths, scope, 'Daemon PID file removed, treating as successful shutdown', {
-      pid,
-    })
     return true
   }
 

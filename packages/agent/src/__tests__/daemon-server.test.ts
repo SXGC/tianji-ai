@@ -184,7 +184,7 @@ describe('DaemonServer', () => {
     await chat1
   })
 
-  it('shutdown cleans pid/port files', async () => {
+  it('deleteStateFiles cleans pid/port files after shutdown', async () => {
     const portPath = join(tmpdir(), `tianji-test-daemon-port-${Date.now()}`)
     const pidPath = join(tmpdir(), `tianji-test-daemon-pid-${Date.now()}`)
 
@@ -206,7 +206,10 @@ describe('DaemonServer', () => {
     expect(Number(pidContent)).toBe(process.pid)
 
     await server.shutdown()
+    await expect(stat(portPath)).resolves.toBeDefined()
+    await expect(stat(pidPath)).resolves.toBeDefined()
 
+    await server.deleteStateFiles()
     await expect(stat(portPath)).rejects.toThrow()
     await expect(stat(pidPath)).rejects.toThrow()
   })

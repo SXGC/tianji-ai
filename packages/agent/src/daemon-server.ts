@@ -94,6 +94,13 @@ export class DaemonServer {
     await new Promise<void>((resolve, reject) => {
       this.#server.close((err) => (err ? reject(err) : resolve()))
     })
+  }
+
+  /**
+   * 删除 port/pid 状态文件。应在进程即将退出时调用，
+   * 而非在 HTTP server 关闭后立刻删除——避免 CLI 误判进程已退出。
+   */
+  async deleteStateFiles(): Promise<void> {
     await this.#deleteStateFiles()
   }
 
