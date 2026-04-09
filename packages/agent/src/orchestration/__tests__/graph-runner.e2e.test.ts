@@ -88,4 +88,90 @@ describe('orchestration e2e', () => {
     expect(eventTypes).toContain('graph.node.completed')
     expect(eventTypes).toContain('graph.completed')
   })
+
+  it('router 形成循环：reviewer 不通过则回到 coder', async () => {
+    // 序列：第一次 coder→ "代码 v1"； reviewer→ "{approved:false}"；
+    //       第二次 coder→ "代码 v2"； reviewer→ "{approved:true}"。
+    // 同样使用按调用发放 response 的策略，避免 bindTools 克隆隔离掉游标。
+    const responses = [
+      '代码 v1',
+      '{"review":"待改进","approved":false}',
+      '代码 v2',
+      '{"review":"通过","approved":true}',
+    ]
+    let responseIndex = 0
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => {
+        const next = responses[responseIndex] ?? ''
+        responseIndex += 1
+        return new FakeListChatModel({ responses: [next] })
+      },
+    })
+
+    const graph: OrchestrationGraph = {
+      id: 'review-loop',
+      name: 'reviewer-loop',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: {
+        code: { type: 'string' },
+        review: { type: 'string' },
+        approved: { type: 'boolean', default: false },
+      },
+      nodes: [
+        {
+          id: 'coder',
+          type: 'agent',
+          agent: { model: 'fake', systemPrompt: '编码者' },
+          output: ['code'],
+        },
+        {
+          id: 'reviewer',
+          type: 'agent',
+          agent: { model: 'fake', systemPrompt: '审查者' },
+          input: ['code'],
+          output: ['review', 'approved'],
+        },
+        {
+          id: 'router1',
+          type: 'router',
+          condition: {
+            field: 'approved',
+            branches: { true: '__end__', false: 'coder' },
+          },
+        },
+      ],
+      edges: [
+        { from: '__start__', to: 'coder' },
+        { from: 'coder', to: 'reviewer' },
+        { from: 'reviewer', to: 'router1' },
+      ],
+    }
+
+    const result = runOrchestrationGraph({
+      graph,
+      runId: 'run_e2e_loop' as RunId,
+      compileOptions: { agentExecutorFactory: factory },
+    })
+
+    const events: GraphEvent[] = []
+    const collect = (async () => {
+      for await (const event of result.events) {
+        events.push(event)
+      }
+    })()
+
+    const finalState = await result.finished
+    await collect
+
+    expect(finalState.approved).toBe(true)
+    expect(finalState.code).toBe('代码 v2')
+
+    const coderStarts = events.filter(
+      (event) =>
+        event.type === 'graph.node.started' && (event as { nodeId: string }).nodeId === 'coder'
+    )
+    expect(coderStarts.length).toBe(2) // 因为循环了一次
+  })
 })
