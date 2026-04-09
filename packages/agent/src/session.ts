@@ -9,6 +9,11 @@ import {
 import type { AppMessage, RunId, RuntimeEvent, SessionId } from '@tianji/shared'
 
 import { type LoadedAgentContext, injectProviderEnv } from './context.js'
+import {
+  type CompileOptions,
+  type OrchestrationGraph,
+  runOrchestrationGraph,
+} from './orchestration/index.js'
 import { createFetchUrlTool } from './tools/fetch-url-tool.js'
 
 export interface AgentRuntimeOptions {
@@ -19,9 +24,24 @@ export interface ChatOptions {
   readonly systemPrompt?: string
 }
 
+/**
+ * 通过 OrchestrationGraph 启动一轮多智能体编排所需的参数。
+ *
+ * compileOptions 中的 `runId`、`observer`、`emitGraphEvent` 由 session
+ * 内部负责注入，调用方只需要提供 executor 工厂等编译级配置。
+ */
+export interface ChatWithGraphOptions {
+  readonly initialState?: Record<string, unknown>
+  readonly compileOptions: Omit<CompileOptions, 'runId' | 'observer' | 'emitGraphEvent'>
+}
+
 export interface AgentSession {
   readonly sessionId: SessionId
   readonly query: (prompt: string, options?: ChatOptions) => AsyncIterable<RuntimeEvent>
+  readonly queryWithGraph: (
+    graph: OrchestrationGraph,
+    options: ChatWithGraphOptions
+  ) => AsyncIterable<RuntimeEvent>
   readonly abort: () => void
 }
 
@@ -113,6 +133,27 @@ export async function createAgentSession(
           activeRunId = null
         }
       }
+    },
+    async *queryWithGraph(
+      graph: OrchestrationGraph,
+      graphOptions: ChatWithGraphOptions
+    ): AsyncIterable<RuntimeEvent> {
+      // runId 是 @tianji/shared 的分支类型，这里用 session 级时间戳生成唯一值即可。
+      const runId = `run_graph_${Date.now()}` as RunId
+      const result = runOrchestrationGraph({
+        graph,
+        runId,
+        initialState: graphOptions.initialState,
+        compileOptions: graphOptions.compileOptions,
+        observer: options?.logger,
+      })
+
+      // GraphEvent 是 RuntimeEvent 的一个成员（详见 @tianji/shared events.ts），
+      // 直接按 RuntimeEvent 产出即可让 CLI 等上层消费者统一处理。
+      for await (const event of result.events) {
+        yield event
+      }
+      await result.finished
     },
   }
 }
