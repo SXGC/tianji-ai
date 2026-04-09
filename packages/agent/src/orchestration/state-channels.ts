@@ -1,4 +1,5 @@
 import { Annotation } from '@langchain/langgraph'
+import type { BaseChannel } from '@langchain/langgraph'
 import type { StateChannelDef, StateChannelReducer } from './graph-schema'
 
 /**
@@ -11,7 +12,7 @@ import type { StateChannelDef, StateChannelReducer } from './graph-schema'
 export function compileStateChannels(
   channels: Record<string, StateChannelDef>
 ): ReturnType<typeof Annotation.Root> {
-  const spec: Record<string, ReturnType<typeof Annotation>> = {}
+  const spec: Record<string, BaseChannel> = {}
 
   for (const [key, def] of Object.entries(channels)) {
     spec[key] = createChannelAnnotation(def)
@@ -20,7 +21,7 @@ export function compileStateChannels(
   return Annotation.Root(spec)
 }
 
-function createChannelAnnotation(def: StateChannelDef) {
+function createChannelAnnotation(def: StateChannelDef): BaseChannel {
   const reducer: StateChannelReducer = def.reducer ?? 'replace'
 
   if (reducer === 'replace') {
