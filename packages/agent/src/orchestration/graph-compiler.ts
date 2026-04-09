@@ -55,7 +55,7 @@ export function compileOrchestrationGraph(
     runId: options.runId,
     graphId: graph.id,
     observer: options.observer,
-    emitGraphEvent: () => undefined, // 默认空实现，graph-runner 会替换
+    emitGraphEvent: options.emitGraphEvent ?? (() => undefined),
   }
 
   // Step 3: 添加节点
