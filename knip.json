@@ -12,6 +12,7 @@
     "packages/agent/src/__tests__/helpers/**": ["exports", "types"],
     "packages/runtime/src/__tests__/helpers/**": ["exports", "types"],
     "apps/node/src/logger.ts": ["types"],
-    "packages/agent/src/orchestration/executors/executor-types.ts": ["files"]
+    "packages/agent/src/orchestration/executors/executor-types.ts": ["files"],
+    "packages/agent/src/orchestration/graph-compiler.ts": ["exports"]
   }
 }
