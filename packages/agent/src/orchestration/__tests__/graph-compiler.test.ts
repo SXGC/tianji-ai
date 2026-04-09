@@ -106,3 +106,82 @@ describe('compileOrchestrationGraph - basic nodes and edges', () => {
     expect(seen[0]?.graphId).toBe('g1')
   })
 })
+
+const echoStateFactory: AgentExecutorFactory = (node) => async () => {
+  if (node.id === 'setter_true') return { approved: true }
+  if (node.id === 'setter_false') return { approved: false }
+  return {}
+}
+
+describe('compileOrchestrationGraph - router', () => {
+  it('router 把控制流按条件分到不同分支', async () => {
+    const graph: OrchestrationGraph = {
+      id: 'g',
+      name: 't',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: {
+        approved: { type: 'boolean', default: false },
+        count: { type: 'number', default: 0 },
+      },
+      nodes: [
+        { id: 'setter_true', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        {
+          id: 'router1',
+          type: 'router',
+          condition: {
+            field: 'approved',
+            branches: { true: '__end__', false: 'setter_true' },
+          },
+        },
+      ],
+      edges: [
+        { from: '__start__', to: 'setter_true' },
+        { from: 'setter_true', to: 'router1' },
+      ],
+    }
+
+    const compiled = compileOrchestrationGraph(graph, {
+      agentExecutorFactory: echoStateFactory,
+      runId: 'run_test_router' as RunId,
+    })
+    const finalState = await compiled.invoke({})
+    expect(finalState.approved).toBe(true)
+  })
+
+  it('router 直接到 __end__ 时图正常结束', async () => {
+    const graph: OrchestrationGraph = {
+      id: 'g',
+      name: 't',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: {
+        approved: { type: 'boolean', default: true },
+      },
+      nodes: [
+        { id: 'setter_true', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        {
+          id: 'router1',
+          type: 'router',
+          condition: {
+            field: 'approved',
+            branches: { true: '__end__', false: 'setter_true' },
+          },
+        },
+      ],
+      edges: [
+        { from: '__start__', to: 'setter_true' },
+        { from: 'setter_true', to: 'router1' },
+      ],
+    }
+
+    const compiled = compileOrchestrationGraph(graph, {
+      agentExecutorFactory: echoStateFactory,
+      runId: 'run_test_router_end' as RunId,
+    })
+    const finalState = await compiled.invoke({})
+    expect(finalState.approved).toBe(true)
+  })
+})

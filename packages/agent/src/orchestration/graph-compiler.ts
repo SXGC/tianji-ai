@@ -104,16 +104,41 @@ export function compileOrchestrationGraph(
 }
 
 function addEdges(builder: StateGraph<unknown>, graph: OrchestrationGraph): void {
-  // 内部函数实现逐步在后续 task 扩展。
-  // 当前 task 6 只支持普通边。后续 task 7/8 扩展 router/fork，
-  // 届时会在函数内部按需构造自己的 nodeMap。
+  // 当前 task 7 支持普通边 + router 条件边。后续 task 8 扩展 fork。
   const builderAny = builder as unknown as {
     addEdge: (from: string, to: string) => unknown
+    addConditionalEdges: (
+      source: string,
+      path: (state: Record<string, unknown>) => string,
+      pathMap: Record<string, string>
+    ) => unknown
   }
+
+  // 收集所有 router 节点，供指向它们的边在处理时改写为条件边
+  const routerNodes = new Map<string, RouterNode>()
+  for (const node of graph.nodes) {
+    if (node.type === 'router') routerNodes.set(node.id, node)
+  }
+
+  // 遍历边。若目标是 router，则改写为 addConditionalEdges；router 自身不是真实节点
   for (const edge of graph.edges) {
     const fromKey = edge.from === GRAPH_START ? START : edge.from
-    const toKey = edge.to === GRAPH_END ? END : edge.to
-    builderAny.addEdge(fromKey, toKey)
+    const router = routerNodes.get(edge.to)
+
+    if (router) {
+      const pathMap: Record<string, string> = {}
+      for (const [branchKey, target] of Object.entries(router.condition.branches)) {
+        pathMap[branchKey] = target === GRAPH_END ? END : target
+      }
+      builderAny.addConditionalEdges(
+        fromKey,
+        (state) => String((state as Record<string, unknown>)[router.condition.field]),
+        pathMap
+      )
+    } else {
+      const toKey = edge.to === GRAPH_END ? END : edge.to
+      builderAny.addEdge(fromKey, toKey)
+    }
   }
 }
 
