@@ -16,6 +16,30 @@ describe('TokenUsage', () => {
     expect(usage.outputTokens).toBe(50)
     expect(usage.totalTokens).toBe(150)
   })
+
+  it('accepts optional cache token fields', () => {
+    const usage: TokenUsage = {
+      inputTokens: 1000,
+      outputTokens: 200,
+      totalTokens: 1200,
+      cacheReadTokens: 800,
+      cacheCreationTokens: 100,
+    }
+
+    expect(usage.cacheReadTokens).toBe(800)
+    expect(usage.cacheCreationTokens).toBe(100)
+  })
+
+  it('allows omitting cache token fields for backward compatibility', () => {
+    const usage: TokenUsage = {
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+    }
+
+    expect(usage.cacheReadTokens).toBeUndefined()
+    expect(usage.cacheCreationTokens).toBeUndefined()
+  })
 })
 
 describe('addTokenUsage', () => {
@@ -34,6 +58,59 @@ describe('addTokenUsage', () => {
     const delta: TokenUsage = { inputTokens: 10, outputTokens: 5, totalTokens: 15 }
 
     expect(addTokenUsage(undefined, delta)).toEqual(delta)
+  })
+
+  it('sums cache token fields when both sides have them', () => {
+    const base: TokenUsage = {
+      inputTokens: 100,
+      outputTokens: 50,
+      totalTokens: 150,
+      cacheReadTokens: 80,
+      cacheCreationTokens: 10,
+    }
+    const delta: TokenUsage = {
+      inputTokens: 200,
+      outputTokens: 100,
+      totalTokens: 300,
+      cacheReadTokens: 150,
+      cacheCreationTokens: 20,
+    }
+
+    expect(addTokenUsage(base, delta)).toEqual({
+      inputTokens: 300,
+      outputTokens: 150,
+      totalTokens: 450,
+      cacheReadTokens: 230,
+      cacheCreationTokens: 30,
+    })
+  })
+
+  it('carries cache token fields from delta when base has none', () => {
+    const base: TokenUsage = { inputTokens: 100, outputTokens: 50, totalTokens: 150 }
+    const delta: TokenUsage = {
+      inputTokens: 200,
+      outputTokens: 100,
+      totalTokens: 300,
+      cacheReadTokens: 150,
+      cacheCreationTokens: 20,
+    }
+
+    expect(addTokenUsage(base, delta)).toEqual({
+      inputTokens: 300,
+      outputTokens: 150,
+      totalTokens: 450,
+      cacheReadTokens: 150,
+      cacheCreationTokens: 20,
+    })
+  })
+
+  it('omits cache token fields when neither side has them', () => {
+    const base: TokenUsage = { inputTokens: 100, outputTokens: 50, totalTokens: 150 }
+    const delta: TokenUsage = { inputTokens: 200, outputTokens: 100, totalTokens: 300 }
+
+    const result = addTokenUsage(base, delta)
+    expect(result.cacheReadTokens).toBeUndefined()
+    expect(result.cacheCreationTokens).toBeUndefined()
   })
 })
 

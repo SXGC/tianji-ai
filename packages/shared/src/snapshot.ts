@@ -41,6 +41,10 @@ export interface TokenUsage {
   readonly inputTokens: number
   readonly outputTokens: number
   readonly totalTokens: number
+  /** 命中缓存的输入 token 数（来自 LangChain input_token_details.cache_read） */
+  readonly cacheReadTokens?: number
+  /** 创建缓存的输入 token 数（来自 LangChain input_token_details.cache_creation） */
+  readonly cacheCreationTokens?: number
 }
 
 /**
@@ -51,10 +55,21 @@ export interface TokenUsage {
  * @returns Merged TokenUsage with all fields summed
  */
 export function addTokenUsage(base: TokenUsage | undefined, delta: TokenUsage): TokenUsage {
+  const cacheRead =
+    (base?.cacheReadTokens ?? delta.cacheReadTokens)
+      ? (base?.cacheReadTokens ?? 0) + (delta.cacheReadTokens ?? 0)
+      : undefined
+  const cacheCreation =
+    (base?.cacheCreationTokens ?? delta.cacheCreationTokens)
+      ? (base?.cacheCreationTokens ?? 0) + (delta.cacheCreationTokens ?? 0)
+      : undefined
+
   return {
     inputTokens: (base?.inputTokens ?? 0) + delta.inputTokens,
     outputTokens: (base?.outputTokens ?? 0) + delta.outputTokens,
     totalTokens: (base?.totalTokens ?? 0) + delta.totalTokens,
+    ...(cacheRead !== undefined && { cacheReadTokens: cacheRead }),
+    ...(cacheCreation !== undefined && { cacheCreationTokens: cacheCreation }),
   }
 }
 

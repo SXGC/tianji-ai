@@ -188,6 +188,7 @@ function readUsageMetadata(output: unknown): TokenUsage | undefined {
     input_tokens?: unknown
     output_tokens?: unknown
     total_tokens?: unknown
+    input_token_details?: { cache_read?: unknown; cache_creation?: unknown }
   }
 
   if (
@@ -198,10 +199,17 @@ function readUsageMetadata(output: unknown): TokenUsage | undefined {
     return undefined
   }
 
+  const details = typed.input_token_details
+  const cacheRead = typeof details?.cache_read === 'number' ? details.cache_read : undefined
+  const cacheCreation =
+    typeof details?.cache_creation === 'number' ? details.cache_creation : undefined
+
   return {
     inputTokens: typed.input_tokens,
     outputTokens: typed.output_tokens,
     totalTokens: typed.total_tokens,
+    ...(cacheRead !== undefined && { cacheReadTokens: cacheRead }),
+    ...(cacheCreation !== undefined && { cacheCreationTokens: cacheCreation }),
   }
 }
 
