@@ -26,6 +26,11 @@ export interface CompileOptions {
   readonly observer?: ObserverLogger
   readonly runId: RunId
   readonly emitGraphEvent?: (event: GraphEvent) => void
+  /**
+   * 顶层 run 的 abortSignal。
+   * 会被塞入 NodeExecutorContext，让节点执行器在 runtime 调用处透传。
+   */
+  readonly abortSignal?: AbortSignal
 }
 
 /**
@@ -56,6 +61,7 @@ export function compileOrchestrationGraph(
     graphId: graph.id,
     observer: options.observer,
     emitGraphEvent: options.emitGraphEvent ?? (() => undefined),
+    abortSignal: options.abortSignal,
   }
 
   // Step 3: 添加节点

@@ -5,7 +5,10 @@ import type { OrchestrationGraph } from './graph-schema.js'
 
 export interface RunOrchestrationGraphOptions {
   readonly graph: OrchestrationGraph
-  readonly compileOptions: Omit<CompileOptions, 'runId' | 'observer' | 'emitGraphEvent'>
+  readonly compileOptions: Omit<
+    CompileOptions,
+    'runId' | 'observer' | 'emitGraphEvent' | 'abortSignal'
+  >
   readonly runId: RunId
   readonly initialState?: Record<string, unknown>
   readonly observer?: ObserverLogger
@@ -82,6 +85,7 @@ export function runOrchestrationGraph(
     runId: options.runId,
     observer: options.observer,
     emitGraphEvent: emit,
+    abortSignal: options.abortSignal,
   })
 
   emit({
