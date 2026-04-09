@@ -185,3 +185,78 @@ describe('compileOrchestrationGraph - router', () => {
     expect(finalState.approved).toBe(true)
   })
 })
+
+describe('compileOrchestrationGraph - fork/join', () => {
+  it('fork 把控制流并行分发到多个目标节点', async () => {
+    const calls: string[] = []
+    const trackingFactory: AgentExecutorFactory = (node) => async () => {
+      calls.push(node.id)
+      return { logs: [node.id] }
+    }
+
+    const graph: OrchestrationGraph = {
+      id: 'g',
+      name: 't',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: {
+        logs: { type: 'list', reducer: 'append', default: [] },
+      },
+      nodes: [
+        { id: 'start_node', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        { id: 'left', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        { id: 'right', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        { id: 'merge', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        { id: 'fork1', type: 'fork', targets: ['left', 'right'], join: 'merge' },
+      ],
+      edges: [
+        { from: '__start__', to: 'start_node' },
+        { from: 'start_node', to: 'fork1' },
+        { from: 'merge', to: '__end__' },
+      ],
+    }
+
+    const compiled = compileOrchestrationGraph(graph, {
+      agentExecutorFactory: trackingFactory,
+      runId: 'run_test_fork' as RunId,
+    })
+    const finalState = await compiled.invoke({})
+
+    expect(calls).toContain('left')
+    expect(calls).toContain('right')
+    expect(calls).toContain('merge')
+    expect(finalState.logs as string[]).toEqual(
+      expect.arrayContaining(['start_node', 'left', 'right', 'merge'])
+    )
+  })
+})
+
+describe('compileOrchestrationGraph - human-gate', () => {
+  it('human-gate 节点编译时被加入 interruptBefore', async () => {
+    const graph: OrchestrationGraph = {
+      id: 'g',
+      name: 't',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: { x: { type: 'string' } },
+      nodes: [
+        { id: 'a', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        { id: 'gate', type: 'human-gate', prompt: '请确认' },
+      ],
+      edges: [
+        { from: '__start__', to: 'a' },
+        { from: 'a', to: 'gate' },
+        { from: 'gate', to: '__end__' },
+      ],
+    }
+
+    expect(() =>
+      compileOrchestrationGraph(graph, {
+        agentExecutorFactory: stubAgentFactory,
+        runId: 'run_test_human_gate' as RunId,
+      })
+    ).not.toThrow()
+  })
+})

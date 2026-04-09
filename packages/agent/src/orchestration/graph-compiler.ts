@@ -1,4 +1,4 @@
-import { type CompiledStateGraph, END, START, StateGraph } from '@langchain/langgraph'
+import { type CompiledStateGraph, END, START, Send, StateGraph } from '@langchain/langgraph'
 import type { ObserverLogger } from '@tianji/observer'
 import type { GraphEvent, RunId } from '@tianji/shared'
 import type {
@@ -8,8 +8,6 @@ import type {
   NodeExecutorContext,
 } from './executors/executor-types.js'
 import {
-  type AcpAgentNode,
-  type AgentNode,
   type ForkNode,
   GRAPH_END,
   GRAPH_START,
@@ -104,26 +102,29 @@ export function compileOrchestrationGraph(
 }
 
 function addEdges(builder: StateGraph<unknown>, graph: OrchestrationGraph): void {
-  // 当前 task 7 支持普通边 + router 条件边。后续 task 8 扩展 fork。
+  // 支持普通边、router 条件边、fork Send 并行扇出
   const builderAny = builder as unknown as {
     addEdge: (from: string, to: string) => unknown
     addConditionalEdges: (
       source: string,
-      path: (state: Record<string, unknown>) => string,
-      pathMap: Record<string, string>
+      path: (state: Record<string, unknown>) => string | Send | (string | Send)[],
+      pathMap?: Record<string, string>
     ) => unknown
   }
 
-  // 收集所有 router 节点，供指向它们的边在处理时改写为条件边
+  // 收集所有 router / fork 节点，供指向它们的边在处理时改写为条件边
   const routerNodes = new Map<string, RouterNode>()
+  const forkNodes = new Map<string, ForkNode>()
   for (const node of graph.nodes) {
     if (node.type === 'router') routerNodes.set(node.id, node)
+    if (node.type === 'fork') forkNodes.set(node.id, node)
   }
 
-  // 遍历边。若目标是 router，则改写为 addConditionalEdges；router 自身不是真实节点
+  // 遍历边。若目标是 router / fork，改写为 addConditionalEdges；它们自身不是真实节点
   for (const edge of graph.edges) {
     const fromKey = edge.from === GRAPH_START ? START : edge.from
     const router = routerNodes.get(edge.to)
+    const fork = forkNodes.get(edge.to)
 
     if (router) {
       const pathMap: Record<string, string> = {}
@@ -135,6 +136,18 @@ function addEdges(builder: StateGraph<unknown>, graph: OrchestrationGraph): void
         (state) => String((state as Record<string, unknown>)[router.condition.field]),
         pathMap
       )
+    } else if (fork) {
+      // fork: 用 conditional edges + Send 实现并行扇出
+      const targets = [...fork.targets]
+      builderAny.addConditionalEdges(
+        fromKey,
+        (state) => targets.map((t) => new Send(t, state)),
+        Object.fromEntries(targets.map((t) => [t, t]))
+      )
+      // fork 的每个 target → join
+      for (const target of fork.targets) {
+        builderAny.addEdge(target, fork.join)
+      }
     } else {
       const toKey = edge.to === GRAPH_END ? END : edge.to
       builderAny.addEdge(fromKey, toKey)
@@ -150,13 +163,4 @@ function createHumanGateAction(): NodeAction {
 
 function collectHumanGateIds(graph: OrchestrationGraph): string[] {
   return graph.nodes.filter((n): n is HumanGateNode => n.type === 'human-gate').map((n) => n.id)
-}
-
-// 占位：后续 task 实现
-export function _internalRouterStub(_: RouterNode): void {
-  void _
-}
-export function _internalForkStub(_: ForkNode, __: AgentNode | AcpAgentNode): void {
-  void _
-  void __
 }
