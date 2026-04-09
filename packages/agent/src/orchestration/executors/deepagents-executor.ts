@@ -21,6 +21,7 @@ import {
   type ToolCatalog,
   createSessionRuntime,
 } from '@tianji/runtime'
+import { TianjiError } from '@tianji/shared'
 import type { AppMessage, RunId, RuntimeEvent } from '@tianji/shared'
 
 import type { AgentNode } from '../graph-schema.js'
@@ -70,6 +71,8 @@ export function createDeepagentsExecutorFactory(
   return (node: AgentNode, ctx: NodeExecutorContext): NodeAction => {
     const action: NodeAction = async (state) => {
       // 先做 input 快速失败，避免创建无用的 runtime/session。
+      // 这里刻意放在 started 事件之前：输入缺失是调用方的契约错误，
+      // 让它裸抛，避免产生一个孤儿的 started/failed 事件对。
       const promptText = buildPromptFromState(state, node.input)
       const systemPromptSuffix = buildOutputInstructionSuffix(node.output)
       const fullSystemPrompt = node.agent.systemPrompt + systemPromptSuffix
@@ -84,44 +87,72 @@ export function createDeepagentsExecutorFactory(
         timestamp: startTimestamp,
       })
 
-      const runtime = buildRuntimeForNode(node, options)
-      const session = await runtime.createSession({})
+      try {
+        const runtime = buildRuntimeForNode(node, options)
+        const session = await runtime.createSession({})
 
-      const userMessage: AppMessage = {
-        id: `msg_user_${startTimestamp}`,
-        role: 'user',
-        content: [{ type: 'text', text: promptText }],
-        createdAt: startTimestamp,
+        const userMessage: AppMessage = {
+          id: `msg_user_${startTimestamp}`,
+          role: 'user',
+          content: [{ type: 'text', text: promptText }],
+          createdAt: startTimestamp,
+        }
+
+        const runOptions: RunTurnOptions = {
+          sessionId: session.sessionId,
+          message: userMessage,
+          systemPrompt: fullSystemPrompt,
+          abortSignal: ctx.abortSignal,
+        }
+        options.onRuntimeOptions?.(runOptions)
+
+        const runId = await runtime.runTurn(runOptions)
+        const finalAssistantText = await collectFinalAssistantText(runtime, runId)
+
+        const stateUpdate = buildStateUpdateFromText(finalAssistantText, node.output)
+
+        ctx.emitGraphEvent({
+          type: 'graph.node.completed',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          output: stateUpdate,
+          timestamp: Date.now(),
+        })
+
+        await runtime.closeSession(session.sessionId)
+        return stateUpdate
+      } catch (caught) {
+        // 把底层错误归一化为 TianjiError 后广播 failed 事件，再把原始错误再抛出，
+        // 让 LangGraph 正常结束 run 并让上层 runner 走 finished reject 路径。
+        const error = toTianjiError(caught)
+        ctx.emitGraphEvent({
+          type: 'graph.node.failed',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          error,
+          timestamp: Date.now(),
+        })
+        throw caught
       }
-
-      const runOptions: RunTurnOptions = {
-        sessionId: session.sessionId,
-        message: userMessage,
-        systemPrompt: fullSystemPrompt,
-        abortSignal: ctx.abortSignal,
-      }
-      options.onRuntimeOptions?.(runOptions)
-
-      const runId = await runtime.runTurn(runOptions)
-      const finalAssistantText = await collectFinalAssistantText(runtime, runId)
-
-      const stateUpdate = buildStateUpdateFromText(finalAssistantText, node.output)
-
-      ctx.emitGraphEvent({
-        type: 'graph.node.completed',
-        runId: ctx.runId,
-        graphId: ctx.graphId,
-        nodeId: node.id,
-        output: stateUpdate,
-        timestamp: Date.now(),
-      })
-
-      await runtime.closeSession(session.sessionId)
-      return stateUpdate
     }
 
     return action
   }
+}
+
+/**
+ * 把任意抛出的值归一化为 TianjiError，保留 cause 链。
+ */
+function toTianjiError(caught: unknown): TianjiError {
+  if (caught instanceof TianjiError) {
+    return caught
+  }
+  if (caught instanceof Error) {
+    return new TianjiError('internal', caught.name || 'unknown', caught.message, { cause: caught })
+  }
+  return new TianjiError('internal', 'unknown', String(caught))
 }
 
 /**

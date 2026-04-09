@@ -77,6 +77,33 @@ describe('createDeepagentsExecutorFactory', () => {
     await expect(action({}, {} as never)).rejects.toThrow(/ghost/)
   })
 
+  it('runtime 抛错时发射 graph.node.failed 后再 re-throw', async () => {
+    const events: GraphEvent[] = []
+    const ctx = makeCtx({
+      emitGraphEvent: (event) => events.push(event),
+    })
+    // resolveModel 直接抛错，触发 buildRuntimeForNode 内部失败路径。
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => {
+        throw new Error('boom')
+      },
+    })
+    const node = makeAgentNode({ input: ['q'], output: ['a'] })
+    const action = factory(node, ctx)
+
+    await expect(action({ q: 'x' }, {} as never)).rejects.toThrow(/boom/)
+
+    const failedEvents = events.filter((event) => event.type === 'graph.node.failed')
+    expect(failedEvents).toHaveLength(1)
+    const failed = failedEvents[0] as { readonly error: { readonly message: string } }
+    expect(failed.error.message).toContain('boom')
+
+    // started 必须先于 failed；completed 不应出现。
+    const types = events.map((event) => event.type)
+    expect(types).toEqual(expect.arrayContaining(['graph.node.started', 'graph.node.failed']))
+    expect(types).not.toContain('graph.node.completed')
+  })
+
   it('多 output 字段时 systemPrompt 自动追加 JSON 指令', async () => {
     let capturedSystemPrompt: string | undefined
     const factory = createDeepagentsExecutorFactory({

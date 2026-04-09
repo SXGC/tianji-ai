@@ -10,6 +10,7 @@
  * 对外触点：
  * - apps/node 配置 SessionRuntime 时，把此工厂连同具体的 runnerProvider 一起传入。
  */
+import { TianjiError } from '@tianji/shared'
 import type { RuntimeEvent } from '@tianji/shared'
 
 import type { AcpAgentNode } from '../graph-schema.js'
@@ -61,6 +62,12 @@ export function createAcpExecutorFactory(
 ): AcpExecutorFactory {
   return (node: AcpAgentNode, ctx: NodeExecutorContext): NodeAction => {
     const action: NodeAction = async (state) => {
+      // 与 deepagents-executor 保持一致：先做 input 快速失败，避免产生
+      // 孤儿的 started/failed 事件对。
+      const promptText = buildPromptFromState(state, node.input)
+      const suffix = buildOutputInstructionSuffix(node.output)
+      const fullPrompt = suffix ? `${promptText}${suffix}` : promptText
+
       const startTimestamp = Date.now()
       ctx.emitGraphEvent({
         type: 'graph.node.started',
@@ -71,41 +78,64 @@ export function createAcpExecutorFactory(
         timestamp: startTimestamp,
       })
 
-      const promptText = buildPromptFromState(state, node.input)
-      const suffix = buildOutputInstructionSuffix(node.output)
-      const fullPrompt = suffix ? `${promptText}${suffix}` : promptText
-
-      const runner = options.runnerProvider(node)
-      await runner.connect()
-
-      let accumulatedText = ''
       try {
-        for await (const event of runner.query(fullPrompt)) {
-          if (event.type === 'message.completed' && event.message.role === 'assistant') {
-            accumulatedText = extractText(event.message)
+        const runner = options.runnerProvider(node)
+        await runner.connect()
+
+        let accumulatedText = ''
+        try {
+          for await (const event of runner.query(fullPrompt)) {
+            if (event.type === 'message.completed' && event.message.role === 'assistant') {
+              accumulatedText = extractText(event.message)
+            }
           }
+        } finally {
+          // 资源释放，必须在任何异常后依然执行。
+          await runner.disconnect()
         }
-      } finally {
-        // 资源释放，必须在任何异常后依然执行。
-        await runner.disconnect()
+
+        const stateUpdate = buildStateUpdateFromText(accumulatedText, node.output)
+
+        ctx.emitGraphEvent({
+          type: 'graph.node.completed',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          output: stateUpdate,
+          timestamp: Date.now(),
+        })
+
+        return stateUpdate
+      } catch (caught) {
+        // 连接 / query / 解析失败统一走 failed 事件，再把原始错误再抛出。
+        const error = toTianjiError(caught)
+        ctx.emitGraphEvent({
+          type: 'graph.node.failed',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          error,
+          timestamp: Date.now(),
+        })
+        throw caught
       }
-
-      const stateUpdate = buildStateUpdateFromText(accumulatedText, node.output)
-
-      ctx.emitGraphEvent({
-        type: 'graph.node.completed',
-        runId: ctx.runId,
-        graphId: ctx.graphId,
-        nodeId: node.id,
-        output: stateUpdate,
-        timestamp: Date.now(),
-      })
-
-      return stateUpdate
     }
 
     return action
   }
+}
+
+/**
+ * 把任意抛出的值归一化为 TianjiError，保留 cause 链。
+ */
+function toTianjiError(caught: unknown): TianjiError {
+  if (caught instanceof TianjiError) {
+    return caught
+  }
+  if (caught instanceof Error) {
+    return new TianjiError('internal', caught.name || 'unknown', caught.message, { cause: caught })
+  }
+  return new TianjiError('internal', 'unknown', String(caught))
 }
 
 /**
