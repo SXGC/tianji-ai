@@ -5,9 +5,6 @@
   "workspaces": {
     "packages/shared": {
       "entry": ["scripts/*.ts"]
-    },
-    "packages/agent": {
-      "ignoreDependencies": ["@langchain/langgraph"]
     }
   },
   "ignoreIssues": {
