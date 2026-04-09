@@ -1,6 +1,6 @@
 import { type CompiledStateGraph, END, START, StateGraph } from '@langchain/langgraph'
 import type { ObserverLogger } from '@tianji/observer'
-import type { RunId } from '@tianji/shared'
+import type { GraphEvent, RunId } from '@tianji/shared'
 import type {
   AcpExecutorFactory,
   AgentExecutorFactory,
@@ -13,7 +13,6 @@ import {
   type ForkNode,
   GRAPH_END,
   GRAPH_START,
-  type GraphNode,
   type HumanGateNode,
   type OrchestrationGraph,
   type RouterNode,
@@ -27,8 +26,8 @@ export interface CompileOptions {
   readonly checkpointer?: unknown
   readonly store?: unknown
   readonly observer?: ObserverLogger
-  readonly runId?: RunId
-  readonly emitGraphEvent?: (event: never) => void
+  readonly runId: RunId
+  readonly emitGraphEvent?: (event: GraphEvent) => void
 }
 
 /**
@@ -55,14 +54,11 @@ export function compileOrchestrationGraph(
   const builder = new StateGraph(stateAnnotation as never) as unknown as StateGraph<unknown>
 
   const ctx: NodeExecutorContext = {
-    runId: options.runId ?? ('run_local' as RunId),
+    runId: options.runId,
     graphId: graph.id,
     observer: options.observer,
     emitGraphEvent: () => undefined, // 默认空实现，graph-runner 会替换
   }
-
-  const nodeMap = new Map<string, GraphNode>()
-  for (const node of graph.nodes) nodeMap.set(node.id, node)
 
   // Step 3: 添加节点
   for (const node of graph.nodes) {
@@ -84,14 +80,14 @@ export function compileOrchestrationGraph(
     } else if (node.type === 'human-gate') {
       ;(builder as { addNode: (id: string, action: NodeAction) => unknown }).addNode(
         node.id,
-        createHumanGateAction(node)
+        createHumanGateAction()
       )
     }
     // router / fork: 不创建节点，留到 Step 4
   }
 
   // Step 4: 添加边
-  addEdges(builder, graph, nodeMap)
+  addEdges(builder, graph)
 
   // Step 5: 编译
   const compiled = (
@@ -107,14 +103,10 @@ export function compileOrchestrationGraph(
   return compiled
 }
 
-function addEdges(
-  builder: StateGraph<unknown>,
-  graph: OrchestrationGraph,
-  nodeMap: ReadonlyMap<string, GraphNode>
-): void {
+function addEdges(builder: StateGraph<unknown>, graph: OrchestrationGraph): void {
   // 内部函数实现逐步在后续 task 扩展。
-  // 当前 task 6 只支持普通边。后续 task 7/8 扩展 router/fork。
-  void nodeMap
+  // 当前 task 6 只支持普通边。后续 task 7/8 扩展 router/fork，
+  // 届时会在函数内部按需构造自己的 nodeMap。
   const builderAny = builder as unknown as {
     addEdge: (from: string, to: string) => unknown
   }
@@ -125,13 +117,10 @@ function addEdges(
   }
 }
 
-function createHumanGateAction(node: HumanGateNode): NodeAction {
-  return async (state) => {
-    // 实际的中断由 compile({ interruptBefore }) 触发；
-    // 节点函数本身只是一个 pass-through
-    void node
-    return state
-  }
+function createHumanGateAction(): NodeAction {
+  // 实际的中断由 compile({ interruptBefore }) 触发；
+  // 节点函数本身只是一个 pass-through
+  return async (state) => state
 }
 
 function collectHumanGateIds(graph: OrchestrationGraph): string[] {
