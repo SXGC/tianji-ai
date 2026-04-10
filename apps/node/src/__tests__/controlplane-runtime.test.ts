@@ -384,6 +384,8 @@ describe('createRunner routing', () => {
           resolvedEnvVars: [],
           snapshotStore: {} as never,
         },
+        defaultGraph: {} as never,
+        executorFactory: {} as never,
       }),
       {
         createConnection: () => createConnectionDouble(),
@@ -392,10 +394,12 @@ describe('createRunner routing', () => {
 
     await runtime.taskExecutor.execute(createTestCommand())
 
-    expect(inProcessRunnerMock).toHaveBeenCalledWith({
-      agentId: 'default',
-      nativeAgentContext: expect.any(Object),
-    })
+    expect(inProcessRunnerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'default',
+        nativeAgentContext: expect.any(Object),
+      })
+    )
     expect(agentRunnerMock).not.toHaveBeenCalled()
   })
 

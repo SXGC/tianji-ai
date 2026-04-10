@@ -64,7 +64,7 @@ describe('InProcessAgentRunner', () => {
     createAgentSessionMock.mockReturnValue({
       sessionId: 'session-1',
       abort: vi.fn(),
-      async *query() {
+      async *queryWithGraph(_graph: unknown, _options: unknown) {
         yield {
           type: 'message.delta',
           runId: 'run-1' as never,
@@ -82,6 +82,8 @@ describe('InProcessAgentRunner', () => {
     const runner = new InProcessAgentRunner({
       agentId: 'reviewer',
       nativeAgentContext: createContext(),
+      defaultGraph: {} as never,
+      executorFactory: {} as never,
     })
 
     await runner.connect()
@@ -101,7 +103,7 @@ describe('InProcessAgentRunner', () => {
     createAgentSessionMock.mockReturnValue({
       sessionId: 'session-1',
       abort,
-      async *query() {
+      async *queryWithGraph(_graph: unknown, _options: unknown) {
         yield {
           type: 'message.delta',
           runId: 'run-1' as never,
@@ -130,6 +132,8 @@ describe('InProcessAgentRunner', () => {
     const runner = new InProcessAgentRunner({
       agentId: 'reviewer',
       nativeAgentContext: createContext(),
+      defaultGraph: {} as never,
+      executorFactory: {} as never,
     })
 
     await runner.connect()
@@ -150,7 +154,7 @@ describe('InProcessAgentRunner', () => {
     createAgentSessionMock.mockReturnValue({
       sessionId: 'session-1',
       abort: vi.fn(),
-      async *query() {
+      async *queryWithGraph(_graph: unknown, _options: unknown) {
         const completed: RuntimeEvent = {
           type: 'run.completed',
           runId: 'run-1' as never,
@@ -177,6 +181,8 @@ describe('InProcessAgentRunner', () => {
     const runner = new InProcessAgentRunner({
       agentId: 'reviewer',
       nativeAgentContext: createContext(),
+      defaultGraph: {} as never,
+      executorFactory: {} as never,
     })
 
     await runner.connect()
