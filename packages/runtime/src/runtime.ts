@@ -558,151 +558,236 @@ class SessionRuntimeImpl implements SessionRuntime {
 
       const result = await this.executeDeepagentsTurn(activeRun, input, context)
       capturedUsage = result.usage
-      const completedRunMetadata = writeRunRuntimeMetadata(runSnapshot.metadata, {
-        engine: this.engine,
-        threadId: result.threadId,
-        checkpointId: result.checkpointId,
-      })
 
-      // 将 run 级别的 token 用量写入 metadata，供查询和日志使用。
-      const runMetadataWithUsage =
-        result.usage !== undefined
-          ? { ...completedRunMetadata, usage: result.usage }
-          : completedRunMetadata
-
-      if (result.interrupts !== undefined && result.interrupts.length > 0) {
-        // deepagents 进入 HITL 中断时将其映射为 cancelled run，并持久化恢复所需 checkpoint/interrupt 信息。
-        const interruptedRunSnapshot: RunSnapshot = {
-          ...runSnapshot,
-          status: 'cancelled',
-          updatedAt: Date.now(),
-          cancelPoint: 'human-in-the-loop',
-          pendingOperations: [...context.pendingOperations.values()],
-          resumeHint: 'require-user-confirmation',
-          workflowState: writeDeepagentsRunWorkflowState({
-            threadId: result.threadId,
-            checkpointId: result.checkpointId,
-            interrupts: result.interrupts,
-          }),
-          metadata: runMetadataWithUsage,
-        }
-
-        await this.snapshotStore.saveRun(interruptedRunSnapshot)
-
-        activeRun.events.push({
-          type: 'run.cancelled',
-          ...lineage,
-          timestamp: Date.now(),
-        })
-        this.logRunLifecycle('info', 'run.cancelled', lineage, {
-          cancelPoint: 'human-in-the-loop',
-          ...(result.usage !== undefined ? { usage: result.usage } : undefined),
-        })
-        activeRun.events.close()
-        return
-      }
-
-      if (result.turnMessages.length === 0) {
-        throw new ProviderError(
-          'RUN_EMPTY_RESPONSE',
-          'Runtime workflow finished without any messages'
-        )
-      }
-
-      // 将本次 run 的 token 用量累加到 session 级别。
-      const sessionMetadataWithUsage =
-        result.usage !== undefined
-          ? {
-              ...input.sessionSnapshot.metadata,
-              usage: addTokenUsage(readTokenUsage(input.sessionSnapshot.metadata), result.usage),
-            }
-          : input.sessionSnapshot.metadata
-
-      const nextSessionSnapshot: SessionSnapshot = {
-        ...input.sessionSnapshot,
-        messages: [...input.sessionSnapshot.messages, ...result.turnMessages],
-        updatedAt: Date.now(),
-        metadata: sessionMetadataWithUsage,
-      }
-      const completedRunSnapshot: RunSnapshot = {
-        ...runSnapshot,
-        status: 'completed',
-        messages: nextSessionSnapshot.messages,
-        updatedAt: Date.now(),
-        pendingOperations: [...context.pendingOperations.values()],
-        metadata: runMetadataWithUsage,
-      }
-
-      await this.snapshotStore.saveSession(nextSessionSnapshot)
-      await this.snapshotStore.saveRun(completedRunSnapshot)
-
-      activeRun.events.push({
-        type: 'run.completed',
-        ...lineage,
-        timestamp: Date.now(),
-      })
-      this.logRunLifecycle('info', 'run.completed', lineage, {
-        ...(result.usage !== undefined ? { usage: result.usage } : undefined),
-      })
-      activeRun.events.close()
+      await this.handleRunSuccess(activeRun, runSnapshot, input, context, lineage, result)
     } catch (error) {
       if (isCancellationError(error, context.signal)) {
-        const cancelledRunSnapshot: RunSnapshot = {
-          ...runSnapshot,
-          status: 'cancelled',
-          updatedAt: Date.now(),
-          cancelPoint: 'assistant_turn',
-          pendingOperations: [...context.pendingOperations.values()],
-          resumeHint: hasSideEffect(context.pendingOperations, context.destructiveOperationIds)
-            ? 'require-user-confirmation'
-            : 'replay',
-          metadata:
-            capturedUsage !== undefined
-              ? { ...runSnapshot.metadata, usage: capturedUsage }
-              : runSnapshot.metadata,
-        }
-
-        await this.snapshotStore.saveRun(cancelledRunSnapshot)
-
-        activeRun.events.push({
-          type: 'run.cancelled',
-          ...lineage,
-          timestamp: Date.now(),
-        })
-        this.logRunLifecycle('warn', 'run.cancelled', lineage, {
-          ...(capturedUsage !== undefined ? { usage: capturedUsage } : undefined),
-        })
-        activeRun.events.close()
+        await this.handleRunCancellation(activeRun, runSnapshot, context, lineage, capturedUsage)
       } else {
-        const resolvedError = toTianjiError(error)
-        const failedRunSnapshot: RunSnapshot = {
-          ...runSnapshot,
-          status: 'failed',
-          updatedAt: Date.now(),
-          pendingOperations: [...context.pendingOperations.values()],
-          metadata: mergeMetadata(runSnapshot.metadata, {
-            failureCode: resolvedError.code,
-            ...(capturedUsage !== undefined ? { usage: capturedUsage } : undefined),
-          }),
-        }
-
-        await this.snapshotStore.saveRun(failedRunSnapshot)
-
-        activeRun.events.push({
-          type: 'run.failed',
-          ...lineage,
-          error: resolvedError,
-          timestamp: Date.now(),
-        })
-        this.logRunLifecycle('error', 'run.failed', lineage, {
-          errorCode: resolvedError.code,
-        })
-        activeRun.events.fail(resolvedError)
+        await this.handleRunFailure(activeRun, runSnapshot, context, lineage, error, capturedUsage)
       }
     } finally {
       abortSignalScope.cleanup()
       this.activeRuns.delete(activeRun.runId)
     }
+  }
+
+  /**
+   * 处理 run 成功完成路径：包含 HITL 中断映射和正常完成两种情况。
+   */
+  private async handleRunSuccess(
+    activeRun: ActiveRun,
+    runSnapshot: RunSnapshot,
+    input: ExecuteRunInput,
+    context: RunExecutionContext,
+    lineage: RunLineageFields,
+    result: DeepagentsRunResult
+  ): Promise<void> {
+    const completedRunMetadata = writeRunRuntimeMetadata(runSnapshot.metadata, {
+      engine: this.engine,
+      threadId: result.threadId,
+      checkpointId: result.checkpointId,
+    })
+
+    // 将 run 级别的 token 用量写入 metadata，供查询和日志使用。
+    const runMetadataWithUsage =
+      result.usage === undefined
+        ? completedRunMetadata
+        : { ...completedRunMetadata, usage: result.usage }
+
+    if (result.interrupts !== undefined && result.interrupts.length > 0) {
+      await this.handleHitlInterrupt(
+        activeRun,
+        runSnapshot,
+        context,
+        lineage,
+        result,
+        runMetadataWithUsage
+      )
+      return
+    }
+
+    await this.handleRunCompletion(
+      activeRun,
+      runSnapshot,
+      input,
+      context,
+      lineage,
+      result,
+      runMetadataWithUsage
+    )
+  }
+
+  /**
+   * 处理 deepagents HITL 中断：将 run 标记为 cancelled 并持久化恢复所需 checkpoint/interrupt 信息。
+   */
+  private async handleHitlInterrupt(
+    activeRun: ActiveRun,
+    runSnapshot: RunSnapshot,
+    context: RunExecutionContext,
+    lineage: RunLineageFields,
+    result: DeepagentsRunResult,
+    runMetadataWithUsage: Record<string, unknown>
+  ): Promise<void> {
+    const interruptedRunSnapshot: RunSnapshot = {
+      ...runSnapshot,
+      status: 'cancelled',
+      updatedAt: Date.now(),
+      cancelPoint: 'human-in-the-loop',
+      pendingOperations: [...context.pendingOperations.values()],
+      resumeHint: 'require-user-confirmation',
+      workflowState: writeDeepagentsRunWorkflowState({
+        threadId: result.threadId,
+        checkpointId: result.checkpointId,
+        interrupts: result.interrupts ?? [],
+      }),
+      metadata: runMetadataWithUsage,
+    }
+
+    await this.snapshotStore.saveRun(interruptedRunSnapshot)
+
+    activeRun.events.push({
+      type: 'run.cancelled',
+      ...lineage,
+      timestamp: Date.now(),
+    })
+    this.logRunLifecycle('info', 'run.cancelled', lineage, {
+      cancelPoint: 'human-in-the-loop',
+      ...(result.usage === undefined ? undefined : { usage: result.usage }),
+    })
+    activeRun.events.close()
+  }
+
+  /**
+   * 处理 run 正常完成：更新 session 快照并保存 completed run 快照。
+   */
+  private async handleRunCompletion(
+    activeRun: ActiveRun,
+    runSnapshot: RunSnapshot,
+    input: ExecuteRunInput,
+    context: RunExecutionContext,
+    lineage: RunLineageFields,
+    result: DeepagentsRunResult,
+    runMetadataWithUsage: Record<string, unknown>
+  ): Promise<void> {
+    if (result.turnMessages.length === 0) {
+      throw new ProviderError(
+        'RUN_EMPTY_RESPONSE',
+        'Runtime workflow finished without any messages'
+      )
+    }
+
+    // 将本次 run 的 token 用量累加到 session 级别。
+    const sessionMetadataWithUsage =
+      result.usage === undefined
+        ? input.sessionSnapshot.metadata
+        : {
+            ...input.sessionSnapshot.metadata,
+            usage: addTokenUsage(readTokenUsage(input.sessionSnapshot.metadata), result.usage),
+          }
+
+    const nextSessionSnapshot: SessionSnapshot = {
+      ...input.sessionSnapshot,
+      messages: [...input.sessionSnapshot.messages, ...result.turnMessages],
+      updatedAt: Date.now(),
+      metadata: sessionMetadataWithUsage,
+    }
+    const completedRunSnapshot: RunSnapshot = {
+      ...runSnapshot,
+      status: 'completed',
+      messages: nextSessionSnapshot.messages,
+      updatedAt: Date.now(),
+      pendingOperations: [...context.pendingOperations.values()],
+      metadata: runMetadataWithUsage,
+    }
+
+    await this.snapshotStore.saveSession(nextSessionSnapshot)
+    await this.snapshotStore.saveRun(completedRunSnapshot)
+
+    activeRun.events.push({
+      type: 'run.completed',
+      ...lineage,
+      timestamp: Date.now(),
+    })
+    this.logRunLifecycle('info', 'run.completed', lineage, {
+      ...(result.usage === undefined ? undefined : { usage: result.usage }),
+    })
+    activeRun.events.close()
+  }
+
+  /**
+   * 处理 run 被取消（AbortSignal 触发）：保存 cancelled 快照并关闭事件流。
+   */
+  private async handleRunCancellation(
+    activeRun: ActiveRun,
+    runSnapshot: RunSnapshot,
+    context: RunExecutionContext,
+    lineage: RunLineageFields,
+    capturedUsage: TokenUsage | undefined
+  ): Promise<void> {
+    const cancelledRunSnapshot: RunSnapshot = {
+      ...runSnapshot,
+      status: 'cancelled',
+      updatedAt: Date.now(),
+      cancelPoint: 'assistant_turn',
+      pendingOperations: [...context.pendingOperations.values()],
+      resumeHint: hasSideEffect(context.pendingOperations, context.destructiveOperationIds)
+        ? 'require-user-confirmation'
+        : 'replay',
+      metadata:
+        capturedUsage === undefined
+          ? runSnapshot.metadata
+          : { ...runSnapshot.metadata, usage: capturedUsage },
+    }
+
+    await this.snapshotStore.saveRun(cancelledRunSnapshot)
+
+    activeRun.events.push({
+      type: 'run.cancelled',
+      ...lineage,
+      timestamp: Date.now(),
+    })
+    this.logRunLifecycle('warn', 'run.cancelled', lineage, {
+      ...(capturedUsage === undefined ? undefined : { usage: capturedUsage }),
+    })
+    activeRun.events.close()
+  }
+
+  /**
+   * 处理 run 执行失败（非取消错误）：保存 failed 快照并将错误传播到事件流。
+   */
+  private async handleRunFailure(
+    activeRun: ActiveRun,
+    runSnapshot: RunSnapshot,
+    context: RunExecutionContext,
+    lineage: RunLineageFields,
+    error: unknown,
+    capturedUsage: TokenUsage | undefined
+  ): Promise<void> {
+    const resolvedError = toTianjiError(error)
+    const failedRunSnapshot: RunSnapshot = {
+      ...runSnapshot,
+      status: 'failed',
+      updatedAt: Date.now(),
+      pendingOperations: [...context.pendingOperations.values()],
+      metadata: mergeMetadata(runSnapshot.metadata, {
+        failureCode: resolvedError.code,
+        ...(capturedUsage === undefined ? undefined : { usage: capturedUsage }),
+      }),
+    }
+
+    await this.snapshotStore.saveRun(failedRunSnapshot)
+
+    activeRun.events.push({
+      type: 'run.failed',
+      ...lineage,
+      error: resolvedError,
+      timestamp: Date.now(),
+    })
+    this.logRunLifecycle('error', 'run.failed', lineage, {
+      errorCode: resolvedError.code,
+    })
+    activeRun.events.fail(resolvedError)
   }
 
   private async executeDeepagentsTurn(
@@ -820,7 +905,7 @@ class SessionRuntimeImpl implements SessionRuntime {
       sessionId: fields.sessionId,
       runId: fields.runId,
       triggerType: fields.triggerType,
-      ...(fields.parentRunId === undefined ? undefined : { parentRunId: fields.parentRunId }),
+      ...(fields.parentRunId !== undefined ? { parentRunId: fields.parentRunId } : undefined),
       ...extraData,
     }
 
