@@ -9,6 +9,11 @@ import {
 import type { AppMessage, RunId, RuntimeEvent, SessionId } from '@tianji/shared'
 
 import { type LoadedAgentContext, injectProviderEnv } from './context.js'
+import {
+  type CompileOptions,
+  type OrchestrationGraph,
+  runOrchestrationGraph,
+} from './orchestration/index.js'
 import { createFetchUrlTool } from './tools/fetch-url-tool.js'
 
 export interface AgentRuntimeOptions {
@@ -19,9 +24,30 @@ export interface ChatOptions {
   readonly systemPrompt?: string
 }
 
+/**
+ * 通过 OrchestrationGraph 启动一轮多智能体编排所需的参数。
+ *
+ * compileOptions 中的 `runId`、`observer`、`emitGraphEvent`、`abortSignal`
+ * 由 session 内部负责注入：
+ * - runId / observer / emitGraphEvent 由 graph-runner 透传
+ * - abortSignal 由 session 通过内部维护的 AbortController 注入，供 session.abort() 终止
+ *   正在运行的图；调用方若自己再传一份就会被静默覆盖，因此从公开类型中剔除
+ */
+export interface ChatWithGraphOptions {
+  readonly initialState?: Record<string, unknown>
+  readonly compileOptions: Omit<
+    CompileOptions,
+    'runId' | 'observer' | 'emitGraphEvent' | 'abortSignal'
+  >
+}
+
 export interface AgentSession {
   readonly sessionId: SessionId
   readonly query: (prompt: string, options?: ChatOptions) => AsyncIterable<RuntimeEvent>
+  readonly queryWithGraph: (
+    graph: OrchestrationGraph,
+    options: ChatWithGraphOptions
+  ) => AsyncIterable<RuntimeEvent>
   readonly abort: () => void
 }
 
@@ -79,6 +105,10 @@ export async function createAgentSession(
   const runtime = await createAgentRuntime(context, options)
   const sessionId = `session_${Date.now()}` as SessionId
   let activeRunId: RunId | null = null
+  // 当前 session 内所有仍在运行的 queryWithGraph 对应的 AbortController。
+  // session.abort() 会同时通知这些图级控制器，让节点执行器（deepagents-executor / acp-executor）
+  // 走 AbortSignal 路径中断正在进行的 runtime 调用。
+  const activeGraphControllers = new Set<AbortController>()
 
   // runtime.createSession 是初始化语义,会无脑覆盖 sessions/{sessionId}.json 的 messages 为空。
   // 必须只在 AgentSession 工厂里调用一次,否则后续每轮 query 都会清掉前一轮 runTurn 累加的多轮历史。
@@ -89,6 +119,11 @@ export async function createAgentSession(
     abort(): void {
       if (activeRunId !== null) {
         runtime.cancelRun(activeRunId)
+      }
+      // 通知所有进行中的图运行终止；controller 会在各自 queryWithGraph 的 finally
+      // 里从集合里移除，这里只负责发信号。
+      for (const controller of activeGraphControllers) {
+        controller.abort()
       }
     },
     async *query(prompt: string, options?: ChatOptions): AsyncIterable<RuntimeEvent> {
@@ -114,6 +149,37 @@ export async function createAgentSession(
         if (activeRunId === runId) {
           activeRunId = null
         }
+      }
+    },
+    async *queryWithGraph(
+      graph: OrchestrationGraph,
+      graphOptions: ChatWithGraphOptions
+    ): AsyncIterable<RuntimeEvent> {
+      // runId 是 @tianji/shared 的分支类型，这里用 session 级时间戳生成唯一值即可。
+      const runId = `run_graph_${Date.now()}` as RunId
+      const controller = new AbortController()
+      activeGraphControllers.add(controller)
+
+      try {
+        const result = runOrchestrationGraph({
+          graph,
+          runId,
+          initialState: graphOptions.initialState,
+          compileOptions: graphOptions.compileOptions,
+          observer: options?.logger,
+          abortSignal: controller.signal,
+        })
+
+        // GraphEvent 是 RuntimeEvent 的一个成员（详见 @tianji/shared events.ts），
+        // 直接按 RuntimeEvent 产出即可让 CLI 等上层消费者统一处理。
+        for await (const event of result.events) {
+          yield event
+        }
+        await result.finished
+      } finally {
+        // 无论正常结束、消费者 break、还是底层抛错，都要从集合中移除 controller，
+        // 避免悬挂的 controller 影响后续 abort() 语义。
+        activeGraphControllers.delete(controller)
       }
     },
   }

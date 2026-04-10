@@ -26,6 +26,8 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.18.0",
+    "@langchain/langgraph": "^1.2.2",
+    "@tianji/observer": "workspace:*",
     "@tianji/runtime": "workspace:*",
     "@tianji/shared": "workspace:*",
     "turndown": "^7.2.4"

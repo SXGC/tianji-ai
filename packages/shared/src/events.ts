@@ -25,6 +25,7 @@ export type RuntimeEventType =
   | 'tool.started'
   | 'tool.completed'
   | 'tool.failed'
+  | GraphEventType
 
 interface RunLifecycleEventFields {
   readonly runId: RunId
@@ -126,3 +127,67 @@ export type RuntimeEvent =
   | ToolStartedEvent
   | ToolCompletedEvent
   | ToolFailedEvent
+  | GraphEvent
+
+// ============================================================================
+// Graph Orchestration Events
+// ============================================================================
+
+export type GraphEventType =
+  | 'graph.started'
+  | 'graph.node.started'
+  | 'graph.node.completed'
+  | 'graph.node.failed'
+  | 'graph.completed'
+
+export interface GraphStartedEvent {
+  readonly type: 'graph.started'
+  readonly runId: RunId
+  readonly graphId: string
+  readonly graphVersion: number
+  readonly timestamp: number
+}
+
+export type GraphNodeKind = 'agent' | 'acp-agent' | 'human-gate' | 'fork'
+
+export interface GraphNodeStartedEvent {
+  readonly type: 'graph.node.started'
+  readonly runId: RunId
+  readonly graphId: string
+  readonly nodeId: string
+  readonly nodeKind: GraphNodeKind
+  readonly timestamp: number
+}
+
+export interface GraphNodeCompletedEvent {
+  readonly type: 'graph.node.completed'
+  readonly runId: RunId
+  readonly graphId: string
+  readonly nodeId: string
+  readonly output: Record<string, unknown>
+  readonly timestamp: number
+}
+
+export interface GraphNodeFailedEvent {
+  readonly type: 'graph.node.failed'
+  readonly runId: RunId
+  readonly graphId: string
+  readonly nodeId: string
+  readonly error: TianjiError
+  readonly timestamp: number
+}
+
+export interface GraphCompletedEvent {
+  readonly type: 'graph.completed'
+  readonly runId: RunId
+  readonly graphId: string
+  readonly finalState: Record<string, unknown>
+  readonly timestamp: number
+}
+
+export type GraphEvent =
+  | GraphStartedEvent
+  | GraphNodeStartedEvent
+  | GraphNodeCompletedEvent
+  | GraphNodeFailedEvent
+  | GraphCompletedEvent
