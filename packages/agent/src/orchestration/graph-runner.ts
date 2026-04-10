@@ -100,7 +100,7 @@ export function runOrchestrationGraph(
   const finished = (async (): Promise<Record<string, unknown>> => {
     try {
       // LangGraph 的 invoke 类型签名比我们需要的更严格，这里用 unknown 逃逸
-      const finalState = (await (
+      const finalState = await (
         compiled as unknown as {
           invoke: (
             input: Record<string, unknown>,
@@ -109,7 +109,7 @@ export function runOrchestrationGraph(
         }
       ).invoke(options.initialState ?? {}, {
         signal: options.abortSignal,
-      })) as Record<string, unknown>
+      })
 
       emit({
         type: 'graph.completed',

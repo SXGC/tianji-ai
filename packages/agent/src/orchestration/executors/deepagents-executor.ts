@@ -126,19 +126,19 @@ export function createDeepagentsExecutorFactory(
 
         await runtime.closeSession(session.sessionId)
         return stateUpdate
-      } catch (caught) {
+      } catch (error_) {
         // 把底层错误归一化为 TianjiError 后广播 failed 事件，再把原始错误再抛出，
         // 让 LangGraph 正常结束 run 并让上层 runner 走 finished reject 路径。
-        const error = toTianjiError(caught)
+        const tianjiError = toTianjiError(error_)
         ctx.emitGraphEvent({
           type: 'graph.node.failed',
           runId: ctx.runId,
           graphId: ctx.graphId,
           nodeId: node.id,
-          error,
+          error: tianjiError,
           timestamp: Date.now(),
         })
-        throw caught
+        throw error_
       }
     }
 

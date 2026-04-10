@@ -45,21 +45,19 @@ function parseFetchUrlArgs(args: unknown): FetchUrlArgs {
   if (typeof args !== 'object' || args === null) {
     throw new Error('fetch_url args must be an object')
   }
-  const candidate = args as { url?: unknown; timeoutMs?: unknown }
+  const candidate = args as { url?: unknown; timeoutMs?: number }
   if (typeof candidate.url !== 'string' || candidate.url.length === 0) {
     throw new Error('fetch_url args.url must be a non-empty string')
   }
   if (
     candidate.timeoutMs !== undefined &&
-    (typeof candidate.timeoutMs !== 'number' ||
-      !Number.isFinite(candidate.timeoutMs) ||
-      candidate.timeoutMs <= 0)
+    (!Number.isFinite(candidate.timeoutMs) || candidate.timeoutMs <= 0)
   ) {
     throw new Error('fetch_url args.timeoutMs must be a positive finite number')
   }
   return {
     url: candidate.url,
-    timeoutMs: candidate.timeoutMs as number | undefined,
+    timeoutMs: candidate.timeoutMs,
   }
 }
 

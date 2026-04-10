@@ -82,11 +82,11 @@ function stringifyValue(value: unknown): string {
 function parseJsonAllowingFence(text: string): unknown {
   const trimmed = text.trim()
   // 尝试剥掉 ```json ... ``` 围栏
-  const fenceMatch = trimmed.match(/^```(?:json)?\s*\n?([\s\S]*?)\n?```$/)
+  const fenceMatch = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/.exec(trimmed)
   const candidate = fenceMatch ? fenceMatch[1] : trimmed
   try {
     return JSON.parse(candidate)
-  } catch (err) {
-    throw new Error(`无法解析 JSON 输出: ${(err as Error).message}`)
+  } catch (error_) {
+    throw new Error(`无法解析 JSON 输出: ${(error_ as Error).message}`)
   }
 }

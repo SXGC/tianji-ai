@@ -166,8 +166,7 @@ export function createControlPlaneRuntime(
           return new InProcessAgentRunner({
             agentId: command.payload.agentId,
             nativeAgentContext: config.nativeAgentContext,
-            runtimeOptions:
-              config.observerLogger !== undefined ? { logger: config.observerLogger } : undefined,
+            runtimeOptions: config.observerLogger ? { logger: config.observerLogger } : undefined,
             defaultGraph: config.defaultGraph,
             executorFactory: config.executorFactory,
           })
