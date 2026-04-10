@@ -153,4 +153,23 @@ describe('agent session e2e', () => {
 
     expect(session.sessionId).toMatch(/^session_\d+$/)
   })
+
+  it('runtime.createSession 在多轮 query 下仍然只调用一次', async () => {
+    // 业务背景:
+    // runtime.createSession 是"初始化"语义——它会无脑构造一个空 messages 的
+    // SessionSnapshot 并覆盖落盘 sessions/{sessionId}.json (snapshot-store.ts:54)。
+    // 如果 AgentSession 在每次 query 内部都调用一次 createSession，
+    // 前一轮通过 runTurn 累加进 SessionSnapshot 的多轮历史会被整体重置。
+    // 因此整个 AgentSession 生命周期内，runtime.createSession 必须只调用一次,
+    // 后续每一轮聊天只走 runTurn。runtime 的 multi-turn.test.ts 集成测试也按此契约用。
+    const mockRuntime = createMockRuntime()
+    vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
+
+    const session = await createAgentSession(createTestContext())
+    await collectChatEvents(session, '第一轮提问')
+    await collectChatEvents(session, '第二轮提问')
+
+    expect(mockRuntime.createSession).toHaveBeenCalledTimes(1)
+    expect(mockRuntime.runTurn).toHaveBeenCalledTimes(2)
+  })
 })

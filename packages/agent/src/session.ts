@@ -80,6 +80,10 @@ export async function createAgentSession(
   const sessionId = `session_${Date.now()}` as SessionId
   let activeRunId: RunId | null = null
 
+  // runtime.createSession 是初始化语义,会无脑覆盖 sessions/{sessionId}.json 的 messages 为空。
+  // 必须只在 AgentSession 工厂里调用一次,否则后续每轮 query 都会清掉前一轮 runTurn 累加的多轮历史。
+  await runtime.createSession({ sessionId })
+
   return {
     sessionId,
     abort(): void {
@@ -88,8 +92,6 @@ export async function createAgentSession(
       }
     },
     async *query(prompt: string, options?: ChatOptions): AsyncIterable<RuntimeEvent> {
-      await runtime.createSession({ sessionId })
-
       const userMessage: AppMessage = {
         id: `msg_user_${Date.now()}`,
         role: 'user',
