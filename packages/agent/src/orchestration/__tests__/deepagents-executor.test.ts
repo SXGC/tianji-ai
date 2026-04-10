@@ -7,7 +7,7 @@
  * - 验证 input 缺失快速失败、多 output 自动追加 JSON 指令等边界行为。
  */
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import type { GraphEvent, RunId } from '@tianji/shared'
+import type { GraphEvent, RunId, RuntimeEvent } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createDeepagentsExecutorFactory } from '../executors/deepagents-executor.js'
@@ -121,5 +121,35 @@ describe('createDeepagentsExecutorFactory', () => {
 
     expect(update).toEqual({ code: 'C', tests: 'T' })
     expect(capturedSystemPrompt).toContain('JSON')
+  })
+
+  it('透传内部 RuntimeEvent 到 emitRuntimeEvent 回调', async () => {
+    const runtimeEvents: RuntimeEvent[] = []
+    const ctx = makeCtx({
+      emitRuntimeEvent: (event) => runtimeEvents.push(event),
+    })
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['result text'] }),
+    })
+    const node = makeAgentNode({ input: ['q'], output: ['a'] })
+    const action = factory(node, ctx)
+    await action({ q: 'x' }, {} as never)
+
+    // deepagents runtime 至少会发出 run.started 和 run.completed
+    const types = runtimeEvents.map((e) => e.type)
+    expect(types).toContain('run.started')
+    expect(types).toContain('run.completed')
+  })
+
+  it('emitRuntimeEvent 未提供时不报错（向后兼容）', async () => {
+    const ctx = makeCtx() // 没有 emitRuntimeEvent
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),
+    })
+    const node = makeAgentNode({ input: ['q'], output: ['a'] })
+    const action = factory(node, ctx)
+
+    // 不报错即通过
+    await expect(action({ q: 'x' }, {} as never)).resolves.toBeDefined()
   })
 })

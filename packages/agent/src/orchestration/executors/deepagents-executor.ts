@@ -107,7 +107,11 @@ export function createDeepagentsExecutorFactory(
         options.onRuntimeOptions?.(runOptions)
 
         const runId = await runtime.runTurn(runOptions)
-        const finalAssistantText = await collectFinalAssistantText(runtime, runId)
+        const finalAssistantText = await collectFinalAssistantText(
+          runtime,
+          runId,
+          ctx.emitRuntimeEvent
+        )
 
         const stateUpdate = buildStateUpdateFromText(finalAssistantText, node.output)
 
@@ -191,11 +195,21 @@ function buildRuntimeForNode(
  * 消费 runtime 的事件流，取出最后一条 assistant message 的文本内容。
  *
  * 节点只关心最终输出，不消费 delta/tool 事件，但仍完整迭代以确保 run 结束。
+ * 如果提供了 onEvent 回调，所有事件都会被透传出去。
+ *
+ * @param runtime - 当前节点的 SessionRuntime 实例
+ * @param runId - 本轮 run 的唯一标识
+ * @param onEvent - 可选的事件透传回调，每个 RuntimeEvent 都会调用一次
  */
-async function collectFinalAssistantText(runtime: SessionRuntime, runId: RunId): Promise<string> {
+async function collectFinalAssistantText(
+  runtime: SessionRuntime,
+  runId: RunId,
+  onEvent?: (event: RuntimeEvent) => void
+): Promise<string> {
   let finalText = ''
   const events: AsyncIterable<RuntimeEvent> = runtime.streamEvents(runId)
   for await (const event of events) {
+    onEvent?.(event)
     if (event.type === 'message.completed' && event.message.role === 'assistant') {
       finalText = extractTextFromMessage(event.message)
     }
