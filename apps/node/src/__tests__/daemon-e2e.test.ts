@@ -11,7 +11,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
-import { type AgentSession, DaemonClient, DaemonServer } from '@tianji/agent'
+import {
+  type AgentExecutorFactory,
+  type AgentSession,
+  DaemonClient,
+  DaemonServer,
+  type OrchestrationGraph,
+} from '@tianji/agent'
 import type { RunId, RuntimeEvent, SessionId } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -20,6 +26,19 @@ import type { RunCommandDependencies } from '../main.js'
 import { runCli } from '../main.js'
 
 import { captureStdout, createTempCliPaths } from './helpers/cli-test-utils.js'
+
+const testDefaultGraph: OrchestrationGraph = {
+  id: 'test',
+  name: 'test',
+  version: 1,
+  source: 'static',
+  locked: false,
+  state: {},
+  nodes: [],
+  edges: [],
+}
+
+const testExecutorFactory: AgentExecutorFactory = vi.fn()
 
 interface LiveDaemonHandle {
   readonly client: DaemonClient
@@ -35,6 +54,8 @@ async function setupLiveDaemon(
   const paths = providedPaths ?? temp!.paths
   const server = new DaemonServer({
     session,
+    defaultGraph: testDefaultGraph,
+    executorFactory: testExecutorFactory,
     paths: {
       daemonPortPath: paths.daemonPortPath,
       daemonPidPath: paths.daemonPidPath,
@@ -61,7 +82,7 @@ function createStubSession(chunks: readonly string[]): AgentSession {
   return {
     sessionId,
     abort: () => undefined,
-    async *query(_prompt: string): AsyncIterable<RuntimeEvent> {
+    async *queryWithGraph(): AsyncIterable<RuntimeEvent> {
       const runId = `run_${Date.now()}` as RunId
       const messageId = `msg_${Date.now()}`
 
@@ -94,7 +115,8 @@ function createRecordingSession(prompts: string[]): AgentSession {
   return {
     sessionId,
     abort: () => undefined,
-    async *query(prompt: string): AsyncIterable<RuntimeEvent> {
+    async *queryWithGraph(_graph, options): AsyncIterable<RuntimeEvent> {
+      const prompt = String(options.initialState?.input ?? '')
       prompts.push(prompt)
       const runId = `run_${Date.now()}` as RunId
       yield {

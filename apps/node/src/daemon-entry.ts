@@ -7,6 +7,8 @@ import {
   DEFAULT_CONTROL_PLANE_STATUS,
   DaemonServer,
   createAgentSession,
+  createDeepagentsExecutorFactory,
+  loadDefaultOrchestrationGraph,
 } from '@tianji/agent'
 
 import { loadUserConfigContext } from './config.js'
@@ -45,6 +47,14 @@ export async function runDaemonEntry(): Promise<void> {
   const session = await createAgentSession(context, {
     logger: logger.observerLogger,
   })
+  const defaultGraph = await loadDefaultOrchestrationGraph({
+    configDir: context.paths.configDir,
+    agentConfigs: context.config.agents?.items ?? {},
+  })
+  const executorFactory = createDeepagentsExecutorFactory({
+    resolveModel: (modelRef) => modelRef,
+    observer: logger.observerLogger,
+  })
   let controlPlaneStatus: ControlPlaneStatusSnapshot = DEFAULT_CONTROL_PLANE_STATUS
 
   const updateControlPlaneStatus = (
@@ -59,6 +69,8 @@ export async function runDaemonEntry(): Promise<void> {
 
   const server = new DaemonServer({
     session,
+    defaultGraph,
+    executorFactory,
     getControlPlaneStatus: () => controlPlaneStatus,
     paths: {
       daemonPortPath: context.paths.daemonPortPath,

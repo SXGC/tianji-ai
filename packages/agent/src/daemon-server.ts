@@ -15,10 +15,13 @@ import {
   type ShutdownResponse,
   encodeSseMessage,
 } from './daemon-protocol.js'
-import type { AgentSession } from './session.js'
+import type { AgentExecutorFactory, OrchestrationGraph } from './orchestration/index.js'
+import type { AgentSession, ChatWithGraphOptions } from './session.js'
 
 export interface DaemonServerOptions {
   readonly session: AgentSession
+  readonly defaultGraph: OrchestrationGraph
+  readonly executorFactory: AgentExecutorFactory
   readonly paths?: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'>
   readonly getControlPlaneStatus?: () => ControlPlaneStatusSnapshot
 }
@@ -33,6 +36,8 @@ async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
 
 export class DaemonServer {
   readonly #session: AgentSession
+  readonly #defaultGraph: OrchestrationGraph
+  readonly #executorFactory: AgentExecutorFactory
   readonly #paths: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'> | undefined
   readonly #server: Server
   readonly #getControlPlaneStatus: (() => ControlPlaneStatusSnapshot) | undefined
@@ -42,6 +47,8 @@ export class DaemonServer {
 
   constructor(options: DaemonServerOptions) {
     this.#session = options.session
+    this.#defaultGraph = options.defaultGraph
+    this.#executorFactory = options.executorFactory
     this.#paths = options.paths
     this.#getControlPlaneStatus = options.getControlPlaneStatus
     this.#server = createServer((req, res) => {
@@ -183,9 +190,11 @@ export class DaemonServer {
     })
 
     try {
-      // TODO(Task 8): 迁移到 session.queryWithGraph，当前调用暂时保留待后续任务修复
-      // @ts-expect-error — session.query 已删除，此处等待 Task 8 迁移到 queryWithGraph
-      for await (const event of this.#session.query(parsed.prompt)) {
+      const graphOptions: ChatWithGraphOptions = {
+        initialState: { input: parsed.prompt },
+        compileOptions: { agentExecutorFactory: this.#executorFactory },
+      }
+      for await (const event of this.#session.queryWithGraph(this.#defaultGraph, graphOptions)) {
         const message: ChatSseMessage = { type: 'chat.event', event }
         this.#sendSse(res, DAEMON_SSE_EVENT_NAME, message)
       }

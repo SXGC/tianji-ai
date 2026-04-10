@@ -111,6 +111,17 @@ vi.mock('@tianji/agent', () => ({
     lastError: null,
   },
   createAgentSession: createAgentSessionMock,
+  loadDefaultOrchestrationGraph: vi.fn(async () => ({
+    id: 'test',
+    name: 'test',
+    version: 1,
+    source: 'static',
+    locked: false,
+    state: {},
+    nodes: [],
+    edges: [],
+  })),
+  createDeepagentsExecutorFactory: vi.fn(() => vi.fn()),
   DaemonServer: vi.fn().mockImplementation(() => ({
     port: 4321,
     listen: listenMock,
