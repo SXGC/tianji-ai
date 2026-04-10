@@ -45,8 +45,8 @@ function createChannelAnnotation(def: StateChannelDef): BaseChannel {
   if (reducer === 'merge') {
     return Annotation<Record<string, unknown>>({
       reducer: (existing, update) => ({
-        ...(existing ?? {}),
-        ...(update ?? {}),
+        ...existing,
+        ...update,
       }),
       default: () =>
         def.default && typeof def.default === 'object'

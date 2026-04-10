@@ -416,9 +416,9 @@ export async function executeDeepagentsRun(
   const threadId = options.threadId ?? options.sessionId
   const createUntypedDeepAgent = createDeepAgent as unknown as DeepAgentFactory
 
-  const llmRecorder = options.llmRawDir !== undefined ? new LlmCallRecorder() : undefined
+  const llmRecorder = options.llmRawDir === undefined ? undefined : new LlmCallRecorder()
   const recordingMiddleware =
-    llmRecorder !== undefined ? createRecordingMiddleware(llmRecorder) : undefined
+    llmRecorder === undefined ? undefined : createRecordingMiddleware(llmRecorder)
 
   options.emitEvent({
     type: 'message.started',
