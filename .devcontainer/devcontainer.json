@@ -1,0 +1,51 @@
+{
+  "name": "Common Dev Environment (Proxy & SSH)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1.6.3": {
+      "version": "20"
+    },
+    "ghcr.io/rails/devcontainer/features/bun:1": {},
+    "ghcr.io/devcontainers/features/git:1": {},
+    "ghcr.io/devcontainers/features/python:1": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
+      "enableNonRootDocker": true,
+      "remoteUser": "cby"
+    }
+  },
+  "containerEnv": {},
+  "mounts": [
+    "source=pip-cache,target=/home/cby/.cache/pip,type=volume",
+    "source=pnpm-store,target=/home/cby/.local/share/pnpm/store,type=volume",
+    "source=${localEnv:HOME}/.codex,target=/home/cby/.codex,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude,target=/home/cby/.claude,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude.json,target=/home/cby/.claude.json,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.ssh,target=/home/cby/.ssh,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.factory,target=/home/cby/.factory,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.opencode,target=/home/cby/.opencode,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.config/opencode,target=/home/cby/.config/opencode,type=bind,consistency=cached"
+  ],
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "zsh",
+        "http.proxyStrictSSL": false
+      },
+      "extensions": [
+        "GitHub.copilot",
+        "GitHub.copilot-chat",
+        "dbaeumer.vscode-eslint",
+        "openai.chatgpt",
+        "esbenp.prettier-vscode",
+        "ms-azuretools.vscode-containers",
+        "yzhang.markdown-all-in-one",
+        "bierner.markdown-mermaid"
+      ]
+    }
+  },
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "remoteUser": "cby",
+  "runArgs": ["--network=dev-net"]
+}
