@@ -5,6 +5,7 @@
  * commands through the real InProcessAgentRunner (not mocking the runner
  * constructor), validating the full path from runtime to agent session.
  */
+import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
 import { type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -27,6 +28,12 @@ vi.mock('@tianji/agent', () => ({
   loadAgentContextForName: vi.fn(),
   createAgentSession: vi.fn(),
 }))
+
+/** 最小化 stub，仅满足 createControlPlaneRuntime config 所需 */
+const stubDefaultGraph = {} as OrchestrationGraph
+const stubExecutorFactory = (() => {
+  throw new Error('not used in unit tests')
+}) as unknown as AgentExecutorFactory
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 let agentMock: typeof import('@tianji/agent')
@@ -59,7 +66,7 @@ describe('ControlPlaneRuntime native agent routing integration', () => {
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,
-      query: async function* () {
+      queryWithGraph: async function* () {
         for (const e of events) yield e
       },
       abort: vi.fn(),
@@ -81,6 +88,8 @@ describe('ControlPlaneRuntime native agent routing integration', () => {
           'test-agent': { model: 'openai/gpt-4o-mini' },
         },
         nativeAgentContext: createFakeContext(),
+        defaultGraph: stubDefaultGraph,
+        executorFactory: stubExecutorFactory,
       },
       {
         createConnection: () => connectionDouble,
@@ -131,6 +140,8 @@ describe('ControlPlaneRuntime native agent routing integration', () => {
           'test-agent': { model: 'openai/gpt-4o-mini' },
         },
         nativeAgentContext: createFakeContext(),
+        defaultGraph: stubDefaultGraph,
+        executorFactory: stubExecutorFactory,
       },
       {
         createConnection: () => connectionDouble,

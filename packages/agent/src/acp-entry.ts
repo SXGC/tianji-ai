@@ -11,8 +11,14 @@ import { Readable, Writable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
 import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk'
 
+import type { TianjiAgentConfig } from '@tianji/shared'
+
 import { TianjiAcpAgent } from './acp/agent-bridge.js'
 import { loadAgentContext } from './context.js'
+import {
+  createDeepagentsExecutorFactory,
+  loadDefaultOrchestrationGraph,
+} from './orchestration/index.js'
 import { createAgentSession } from './session.js'
 
 /**
@@ -26,13 +32,22 @@ export async function runAcpAgent(): Promise<void> {
 
   console.error('[acp-agent] Agent context loaded:', context.agent.agentName)
 
+  const configDir = context.paths.configDir
+  const agentConfigs: Readonly<Record<string, TianjiAgentConfig>> =
+    context.config.agents?.items ?? {}
+  const defaultGraph = await loadDefaultOrchestrationGraph({ configDir, agentConfigs })
+
+  const executorFactory = createDeepagentsExecutorFactory({
+    resolveModel: (modelRef) => modelRef,
+  })
+
   const output = Writable.toWeb(process.stdout) as WritableStream<Uint8Array>
   const input = Readable.toWeb(process.stdin) as ReadableStream<Uint8Array>
   const stream = ndJsonStream(output, input)
 
   const connection = new AgentSideConnection((conn) => {
     const sessionFactory = () => createAgentSession(context)
-    return new TianjiAcpAgent(conn, sessionFactory)
+    return new TianjiAcpAgent(conn, sessionFactory, defaultGraph, executorFactory)
   }, stream)
 
   console.error('[acp-agent] ACP connection established, waiting for requests')

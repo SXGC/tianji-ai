@@ -1,4 +1,4 @@
-import type { LoadedAgentContext } from '@tianji/agent'
+import type { AgentExecutorFactory, LoadedAgentContext, OrchestrationGraph } from '@tianji/agent'
 import type { ObserverLogger } from '@tianji/observer'
 import type {
   AgentInfo,
@@ -26,6 +26,8 @@ export interface ControlPlaneRuntimeConfig {
   readonly agentConfigs: Readonly<Record<string, TianjiAgentConfig>>
   readonly agentList: readonly AgentInfo[]
   readonly nativeAgentContext?: LoadedAgentContext
+  readonly defaultGraph?: OrchestrationGraph
+  readonly executorFactory?: AgentExecutorFactory
   readonly onConnectionStateChange?: (event: {
     status:
       | 'connecting'
@@ -155,12 +157,19 @@ export function createControlPlaneRuntime(
           throw new Error(`Agent config not found for agentId "${command.payload.agentId}"`)
         }
 
-        if (resolveAgentType(agentConfig) === 'native' && config.nativeAgentContext !== undefined) {
+        if (
+          resolveAgentType(agentConfig) === 'native' &&
+          config.nativeAgentContext !== undefined &&
+          config.defaultGraph !== undefined &&
+          config.executorFactory !== undefined
+        ) {
           return new InProcessAgentRunner({
             agentId: command.payload.agentId,
             nativeAgentContext: config.nativeAgentContext,
             runtimeOptions:
               config.observerLogger !== undefined ? { logger: config.observerLogger } : undefined,
+            defaultGraph: config.defaultGraph,
+            executorFactory: config.executorFactory,
           })
         }
 

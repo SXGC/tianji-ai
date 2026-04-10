@@ -1,3 +1,4 @@
+import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
 import { type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -24,6 +25,12 @@ vi.mock('@tianji/agent', () => ({
   createAgentSession: vi.fn(),
 }))
 
+/** 最小化 stub，仅满足 InProcessAgentRunner 构造签名所需 */
+const stubDefaultGraph = {} as OrchestrationGraph
+const stubExecutorFactory = (() => {
+  throw new Error('not used in unit tests')
+}) as unknown as AgentExecutorFactory
+
 // --- setup ---
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -42,7 +49,7 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,
-      query: async function* () {
+      queryWithGraph: async function* () {
         for (const e of events) yield e
       },
       abort: vi.fn(),
@@ -59,6 +66,8 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
           nativeAgentContext: baseContext,
+          defaultGraph: stubDefaultGraph,
+          executorFactory: stubExecutorFactory,
         })
       },
       openEventStream: async () => writer,
@@ -100,7 +109,7 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,
-      query: async function* () {
+      queryWithGraph: async function* () {
         for (const e of events) yield e
       },
       abort: vi.fn(),
@@ -116,6 +125,8 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
           nativeAgentContext: baseContext,
+          defaultGraph: stubDefaultGraph,
+          executorFactory: stubExecutorFactory,
         })
       },
       openEventStream: async () => writer,
@@ -143,7 +154,7 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,
-      query: async function* () {
+      queryWithGraph: async function* () {
         for (const e of events) yield e
       },
       abort: vi.fn(),
@@ -159,6 +170,8 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
           nativeAgentContext: baseContext,
+          defaultGraph: stubDefaultGraph,
+          executorFactory: stubExecutorFactory,
         })
       },
       openEventStream: async () => writer,

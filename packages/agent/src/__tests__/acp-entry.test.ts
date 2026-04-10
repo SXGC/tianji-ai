@@ -10,6 +10,11 @@ vi.mock('../session.js', () => ({
   createAgentSession: vi.fn(),
 }))
 
+vi.mock('../orchestration/index.js', () => ({
+  loadDefaultOrchestrationGraph: vi.fn().mockResolvedValue({}),
+  createDeepagentsExecutorFactory: vi.fn().mockReturnValue(vi.fn()),
+}))
+
 /**
  * Deferred promise helper used to control when the connection "closes".
  */

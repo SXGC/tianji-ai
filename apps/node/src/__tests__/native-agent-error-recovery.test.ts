@@ -1,3 +1,4 @@
+import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
 import { type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -21,6 +22,12 @@ vi.mock('@tianji/agent', () => ({
   loadAgentContextForName: vi.fn(),
   createAgentSession: vi.fn(),
 }))
+
+/** 最小化 stub，仅满足 InProcessAgentRunner 构造签名所需 */
+const stubDefaultGraph = {} as OrchestrationGraph
+const stubExecutorFactory = (() => {
+  throw new Error('not used in unit tests')
+}) as unknown as AgentExecutorFactory
 
 // --- setup ---
 
@@ -51,6 +58,8 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
           nativeAgentContext: baseContext,
+          defaultGraph: stubDefaultGraph,
+          executorFactory: stubExecutorFactory,
         })
       },
       openEventStream: async () => writer,
@@ -86,7 +95,7 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,
-      query: async function* () {
+      queryWithGraph: async function* () {
         yield messageDeltaEvent()
         throw new Error('provider rate limited')
       },
@@ -104,6 +113,8 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
           nativeAgentContext: baseContext,
+          defaultGraph: stubDefaultGraph,
+          executorFactory: stubExecutorFactory,
         })
       },
       openEventStream: async () => writer,
@@ -148,7 +159,7 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValueOnce(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,
-      query: async function* () {
+      queryWithGraph: async function* () {
         yield messageDeltaEvent()
         yield runCompletedEvent()
       },
@@ -169,6 +180,8 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
           nativeAgentContext: baseContext,
+          defaultGraph: stubDefaultGraph,
+          executorFactory: stubExecutorFactory,
         })
       },
       openEventStream: async () => {

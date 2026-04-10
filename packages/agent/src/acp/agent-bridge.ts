@@ -20,6 +20,7 @@ import type {
   PromptResponse,
 } from '@agentclientprotocol/sdk'
 
+import type { AgentExecutorFactory, OrchestrationGraph } from '../orchestration/index.js'
 import type { AgentSession } from '../session.js'
 import { mapRuntimeEventToSessionUpdate } from './event-mapper.js'
 
@@ -31,12 +32,21 @@ type SessionFactory = () => AgentSession | Promise<AgentSession>
 export class TianjiAcpAgent {
   readonly #connection: AgentSideConnection
   readonly #sessionFactory: SessionFactory
+  readonly #defaultGraph: OrchestrationGraph
+  readonly #executorFactory: AgentExecutorFactory
   #currentSession: AgentSession | null = null
   #abortController: AbortController | null = null
 
-  constructor(connection: AgentSideConnection, sessionFactory: SessionFactory) {
+  constructor(
+    connection: AgentSideConnection,
+    sessionFactory: SessionFactory,
+    defaultGraph: OrchestrationGraph,
+    executorFactory: AgentExecutorFactory
+  ) {
     this.#connection = connection
     this.#sessionFactory = sessionFactory
+    this.#defaultGraph = defaultGraph
+    this.#executorFactory = executorFactory
   }
 
   async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
@@ -86,9 +96,10 @@ export class TianjiAcpAgent {
     this.#abortController = new AbortController()
 
     try {
-      // TODO(Task 9): 迁移到 session.queryWithGraph，当前调用暂时保留待后续任务修复
-      // @ts-expect-error — session.query 已删除，此处等待 Task 9 迁移到 queryWithGraph
-      for await (const event of this.#currentSession.query(promptText)) {
+      for await (const event of this.#currentSession.queryWithGraph(this.#defaultGraph, {
+        initialState: { input: promptText },
+        compileOptions: { agentExecutorFactory: this.#executorFactory },
+      })) {
         if (this.#abortController.signal.aborted) {
           console.error('[acp-agent] Prompt cancelled')
           return { stopReason: 'cancelled' }

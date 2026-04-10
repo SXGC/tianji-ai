@@ -1,7 +1,9 @@
 import {
+  type AgentExecutorFactory,
   type AgentRuntimeOptions,
   type AgentSession,
   type LoadedAgentContext,
+  type OrchestrationGraph,
   createAgentSession,
   loadAgentContextForName,
 } from '@tianji/agent'
@@ -14,6 +16,8 @@ export class InProcessAgentRunner {
   readonly agentId: string
   readonly #baseContext: LoadedAgentContext
   readonly #runtimeOptions?: AgentRuntimeOptions
+  readonly #defaultGraph: OrchestrationGraph
+  readonly #executorFactory: AgentExecutorFactory
   #session: AgentSession | null = null
   #activeGeneration = 0
 
@@ -21,10 +25,14 @@ export class InProcessAgentRunner {
     agentId: string
     nativeAgentContext: LoadedAgentContext
     runtimeOptions?: AgentRuntimeOptions
+    defaultGraph: OrchestrationGraph
+    executorFactory: AgentExecutorFactory
   }) {
     this.agentId = config.agentId
     this.#baseContext = config.nativeAgentContext
     this.#runtimeOptions = config.runtimeOptions
+    this.#defaultGraph = config.defaultGraph
+    this.#executorFactory = config.executorFactory
   }
 
   async connect(): Promise<void> {
@@ -33,6 +41,11 @@ export class InProcessAgentRunner {
     this.#activeGeneration += 1
   }
 
+  /**
+   * 通过 queryWithGraph 向 session 发送 prompt，产出 RuntimeEvent 流。
+   *
+   * @param prompt - 用户输入的文本
+   */
   async *query(prompt: string): AsyncIterable<RuntimeEvent> {
     if (this.#session === null) {
       throw new Error('Not connected. Call connect() first.')
@@ -42,9 +55,10 @@ export class InProcessAgentRunner {
     const generation = this.#activeGeneration
     let completedSeen = false
 
-    // TODO(Task 10): 迁移到 session.queryWithGraph，当前调用暂时保留待后续任务修复
-    // @ts-expect-error — session.query 已删除，此处等待 Task 10 迁移到 queryWithGraph
-    for await (const event of session.query(prompt)) {
+    for await (const event of session.queryWithGraph(this.#defaultGraph, {
+      initialState: { input: prompt },
+      compileOptions: { agentExecutorFactory: this.#executorFactory },
+    })) {
       if (generation !== this.#activeGeneration || this.#session !== session) {
         return
       }
