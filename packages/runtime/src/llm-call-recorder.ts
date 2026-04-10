@@ -113,7 +113,7 @@ function serializeMessages(messages: unknown): SerializedMessage[] {
   if (!Array.isArray(messages)) return []
 
   return messages.map((msg: BaseMessage) => ({
-    role: msg.getType(),
+    role: msg.type,
     content: msg.content,
     name: msg.name ?? undefined,
     toolCallId: isToolMessage(msg) ? msg.tool_call_id : undefined,
@@ -124,9 +124,9 @@ function serializeMessages(messages: unknown): SerializedMessage[] {
   }))
 }
 
-/** ToolMessage 类型判断：通过 getType() 鉴别。 */
+/** ToolMessage 类型判断：通过 type 属性鉴别。 */
 function isToolMessage(msg: BaseMessage): msg is ToolMessage {
-  return msg.getType() === 'tool'
+  return msg.type === 'tool'
 }
 
 function serializeTools(tools: unknown): SerializedTool[] {
