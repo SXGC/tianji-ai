@@ -13,13 +13,31 @@ import {
 } from '../daemon-protocol.js'
 import type { ChatDoneSseMessage, ChatErrorSseMessage, PingResponse } from '../daemon-protocol.js'
 import { DaemonServer, type DaemonServerOptions } from '../daemon-server.js'
+import type { AgentExecutorFactory, OrchestrationGraph } from '../orchestration/index.js'
 import type { AgentSession } from '../session.js'
+
+/** 最小可用的空编排图存根，测试中不会真正执行。 */
+const STUB_GRAPH: OrchestrationGraph = {
+  id: 'stub',
+  name: 'stub',
+  version: 1,
+  source: 'static',
+  locked: false,
+  state: {},
+  nodes: [],
+  edges: [],
+}
+
+/** 不会被调用的执行器工厂存根。 */
+const STUB_EXECUTOR_FACTORY: AgentExecutorFactory = () => {
+  throw new Error('stub executor factory should not be called')
+}
 
 function createStubSession(events: RuntimeEvent[] = []): AgentSession {
   return {
     sessionId: 'session_test' as unknown as AgentSession['sessionId'],
     abort: () => undefined,
-    async *query(_prompt: string) {
+    async *queryWithGraph(_graph, _options) {
       for (const event of events) {
         yield event
       }
@@ -36,7 +54,7 @@ function createBlockingSession(): AgentSession & { resolve: () => void } {
     sessionId: 'session_blocking' as unknown as AgentSession['sessionId'],
     resolve,
     abort: () => undefined,
-    async *query(_prompt: string) {
+    async *queryWithGraph(_graph, _options) {
       yield await barrier.then((): RuntimeEvent => ({ type: 'run.completed' }) as RuntimeEvent)
     },
   }
@@ -75,7 +93,11 @@ describe('DaemonServer', () => {
 
   it('GET /ping returns session metadata', async () => {
     const session = createStubSession()
-    server = new DaemonServer({ session })
+    server = new DaemonServer({
+      session,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
+    })
     await server.listen(0)
 
     const res = await fetch(`${baseUrl(server)}/ping`)
@@ -106,6 +128,8 @@ describe('DaemonServer', () => {
     }
     server = new DaemonServer({
       session,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
       getControlPlaneStatus: () => controlPlane,
     })
     await server.listen(0)
@@ -123,7 +147,11 @@ describe('DaemonServer', () => {
       { type: 'message.delta', content: ' world' } as unknown as RuntimeEvent,
     ]
     const session = createStubSession(events)
-    server = new DaemonServer({ session })
+    server = new DaemonServer({
+      session,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
+    })
     await server.listen(0)
 
     const res = await fetch(`${baseUrl(server)}/chat`, {
@@ -154,7 +182,11 @@ describe('DaemonServer', () => {
 
   it('concurrent chat returns BUSY error', async () => {
     const blockingSession = createBlockingSession()
-    server = new DaemonServer({ session: blockingSession })
+    server = new DaemonServer({
+      session: blockingSession,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
+    })
     await server.listen(0)
 
     const chat1 = fetch(`${baseUrl(server)}/chat`, {
@@ -191,6 +223,8 @@ describe('DaemonServer', () => {
     const session = createStubSession()
     const opts: DaemonServerOptions = {
       session,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
       paths: {
         daemonPortPath: portPath,
         daemonPidPath: pidPath,
@@ -216,7 +250,11 @@ describe('DaemonServer', () => {
 
   it('shutdown is idempotent', async () => {
     const session = createStubSession()
-    server = new DaemonServer({ session })
+    server = new DaemonServer({
+      session,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
+    })
     await server.listen(0)
 
     await server.shutdown()
@@ -225,7 +263,11 @@ describe('DaemonServer', () => {
 
   it('returns 404 for unknown routes', async () => {
     const session = createStubSession()
-    server = new DaemonServer({ session })
+    server = new DaemonServer({
+      session,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
+    })
     await server.listen(0)
 
     const res = await fetch(`${baseUrl(server)}/unknown`)
@@ -234,7 +276,11 @@ describe('DaemonServer', () => {
 
   it('POST /chat with invalid body returns 400', async () => {
     const session = createStubSession()
-    server = new DaemonServer({ session })
+    server = new DaemonServer({
+      session,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
+    })
     await server.listen(0)
 
     const res = await fetch(`${baseUrl(server)}/chat`, {
@@ -249,11 +295,15 @@ describe('DaemonServer', () => {
     const errorSession: AgentSession = {
       sessionId: 'session_error' as unknown as AgentSession['sessionId'],
       abort: () => undefined,
-      async *query() {
+      async *queryWithGraph(_graph, _options) {
         yield await Promise.reject(new Error('boom'))
       },
     }
-    server = new DaemonServer({ session: errorSession })
+    server = new DaemonServer({
+      session: errorSession,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
+    })
     await server.listen(0)
 
     const res = await fetch(`${baseUrl(server)}/chat`, {
