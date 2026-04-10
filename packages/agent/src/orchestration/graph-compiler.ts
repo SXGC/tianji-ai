@@ -49,7 +49,8 @@ export function compileOrchestrationGraph(
 ): CompiledStateGraph<unknown, unknown, string> {
   const validation = validateOrchestrationGraph(graph)
   if (!validation.ok) {
-    throw new Error(`编排图校验失败:\n${validation.errors.map((e) => `  - ${e}`).join('\n')}`)
+    const errorList = validation.errors.map((e) => `  - ${e}`).join('\n')
+    throw new Error(`编排图校验失败:\n${errorList}`)
   }
 
   const stateAnnotation = compileStateChannels(graph.state)
@@ -109,16 +110,47 @@ export function compileOrchestrationGraph(
   return compiled
 }
 
+/** langgraph builder 的最小类型接口，用于绕过泛型限制 */
+type BuilderApi = {
+  addEdge: (from: string, to: string) => unknown
+  addConditionalEdges: (
+    source: string,
+    path: (state: Record<string, unknown>) => string | Send | (string | Send)[],
+    pathMap?: Record<string, string>
+  ) => unknown
+}
+
+/** 为 router 节点添加条件边（读取 state 字段，按值路由） */
+function addRouterEdge(builderApi: BuilderApi, fromKey: string, router: RouterNode): void {
+  const pathMap: Record<string, string> = {}
+  for (const [branchKey, target] of Object.entries(router.condition.branches)) {
+    pathMap[branchKey] = target === GRAPH_END ? END : target
+  }
+  builderApi.addConditionalEdges(fromKey, (state) => String(state[router.condition.field]), pathMap)
+}
+
+/** 为 fork 节点添加并行扇出边（Send 语义），并连接每个分支到 join 节点 */
+function addForkEdge(builderApi: BuilderApi, fromKey: string, fork: ForkNode): void {
+  const targets = [...fork.targets]
+  builderApi.addConditionalEdges(
+    fromKey,
+    (state) => targets.map((t) => new Send(t, state)),
+    Object.fromEntries(targets.map((t) => [t, t]))
+  )
+  for (const target of fork.targets) {
+    builderApi.addEdge(target, fork.join)
+  }
+}
+
+/** 为普通边添加直连边 */
+function addPlainEdge(builderApi: BuilderApi, fromKey: string, toRaw: string): void {
+  const toKey = toRaw === GRAPH_END ? END : toRaw
+  builderApi.addEdge(fromKey, toKey)
+}
+
 function addEdges(builder: StateGraph<unknown>, graph: OrchestrationGraph): void {
   // 支持普通边、router 条件边、fork Send 并行扇出
-  const builderAny = builder as unknown as {
-    addEdge: (from: string, to: string) => unknown
-    addConditionalEdges: (
-      source: string,
-      path: (state: Record<string, unknown>) => string | Send | (string | Send)[],
-      pathMap?: Record<string, string>
-    ) => unknown
-  }
+  const builderApi = builder as unknown as BuilderApi
 
   // 收集所有 router / fork 节点，供指向它们的边在处理时改写为条件边
   const routerNodes = new Map<string, RouterNode>()
@@ -135,30 +167,11 @@ function addEdges(builder: StateGraph<unknown>, graph: OrchestrationGraph): void
     const fork = forkNodes.get(edge.to)
 
     if (router) {
-      const pathMap: Record<string, string> = {}
-      for (const [branchKey, target] of Object.entries(router.condition.branches)) {
-        pathMap[branchKey] = target === GRAPH_END ? END : target
-      }
-      builderAny.addConditionalEdges(
-        fromKey,
-        (state) => String((state as Record<string, unknown>)[router.condition.field]),
-        pathMap
-      )
+      addRouterEdge(builderApi, fromKey, router)
     } else if (fork) {
-      // fork: 用 conditional edges + Send 实现并行扇出
-      const targets = [...fork.targets]
-      builderAny.addConditionalEdges(
-        fromKey,
-        (state) => targets.map((t) => new Send(t, state)),
-        Object.fromEntries(targets.map((t) => [t, t]))
-      )
-      // fork 的每个 target → join
-      for (const target of fork.targets) {
-        builderAny.addEdge(target, fork.join)
-      }
+      addForkEdge(builderApi, fromKey, fork)
     } else {
-      const toKey = edge.to === GRAPH_END ? END : edge.to
-      builderAny.addEdge(fromKey, toKey)
+      addPlainEdge(builderApi, fromKey, edge.to)
     }
   }
 }
