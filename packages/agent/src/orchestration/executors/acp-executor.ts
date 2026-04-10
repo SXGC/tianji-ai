@@ -85,6 +85,7 @@ export function createAcpExecutorFactory(
         let accumulatedText = ''
         try {
           for await (const event of runner.query(fullPrompt)) {
+            ctx.emitRuntimeEvent?.(event)
             if (event.type === 'message.completed' && event.message.role === 'assistant') {
               accumulatedText = extractText(event.message)
             }
