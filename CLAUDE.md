@@ -80,7 +80,7 @@
 ### 提交规则
 
 - 如果需要执行 `git commit`，必须先加载 `git commit` skill。
-
+- 绝对不允许添加例如 `Co-Authored-By:` 这样的内容
 
 ## 文件读取与编辑规则
 
