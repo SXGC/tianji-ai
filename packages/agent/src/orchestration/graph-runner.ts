@@ -1,5 +1,5 @@
 import type { ObserverLogger } from '@tianji/observer'
-import type { GraphEvent, RunId } from '@tianji/shared'
+import type { RunId, RuntimeEvent } from '@tianji/shared'
 import { type CompileOptions, compileOrchestrationGraph } from './graph-compiler.js'
 import type { OrchestrationGraph } from './graph-schema.js'
 
@@ -7,7 +7,7 @@ export interface RunOrchestrationGraphOptions {
   readonly graph: OrchestrationGraph
   readonly compileOptions: Omit<
     CompileOptions,
-    'runId' | 'observer' | 'emitGraphEvent' | 'abortSignal'
+    'runId' | 'observer' | 'emitGraphEvent' | 'emitRuntimeEvent' | 'abortSignal'
   >
   readonly runId: RunId
   readonly initialState?: Record<string, unknown>
@@ -16,16 +16,16 @@ export interface RunOrchestrationGraphOptions {
 }
 
 export interface OrchestrationRunResult {
-  readonly events: AsyncIterable<GraphEvent>
+  readonly events: AsyncIterable<RuntimeEvent>
   readonly finished: Promise<Record<string, unknown>>
 }
 
 /**
  * 顶层入口：编译图并启动执行，返回事件流和最终状态 Promise。
  *
- * 事件流包含 graph.* 事件（启动、节点状态变化、完成）。
- * 内部 deepagents 的 RuntimeEvent 当前由各 executor 自行处理，
- * 后续可在此处通过额外管道透传。
+ * 事件流包含 RuntimeEvent（graph 图级事件 + run/message/tool 运行时事件）。
+ * graph.started/node.started/node.completed/completed 由 graph-runner 直接 emit；
+ * run/message/tool 等事件由各 executor 通过 emitRuntimeEvent 回调转发到同一事件流中。
  *
  * 错误语义：若 invoke 抛错，`finished` 会 reject，同时事件流会通过
  * `try/finally` 正确结束（done 置位并释放所有等待中的消费者），
@@ -34,11 +34,11 @@ export interface OrchestrationRunResult {
 export function runOrchestrationGraph(
   options: RunOrchestrationGraphOptions
 ): OrchestrationRunResult {
-  const eventQueue: GraphEvent[] = []
-  const eventResolvers: ((value: IteratorResult<GraphEvent>) => void)[] = []
+  const eventQueue: RuntimeEvent[] = []
+  const eventResolvers: ((value: IteratorResult<RuntimeEvent>) => void)[] = []
   let done = false
 
-  const emit = (event: GraphEvent): void => {
+  const emit = (event: RuntimeEvent): void => {
     if (done) return
     if (eventResolvers.length > 0) {
       const resolve = eventResolvers.shift()
@@ -61,18 +61,18 @@ export function runOrchestrationGraph(
     }
   }
 
-  const events: AsyncIterable<GraphEvent> = {
-    [Symbol.asyncIterator](): AsyncIterator<GraphEvent> {
+  const events: AsyncIterable<RuntimeEvent> = {
+    [Symbol.asyncIterator](): AsyncIterator<RuntimeEvent> {
       return {
-        next(): Promise<IteratorResult<GraphEvent>> {
+        next(): Promise<IteratorResult<RuntimeEvent>> {
           if (eventQueue.length > 0) {
-            const value = eventQueue.shift() as GraphEvent
+            const value = eventQueue.shift() as RuntimeEvent
             return Promise.resolve({ value, done: false })
           }
           if (done) {
             return Promise.resolve({ value: undefined as never, done: true })
           }
-          return new Promise<IteratorResult<GraphEvent>>((resolve) => {
+          return new Promise<IteratorResult<RuntimeEvent>>((resolve) => {
             eventResolvers.push(resolve)
           })
         },
@@ -85,6 +85,7 @@ export function runOrchestrationGraph(
     runId: options.runId,
     observer: options.observer,
     emitGraphEvent: emit,
+    emitRuntimeEvent: emit,
     abortSignal: options.abortSignal,
   })
 

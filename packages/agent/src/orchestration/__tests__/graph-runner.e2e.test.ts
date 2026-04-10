@@ -7,7 +7,7 @@
  * - 不使用任何 mock：走完整的 graph-runner / graph-compiler / deepagents-executor 路径。
  */
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import type { GraphEvent, RunId } from '@tianji/shared'
+import type { RunId, RuntimeEvent } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { createDeepagentsExecutorFactory } from '../executors/deepagents-executor.js'
@@ -69,7 +69,7 @@ describe('orchestration e2e', () => {
       compileOptions: { agentExecutorFactory: factory },
     })
 
-    const collectedEvents: GraphEvent[] = []
+    const collectedEvents: RuntimeEvent[] = []
     const collectionPromise = (async () => {
       for await (const event of result.events) {
         collectedEvents.push(event)
@@ -155,7 +155,7 @@ describe('orchestration e2e', () => {
       compileOptions: { agentExecutorFactory: factory },
     })
 
-    const events: GraphEvent[] = []
+    const events: RuntimeEvent[] = []
     const collect = (async () => {
       for await (const event of result.events) {
         events.push(event)

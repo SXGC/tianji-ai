@@ -1,6 +1,6 @@
 import { type CompiledStateGraph, END, START, Send, StateGraph } from '@langchain/langgraph'
 import type { ObserverLogger } from '@tianji/observer'
-import type { GraphEvent, RunId } from '@tianji/shared'
+import type { GraphEvent, RunId, RuntimeEvent } from '@tianji/shared'
 import type {
   AcpExecutorFactory,
   AgentExecutorFactory,
@@ -26,6 +26,7 @@ export interface CompileOptions {
   readonly observer?: ObserverLogger
   readonly runId: RunId
   readonly emitGraphEvent?: (event: GraphEvent) => void
+  readonly emitRuntimeEvent?: (event: RuntimeEvent) => void
   /**
    * 顶层 run 的 abortSignal。
    * 会被塞入 NodeExecutorContext，让节点执行器在 runtime 调用处透传。
@@ -61,6 +62,7 @@ export function compileOrchestrationGraph(
     graphId: graph.id,
     observer: options.observer,
     emitGraphEvent: options.emitGraphEvent ?? (() => undefined),
+    emitRuntimeEvent: options.emitRuntimeEvent,
     abortSignal: options.abortSignal,
   }
 
