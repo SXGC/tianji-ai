@@ -1,7 +1,5 @@
-import type { AIMessage, BaseMessage } from '@langchain/core/messages'
-import type { ToolMessage } from '@langchain/core/messages'
-import { createMiddleware } from 'langchain'
-import type { AgentMiddleware } from 'langchain'
+import type { AIMessage, BaseMessage, ToolMessage } from '@langchain/core/messages'
+import { type AgentMiddleware, createMiddleware } from 'langchain'
 import type {
   LlmCallRecord,
   LlmCallRequest,
@@ -115,7 +113,7 @@ function serializeMessages(messages: unknown): SerializedMessage[] {
   if (!Array.isArray(messages)) return []
 
   return messages.map((msg: BaseMessage) => ({
-    role: msg._getType(),
+    role: msg.getType(),
     content: msg.content,
     name: msg.name ?? undefined,
     toolCallId: isToolMessage(msg) ? msg.tool_call_id : undefined,
@@ -126,9 +124,9 @@ function serializeMessages(messages: unknown): SerializedMessage[] {
   }))
 }
 
-/** ToolMessage 类型判断：通过 _getType() 鉴别。 */
+/** ToolMessage 类型判断：通过 getType() 鉴别。 */
 function isToolMessage(msg: BaseMessage): msg is ToolMessage {
-  return msg._getType() === 'tool'
+  return msg.getType() === 'tool'
 }
 
 function serializeTools(tools: unknown): SerializedTool[] {
@@ -138,7 +136,7 @@ function serializeTools(tools: unknown): SerializedTool[] {
     if (typeof tool === 'object' && tool !== null) {
       const obj = tool as Record<string, unknown>
       return {
-        name: typeof obj.name === 'string' ? obj.name : String(tool),
+        name: typeof obj.name === 'string' ? obj.name : JSON.stringify(tool),
         description: typeof obj.description === 'string' ? obj.description : undefined,
         schema: obj.schema,
       }
@@ -156,21 +154,19 @@ function serializeResponse(response: AIMessage): LlmCallResponse {
     })
   )
 
-  const usage = response.usage_metadata as
-    | { input_tokens?: number; output_tokens?: number; total_tokens?: number }
-    | undefined
+  const usage = response.usage_metadata
 
   return {
     content: response.content,
     toolCalls,
     usageMetadata:
-      usage !== undefined
-        ? {
+      usage === undefined
+        ? undefined
+        : {
             inputTokens: usage.input_tokens,
             outputTokens: usage.output_tokens,
             totalTokens: usage.total_tokens,
-          }
-        : undefined,
+          },
     additional_kwargs:
       Object.keys(response.additional_kwargs ?? {}).length > 0
         ? (response.additional_kwargs as Record<string, unknown>)
