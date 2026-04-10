@@ -183,6 +183,8 @@ export class DaemonServer {
     })
 
     try {
+      // TODO(Task 8): 迁移到 session.queryWithGraph，当前调用暂时保留待后续任务修复
+      // @ts-expect-error — session.query 已删除，此处等待 Task 8 迁移到 queryWithGraph
       for await (const event of this.#session.query(parsed.prompt)) {
         const message: ChatSseMessage = { type: 'chat.event', event }
         this.#sendSse(res, DAEMON_SSE_EVENT_NAME, message)

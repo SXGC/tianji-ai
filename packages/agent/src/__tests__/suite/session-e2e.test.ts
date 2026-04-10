@@ -5,7 +5,6 @@ import type { SessionId } from '@tianji/shared'
 
 import type { LoadedAgentContext } from '../../context.js'
 import { createAgentSession } from '../../session.js'
-import { collectChatEvents } from '../helpers/agent-test-utils.js'
 
 vi.mock('@tianji/runtime', async () => {
   const actual = await vi.importActual<typeof import('@tianji/runtime')>('@tianji/runtime')
@@ -60,91 +59,12 @@ function createMockRuntime(): SessionRuntime {
     getRunSnapshot: vi.fn(async () => undefined),
     runTurn: vi.fn(async () => 'run_test' as never),
     resumeRun: vi.fn(async () => 'run_test' as never),
-    streamEvents: vi.fn(async function* () {
-      yield {
-        type: 'run.started' as const,
-        runId: 'run_test' as never,
-        sessionId: 'session_test' as SessionId,
-        triggerType: 'new' as const,
-        parentRunId: undefined,
-        timestamp: Date.now(),
-      }
-      yield {
-        type: 'message.started' as const,
-        runId: 'run_test' as never,
-        messageId: 'msg_1',
-        message: { id: 'msg_1', role: 'assistant' as const, content: [], createdAt: Date.now() },
-        timestamp: Date.now(),
-      }
-      yield {
-        type: 'message.completed' as const,
-        runId: 'run_test' as never,
-        messageId: 'msg_1',
-        message: {
-          id: 'msg_1',
-          role: 'assistant' as const,
-          content: [{ type: 'text' as const, text: 'hello' }],
-          createdAt: Date.now(),
-        },
-        timestamp: Date.now(),
-      }
-      yield {
-        type: 'run.completed' as const,
-        runId: 'run_test' as never,
-        sessionId: 'session_test' as SessionId,
-        triggerType: 'new' as const,
-        parentRunId: undefined,
-        timestamp: Date.now(),
-      }
-    }),
+    streamEvents: vi.fn(async function* () {}),
     cancelRun: vi.fn(() => false),
   }
 }
 
 describe('agent session e2e', () => {
-  it('session.chat returns a complete event stream', async () => {
-    const mockRuntime = createMockRuntime()
-    vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
-
-    const session = await createAgentSession(createTestContext())
-    const events = await collectChatEvents(session, 'hi')
-    const types = events.map((e) => e.type)
-
-    expect(types).toContain('run.started')
-    expect(types).toContain('message.started')
-    expect(types).toContain('message.completed')
-    expect(types).toContain('run.completed')
-  })
-
-  it('uses agent soul as default systemPrompt', async () => {
-    const mockRuntime = createMockRuntime()
-    vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
-
-    const context = createTestContext()
-    const session = await createAgentSession(context)
-    await collectChatEvents(session, 'hi')
-
-    expect(mockRuntime.runTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        systemPrompt: 'You are a test agent.',
-      })
-    )
-  })
-
-  it('ChatOptions.systemPrompt overrides default soul', async () => {
-    const mockRuntime = createMockRuntime()
-    vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
-
-    const session = await createAgentSession(createTestContext())
-    await collectChatEvents(session, 'hi', { systemPrompt: 'custom prompt' })
-
-    expect(mockRuntime.runTurn).toHaveBeenCalledWith(
-      expect.objectContaining({
-        systemPrompt: 'custom prompt',
-      })
-    )
-  })
-
   it('session uses a stable sessionId matching expected pattern', async () => {
     const mockRuntime = createMockRuntime()
     vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
@@ -152,24 +72,5 @@ describe('agent session e2e', () => {
     const session = await createAgentSession(createTestContext())
 
     expect(session.sessionId).toMatch(/^session_\d+$/)
-  })
-
-  it('runtime.createSession 在多轮 query 下仍然只调用一次', async () => {
-    // 业务背景:
-    // runtime.createSession 是"初始化"语义——它会无脑构造一个空 messages 的
-    // SessionSnapshot 并覆盖落盘 sessions/{sessionId}.json (snapshot-store.ts:54)。
-    // 如果 AgentSession 在每次 query 内部都调用一次 createSession，
-    // 前一轮通过 runTurn 累加进 SessionSnapshot 的多轮历史会被整体重置。
-    // 因此整个 AgentSession 生命周期内，runtime.createSession 必须只调用一次,
-    // 后续每一轮聊天只走 runTurn。runtime 的 multi-turn.test.ts 集成测试也按此契约用。
-    const mockRuntime = createMockRuntime()
-    vi.spyOn(runtimeModule, 'createSessionRuntime').mockReturnValue(mockRuntime)
-
-    const session = await createAgentSession(createTestContext())
-    await collectChatEvents(session, '第一轮提问')
-    await collectChatEvents(session, '第二轮提问')
-
-    expect(mockRuntime.createSession).toHaveBeenCalledTimes(1)
-    expect(mockRuntime.runTurn).toHaveBeenCalledTimes(2)
   })
 })

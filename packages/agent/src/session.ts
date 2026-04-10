@@ -6,7 +6,7 @@ import {
   ToolRegistry,
   createSessionRuntime,
 } from '@tianji/runtime'
-import type { AppMessage, RunId, RuntimeEvent, SessionId } from '@tianji/shared'
+import type { RunId, RuntimeEvent, SessionId } from '@tianji/shared'
 
 import { type LoadedAgentContext, injectProviderEnv } from './context.js'
 import {
@@ -18,10 +18,6 @@ import { createFetchUrlTool } from './tools/fetch-url-tool.js'
 
 export interface AgentRuntimeOptions {
   readonly logger?: ObserverLogger
-}
-
-export interface ChatOptions {
-  readonly systemPrompt?: string
 }
 
 /**
@@ -43,7 +39,6 @@ export interface ChatWithGraphOptions {
 
 export interface AgentSession {
   readonly sessionId: SessionId
-  readonly query: (prompt: string, options?: ChatOptions) => AsyncIterable<RuntimeEvent>
   readonly queryWithGraph: (
     graph: OrchestrationGraph,
     options: ChatWithGraphOptions
@@ -104,7 +99,6 @@ export async function createAgentSession(
 ): Promise<AgentSession> {
   const runtime = await createAgentRuntime(context, options)
   const sessionId = `session_${Date.now()}` as SessionId
-  let activeRunId: RunId | null = null
   // 当前 session 内所有仍在运行的 queryWithGraph 对应的 AbortController。
   // session.abort() 会同时通知这些图级控制器，让节点执行器（deepagents-executor / acp-executor）
   // 走 AbortSignal 路径中断正在进行的 runtime 调用。
@@ -117,38 +111,10 @@ export async function createAgentSession(
   return {
     sessionId,
     abort(): void {
-      if (activeRunId !== null) {
-        runtime.cancelRun(activeRunId)
-      }
       // 通知所有进行中的图运行终止；controller 会在各自 queryWithGraph 的 finally
       // 里从集合里移除，这里只负责发信号。
       for (const controller of activeGraphControllers) {
         controller.abort()
-      }
-    },
-    async *query(prompt: string, options?: ChatOptions): AsyncIterable<RuntimeEvent> {
-      const userMessage: AppMessage = {
-        id: `msg_user_${Date.now()}`,
-        role: 'user',
-        content: [{ type: 'text', text: prompt }],
-        createdAt: Date.now(),
-      }
-
-      const runId = await runtime.runTurn({
-        sessionId,
-        message: userMessage,
-        systemPrompt: options?.systemPrompt ?? context.agent.soul,
-      })
-      activeRunId = runId
-
-      try {
-        for await (const event of runtime.streamEvents(runId)) {
-          yield event
-        }
-      } finally {
-        if (activeRunId === runId) {
-          activeRunId = null
-        }
       }
     },
     async *queryWithGraph(

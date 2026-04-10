@@ -29,7 +29,6 @@ export {
   createAgentSession,
   type AgentRuntimeOptions,
   type AgentSession,
-  type ChatOptions,
 } from './session.js'
 export { TianjiAcpAgent, mapRuntimeEventToSessionUpdate } from './acp/index.js'
 export { runAcpAgent } from './acp-entry.js'

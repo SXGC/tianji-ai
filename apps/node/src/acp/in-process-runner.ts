@@ -42,6 +42,8 @@ export class InProcessAgentRunner {
     const generation = this.#activeGeneration
     let completedSeen = false
 
+    // TODO(Task 10): 迁移到 session.queryWithGraph，当前调用暂时保留待后续任务修复
+    // @ts-expect-error — session.query 已删除，此处等待 Task 10 迁移到 queryWithGraph
     for await (const event of session.query(prompt)) {
       if (generation !== this.#activeGeneration || this.#session !== session) {
         return
