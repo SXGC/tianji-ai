@@ -81,9 +81,21 @@ function stringifyValue(value: unknown): string {
 
 function parseJsonAllowingFence(text: string): unknown {
   const trimmed = text.trim()
-  // 尝试剥掉 ```json ... ``` 围栏
-  const fenceMatch = /^```(?:json)?\s*\n?([\s\S]*?)\n?```$/.exec(trimmed)
-  const candidate = fenceMatch ? fenceMatch[1] : trimmed
+  let candidate = trimmed
+
+  if (trimmed.startsWith('```') && trimmed.endsWith('```')) {
+    const firstNewlineIndex = trimmed.indexOf('\n')
+    const lastFenceIndex = trimmed.lastIndexOf('```')
+
+    if (firstNewlineIndex !== -1 && lastFenceIndex > firstNewlineIndex) {
+      const header = trimmed.slice(3, firstNewlineIndex).trim()
+
+      if (header === '' || header === 'json') {
+        candidate = trimmed.slice(firstNewlineIndex + 1, lastFenceIndex).trim()
+      }
+    }
+  }
+
   try {
     return JSON.parse(candidate)
   } catch (error_) {

@@ -25,7 +25,8 @@
     "source=${localEnv:HOME}/.ssh,target=/home/cby/.ssh,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.factory,target=/home/cby/.factory,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.opencode,target=/home/cby/.opencode,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.config/opencode,target=/home/cby/.config/opencode,type=bind,consistency=cached"
+    "source=${localEnv:HOME}/.config/opencode,target=/home/cby/.config/opencode,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.deepagents,target=/home/cby/.deepagents,type=bind,consistency=cached"
   ],
   "customizations": {
     "vscode": {

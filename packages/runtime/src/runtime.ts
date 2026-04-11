@@ -905,8 +905,11 @@ class SessionRuntimeImpl implements SessionRuntime {
       sessionId: fields.sessionId,
       runId: fields.runId,
       triggerType: fields.triggerType,
-      ...(fields.parentRunId !== undefined ? { parentRunId: fields.parentRunId } : undefined),
       ...extraData,
+    }
+
+    if (fields.parentRunId !== undefined) {
+      data.parentRunId = fields.parentRunId
     }
 
     void logger[level](['runtime', 'run'], message, data)

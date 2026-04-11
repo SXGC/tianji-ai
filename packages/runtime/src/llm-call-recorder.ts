@@ -84,7 +84,7 @@ export function createRecordingMiddleware(recorder: LlmCallRecorder): AgentMiddl
       const req = request as unknown as Record<string, unknown>
       try {
         const response = await handler(request)
-        recorder.recordCall(req, response as AIMessage)
+        recorder.recordCall(req, response)
         return response
       } catch (error) {
         recorder.recordError(req, error)

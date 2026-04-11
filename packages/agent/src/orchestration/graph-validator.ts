@@ -5,7 +5,7 @@ import {
   type GraphNode,
   type OrchestrationGraph,
   type ReservedNodeId,
-} from './graph-schema'
+} from './graph-schema.js'
 
 export interface ValidationResult {
   readonly ok: boolean

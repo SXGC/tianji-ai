@@ -1,6 +1,6 @@
 import { Annotation } from '@langchain/langgraph'
 import type { BaseChannel } from '@langchain/langgraph'
-import type { StateChannelDef, StateChannelReducer } from './graph-schema'
+import type { StateChannelDef, StateChannelReducer } from './graph-schema.js'
 
 /**
  * 把 OrchestrationGraph 的 state 定义编译为 LangGraph Annotation.Root。

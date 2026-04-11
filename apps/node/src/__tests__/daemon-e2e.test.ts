@@ -1,5 +1,4 @@
-import { spawn } from 'node:child_process'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 /**
  * Daemon 子命令模式的端到端集成测试。
  *
@@ -7,7 +6,7 @@ import { execFile } from 'node:child_process'
  * 之间的集成行为，不 mock 内部 daemon 协议。
  */
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
@@ -26,6 +25,7 @@ import type { RunCommandDependencies } from '../main.js'
 import { runCli } from '../main.js'
 
 import { captureStdout, createTempCliPaths } from './helpers/cli-test-utils.js'
+import { createStubSession, setupSubprocessDaemon } from './helpers/daemon-subprocess.js'
 
 const testDefaultGraph: OrchestrationGraph = {
   id: 'test',
@@ -76,39 +76,6 @@ async function setupLiveDaemon(
   }
 }
 
-function createStubSession(chunks: readonly string[]): AgentSession {
-  const sessionId = `session_stub_${Date.now()}` as SessionId
-
-  return {
-    sessionId,
-    abort: () => undefined,
-    async *queryWithGraph(): AsyncIterable<RuntimeEvent> {
-      const runId = `run_${Date.now()}` as RunId
-      const messageId = `msg_${Date.now()}`
-
-      for (let i = 0; i < chunks.length; i++) {
-        yield {
-          type: 'message.delta',
-          runId,
-          messageId,
-          sequence: i,
-          channel: 'text',
-          payload: { content: chunks[i] },
-          timestamp: Date.now(),
-        }
-      }
-
-      yield {
-        type: 'run.completed',
-        runId,
-        sessionId,
-        triggerType: 'new',
-        timestamp: Date.now(),
-      }
-    },
-  }
-}
-
 function createRecordingSession(prompts: string[]): AgentSession {
   const sessionId = `session_recording_${Date.now()}` as SessionId
 
@@ -155,7 +122,19 @@ async function collectEvents(stream: AsyncIterable<RuntimeEvent>): Promise<Runti
   return events
 }
 
-async function expectDaemonFilesRemoved(paths: UserConfigPaths): Promise<void> {
+async function expectDaemonFilesRemoved(paths: UserConfigPaths, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    const portExists = await pathExists(paths.daemonPortPath)
+    const pidExists = await pathExists(paths.daemonPidPath)
+    if (!portExists && !pidExists) {
+      return
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+
   await expect(access(paths.daemonPortPath)).rejects.toThrow()
   await expect(access(paths.daemonPidPath)).rejects.toThrow()
 }
@@ -217,19 +196,22 @@ describe('daemon start/status/stop', () => {
   }, 15_000)
 
   it('stops a running daemon through daemon stop', async () => {
-    const live = await setupLiveDaemon(createStubSession(['bye']))
+    const { paths, cleanup: cleanupTemp } = await createTempCliPaths()
     try {
-      const result = await runCommand(['daemon', 'stop'], {
-        getUserConfigPaths: () => live.paths,
-      })
+      const live = await setupSubprocessDaemon(['bye'], paths)
+      try {
+        const result = await runCommand(['daemon', 'stop'], {
+          getUserConfigPaths: () => live.paths,
+        })
 
-      expect(result.exitCode).toBe(0)
-      expect(result.stdout).toContain('stopped successfully')
-      // 等待 server 异步完成文件删除（#handleShutdown 是 fire-and-forget）
-      await live.cleanup()
-      await expectDaemonFilesRemoved(live.paths)
+        expect(result.exitCode).toBe(0)
+        expect(result.stdout).toContain('stopped successfully')
+        await expectDaemonFilesRemoved(live.paths)
+      } finally {
+        await live.cleanup()
+      }
     } finally {
-      await live.cleanup()
+      await cleanupTemp()
     }
   }, 15_000)
 
@@ -285,12 +267,18 @@ describe('daemon start/status/stop', () => {
         }),
         'utf8'
       )
+      await writeFile(
+        join(runtimeConfigDir, 'default-orchestration.json'),
+        JSON.stringify(testDefaultGraph),
+        'utf8'
+      )
 
       const child = spawn(process.execPath, [cliEntryPath, 'daemon', 'start'], {
         cwd: new URL('../..', import.meta.url),
         env: {
           ...process.env,
           HOME: homeDir,
+          OPENAI_API_KEY: 'test-key',
           XDG_CONFIG_HOME: xdgConfigHome,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -361,18 +349,26 @@ describe('daemon restart', () => {
   }, 15_000)
 
   it('restarts a running daemon in foreground mode', async () => {
-    const first = await setupLiveDaemon(createStubSession(['first']))
+    const { paths, cleanup: cleanupTemp } = await createTempCliPaths()
     const replacement = vi.fn(async () => undefined)
 
-    const result = await runCommand(['daemon', 'restart', '--fg'], {
-      getUserConfigPaths: () => first.paths,
-      runDaemonEntry: replacement,
-    })
+    try {
+      const first = await setupSubprocessDaemon(['first'], paths)
+      try {
+        const result = await runCommand(['daemon', 'restart', '--fg'], {
+          getUserConfigPaths: () => first.paths,
+          runDaemonEntry: replacement,
+        })
 
-    expect(result.exitCode).toBe(0)
-    expect(replacement).toHaveBeenCalledOnce()
-
-    await first.cleanup()
+        expect(result.exitCode).toBe(0)
+        expect(replacement).toHaveBeenCalledOnce()
+        await expectDaemonFilesRemoved(first.paths)
+      } finally {
+        await first.cleanup()
+      }
+    } finally {
+      await cleanupTemp()
+    }
   }, 15_000)
 
   it('cleans stale daemon files before foreground start', async () => {
@@ -439,27 +435,33 @@ describe('chat and end-to-end flow', () => {
   }, 15_000)
 
   it('completes start -> status -> chat -> stop -> status failed journey', async () => {
-    const live = await setupLiveDaemon(createStubSession(['journey ok']))
+    const { paths, cleanup: cleanupTemp } = await createTempCliPaths()
     try {
-      const status1 = await runCommand(['daemon', 'status'], {
-        getUserConfigPaths: () => live.paths,
-      })
-      expect(status1.exitCode).toBe(0)
+      const live = await setupSubprocessDaemon(['journey ok'], paths)
+      try {
+        const status1 = await runCommand(['daemon', 'status'], {
+          getUserConfigPaths: () => live.paths,
+        })
+        expect(status1.exitCode).toBe(0)
 
-      const events = await collectEvents(live.client.sendChat('hello'))
-      expect(events.some((event) => event.type === 'run.completed')).toBe(true)
+        const events = await collectEvents(live.client.sendChat('hello'))
+        expect(events.some((event) => event.type === 'run.completed')).toBe(true)
 
-      const stop = await runCommand(['daemon', 'stop'], {
-        getUserConfigPaths: () => live.paths,
-      })
-      expect(stop.exitCode).toBe(0)
+        const stop = await runCommand(['daemon', 'stop'], {
+          getUserConfigPaths: () => live.paths,
+        })
+        expect(stop.exitCode).toBe(0)
+        await expectDaemonFilesRemoved(live.paths)
 
-      const status2 = await runCli(['daemon', 'status'], {
-        getUserConfigPaths: () => live.paths,
-      })
-      expect(status2).toBe(1)
+        const status2 = await runCli(['daemon', 'status'], {
+          getUserConfigPaths: () => live.paths,
+        })
+        expect(status2).toBe(1)
+      } finally {
+        await live.cleanup()
+      }
     } finally {
-      await live.cleanup()
+      await cleanupTemp()
     }
   }, 15_000)
 })

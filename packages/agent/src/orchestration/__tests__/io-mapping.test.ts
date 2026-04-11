@@ -62,6 +62,16 @@ describe('buildStateUpdateFromText', () => {
     const text = '```json\n{"a":"x","b":"y"}\n```'
     expect(buildStateUpdateFromText(text, ['a', 'b'])).toEqual({ a: 'x', b: 'y' })
   })
+
+  it('多字段时纯 code fence 也能解析', () => {
+    const text = '```\n{"a":"x","b":"y"}\n```'
+    expect(buildStateUpdateFromText(text, ['a', 'b'])).toEqual({ a: 'x', b: 'y' })
+  })
+
+  it('多字段时非 json 标记的 code fence 不会被剥掉', () => {
+    const text = '```ts\n{"a":"x","b":"y"}\n```'
+    expect(() => buildStateUpdateFromText(text, ['a', 'b'])).toThrow(/JSON/)
+  })
 })
 
 describe('buildOutputInstructionSuffix', () => {

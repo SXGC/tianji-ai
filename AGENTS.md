@@ -107,3 +107,17 @@ git commit --no-verify
 * 只解决你负责文件中的冲突。
 * 如果冲突出现在你未修改的文件中，立即停止并询问用户。
 * 严禁 `force push`。
+
+## 代码质量
+
+```
+pnpm test:coverage
+pnpm sonar 
+```
+
+### sonar
+
+环境变量中已经有 SONAR_HOST_URL 和 SONAR_TOKEN
+- 用户要求直接开始执行时，不要因为 todo 计划再等待确认，直接推进。
+
+Sonar 的 api/ce/task 可以查询 Compute Engine 任务；质量门可以用 api/qualitygates/project_status 查；问题列表可以用 api/issues/search 查；指标可以走 api/measures
