@@ -7,7 +7,7 @@
  * @module tianji-agent
  */
 import { randomUUID } from 'node:crypto'
-import { AbstractAgent } from '@ag-ui/client'
+import { AbstractAgent, EventType } from '@ag-ui/client'
 import type { BaseEvent, RunAgentInput } from '@ag-ui/client'
 import { Observable } from 'rxjs'
 import type { ControlPlaneDb } from '../db/index.js'
@@ -66,6 +66,22 @@ export class TianjiAgent extends AbstractAgent {
           const lastUserMsg = [...input.messages].reverse().find((m) => m.role === 'user')
           const rawContent = lastUserMsg?.content ?? ''
           const goalText = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+
+          // 校验节点存在且在线
+          const node = this.#db.raw
+            .prepare('SELECT status FROM nodes WHERE node_id = ?')
+            .get(this.#nodeId) as { status: string } | undefined
+
+          if (node === undefined) {
+            subscriber.next({ type: EventType.RUN_ERROR, message: 'Node not found' } as BaseEvent)
+            subscriber.complete()
+            return
+          }
+          if (node.status === 'offline') {
+            subscriber.next({ type: EventType.RUN_ERROR, message: 'Node is offline' } as BaseEvent)
+            subscriber.complete()
+            return
+          }
 
           // 创建 command 和 task 记录
           const now = Date.now()
