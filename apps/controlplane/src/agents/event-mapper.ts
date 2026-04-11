@@ -114,6 +114,13 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
           threadId: ctx.taskId,
           runId: ctx.taskId,
         }),
+        ev({
+          type: EventType.STATE_DELTA,
+          delta: [
+            { op: 'replace', path: '/taskStatus', value: 'running' },
+            { op: 'replace', path: '/taskId', value: ctx.taskId },
+          ],
+        }),
       ]
 
     case 'task.completed':
@@ -123,6 +130,10 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
           threadId: ctx.taskId,
           runId: ctx.taskId,
         }),
+        ev({
+          type: EventType.STATE_DELTA,
+          delta: [{ op: 'replace', path: '/taskStatus', value: 'completed' }],
+        }),
       ]
 
     case 'task.failed':
@@ -131,6 +142,10 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
           type: EventType.RUN_ERROR,
           message: payload.error ?? '',
         }),
+        ev({
+          type: EventType.STATE_DELTA,
+          delta: [{ op: 'replace', path: '/taskStatus', value: 'failed' }],
+        }),
       ]
 
     case 'task.cancelled':
@@ -138,6 +153,10 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
         ev({
           type: EventType.RUN_ERROR,
           message: 'Task cancelled',
+        }),
+        ev({
+          type: EventType.STATE_DELTA,
+          delta: [{ op: 'replace', path: '/taskStatus', value: 'cancelled' }],
         }),
       ]
 
@@ -185,12 +204,20 @@ function mapAgentEvent(payload: AgentPayload, ctx: EventMapperContext): BaseEven
       return mapRunStarted(runtimeEvent)
     case 'run.completed':
       return mapRunCompleted(runtimeEvent)
+    case 'run.failed':
+      return mapRunFailed(runtimeEvent)
+    case 'run.cancelled':
+      return mapRunCancelled(runtimeEvent)
     case 'graph.started':
       return mapGraphStarted(runtimeEvent)
+    case 'graph.completed':
+      return mapGraphCompleted(runtimeEvent)
     case 'graph.node.started':
       return mapGraphNodeStarted(runtimeEvent)
     case 'graph.node.completed':
       return mapGraphNodeCompleted(runtimeEvent)
+    case 'graph.node.failed':
+      return mapGraphNodeFailed(runtimeEvent)
     default:
       return []
   }
@@ -262,11 +289,7 @@ function mapToolStarted(e: RuntimeEventPayload): BaseEvent[] {
       type: EventType.TOOL_CALL_START,
       toolCallId,
       toolCallName: invocation.toolName,
-    }),
-    ev({
-      type: EventType.TOOL_CALL_ARGS,
-      toolCallId,
-      delta: JSON.stringify(invocation.args),
+      args: JSON.stringify(invocation.args),
     }),
   ]
 }
@@ -289,10 +312,12 @@ function mapToolCompleted(e: RuntimeEventPayload): BaseEvent[] {
 }
 
 function mapToolFailed(e: RuntimeEventPayload): BaseEvent[] {
+  const error = e.error as { message: string }
   return [
     ev({
       type: EventType.TOOL_CALL_END,
       toolCallId: e.toolCallId as string,
+      error: error.message,
     }),
   ]
 }
@@ -306,7 +331,12 @@ function mapRunStarted(e: RuntimeEventPayload): BaseEvent[] {
     ev({
       type: EventType.STEP_STARTED,
       stepName: `run:${e.runId}`,
-      metadata: { stepKind: 'run', runId: e.runId },
+      metadata: {
+        stepKind: 'run',
+        runId: e.runId,
+        sessionId: e.sessionId,
+        triggerType: e.triggerType,
+      },
     }),
   ]
 }
@@ -326,7 +356,7 @@ function mapGraphStarted(e: RuntimeEventPayload): BaseEvent[] {
     ev({
       type: EventType.STEP_STARTED,
       stepName: `graph:${e.graphId}`,
-      metadata: { stepKind: 'graph', graphId: e.graphId },
+      metadata: { stepKind: 'graph', graphId: e.graphId, graphVersion: e.graphVersion },
     }),
   ]
 }
@@ -355,6 +385,52 @@ function mapGraphNodeCompleted(e: RuntimeEventPayload): BaseEvent[] {
         stepKind: 'graph-node',
         graphId: e.graphId,
         nodeId: e.nodeId,
+        output: e.output,
+      },
+    }),
+  ]
+}
+
+function mapRunFailed(e: RuntimeEventPayload): BaseEvent[] {
+  return [
+    ev({
+      type: EventType.STEP_FINISHED,
+      stepName: `run:${e.runId}`,
+      metadata: { stepKind: 'run', runId: e.runId, error: e.error },
+    }),
+  ]
+}
+
+function mapRunCancelled(e: RuntimeEventPayload): BaseEvent[] {
+  return [
+    ev({
+      type: EventType.STEP_FINISHED,
+      stepName: `run:${e.runId}`,
+      metadata: { stepKind: 'run', runId: e.runId, cancelled: true },
+    }),
+  ]
+}
+
+function mapGraphCompleted(e: RuntimeEventPayload): BaseEvent[] {
+  return [
+    ev({
+      type: EventType.STEP_FINISHED,
+      stepName: `graph:${e.graphId}`,
+      metadata: { stepKind: 'graph', graphId: e.graphId, finalState: e.finalState },
+    }),
+  ]
+}
+
+function mapGraphNodeFailed(e: RuntimeEventPayload): BaseEvent[] {
+  return [
+    ev({
+      type: EventType.STEP_FINISHED,
+      stepName: `graph-node:${e.graphId}:${e.nodeId}`,
+      metadata: {
+        stepKind: 'graph-node',
+        graphId: e.graphId,
+        nodeId: e.nodeId,
+        error: e.error,
       },
     }),
   ]
