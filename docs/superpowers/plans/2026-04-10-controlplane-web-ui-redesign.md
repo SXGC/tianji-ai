@@ -1,6 +1,6 @@
 # Controlplane Web UI 重构实现计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 将 controlplane web UI 从自定义 SSE + React Query 架构重构为 CopilotKit + Zustand + AG-UI 协议架构，保持现有最简功能不变。
 
@@ -51,7 +51,7 @@
 **Files:**
 - Modify: `apps/controlplane/package.json`
 
-- [ ] **Step 1: 安装新依赖，移除旧依赖**
+- [x] **Step 1: 安装新依赖，移除旧依赖**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -59,25 +59,25 @@ pnpm --filter @tianji/controlplane add zustand @copilotkit/react-core @copilotki
 pnpm --filter @tianji/controlplane remove @tanstack/react-query
 ```
 
-- [ ] **Step 2: 验证安装**
+- [x] **Step 2: 验证安装**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane exec -- node -e "require.resolve('@copilotkit/runtime')"`
 
 Expected: 输出路径，无报错。
 
-- [ ] **Step 3: 确认 @ag-ui/client 导出 AbstractAgent**
+- [x] **Step 3: 确认 @ag-ui/client 导出 AbstractAgent**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane exec -- node -e "const m = require('@ag-ui/client'); console.log(typeof m.AbstractAgent)"`
 
 Expected: 输出 `function`。如果不是，需要查找正确的导出名，并在后续 Task 中相应调整。将实际的类名记录下来。
 
-- [ ] **Step 4: 确认 @copilotkit/runtime 导出 createCopilotEndpointHono**
+- [x] **Step 4: 确认 @copilotkit/runtime 导出 createCopilotEndpointHono**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane exec -- node -e "const m = require('@copilotkit/runtime'); console.log(typeof m.createCopilotEndpointHono); if (!m.createCopilotEndpointHono) { const hono = require('@copilotkit/runtime/hono'); console.log('hono subpath:', Object.keys(hono)) }"`
 
 Expected: 输出 `function`。如果不存在，检查是否在子路径 `@copilotkit/runtime/hono` 下导出。将实际的导入路径记录下来。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -104,7 +104,7 @@ git add apps/controlplane/package.json pnpm-lock.yaml
 
 ### Step 2a: 探索 AG-UI 事件类型
 
-- [ ] **Step 1: 查看 @ag-ui/client 的实际导出类型**
+- [x] **Step 1: 查看 @ag-ui/client 的实际导出类型**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -118,7 +118,7 @@ grep -r "BaseEvent" node_modules/@ag-ui/client/dist/ --include="*.d.ts" | head -
 
 ### Step 2b: 写测试
 
-- [ ] **Step 2: 编写 event-mapper 测试**
+- [x] **Step 2: 编写 event-mapper 测试**
 
 创建 `apps/controlplane/src/agents/__tests__/event-mapper.test.ts`。测试用例必须覆盖 spec 8.1 列出的所有测试点：
 
@@ -153,7 +153,7 @@ interface EventMapperContext {
 }
 ```
 
-- [ ] **Step 3: 运行测试确认全部失败**
+- [x] **Step 3: 运行测试确认全部失败**
 
 Run: `cd /workspaces/dev_docker/tianji-ai/apps/controlplane && pnpm vitest run src/agents/__tests__/event-mapper.test.ts`
 
@@ -161,7 +161,7 @@ Expected: 全部 FAIL（函数未实现）。
 
 ### Step 2c: 实现
 
-- [ ] **Step 4: 实现 event-mapper.ts**
+- [x] **Step 4: 实现 event-mapper.ts**
 
 创建 `apps/controlplane/src/agents/event-mapper.ts`。
 
@@ -205,13 +205,13 @@ export function createInitialStateSnapshot(): BaseEvent {
 3. thinking 状态追踪：用 `ctx.inThinking` 标记是否处于 thinking 通道
 4. 返回事件数组
 
-- [ ] **Step 5: 运行测试确认全部通过**
+- [x] **Step 5: 运行测试确认全部通过**
 
 Run: `cd /workspaces/dev_docker/tianji-ai/apps/controlplane && pnpm vitest run src/agents/__tests__/event-mapper.test.ts`
 
 Expected: 全部 PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -236,7 +236,7 @@ git add apps/controlplane/src/agents/event-mapper.ts apps/controlplane/src/agent
 - ui-tasks.ts 中的 task 创建逻辑（`apps/controlplane/src/routes/ui-tasks.ts:42-93`）——需要将其中的 SQL 逻辑提取复用
 - task-stream.ts 中的轮询逻辑（`apps/controlplane/src/routes/task-stream.ts:29-65`）——需要复用其轮询模式
 
-- [ ] **Step 1: 实现 TianjiAgent**
+- [x] **Step 1: 实现 TianjiAgent**
 
 创建 `apps/controlplane/src/agents/tianji-agent.ts`。
 
@@ -257,13 +257,13 @@ git add apps/controlplane/src/agents/event-mapper.ts apps/controlplane/src/agent
 
 注意：不要把 ui-tasks.ts 的 SQL 复制一份。而是把 task 创建逻辑提取为一个 service 函数（如 `src/services/task-service.ts`），让 TianjiAgent 调用它。但这是一个小的重构，如果提取 service 会导致改动过多，可以直接内联 SQL（因为旧的 ui-tasks.ts 要删掉）。
 
-- [ ] **Step 2: 编译检查**
+- [x] **Step 2: 编译检查**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane exec -- tsc --noEmit --project tsconfig.json`
 
 Expected: 无类型错误。如果有，修复。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -289,7 +289,7 @@ git add apps/controlplane/src/agents/tianji-agent.ts
 
 ### Step 4a: 写测试
 
-- [ ] **Step 1: 编写路由集成测试**
+- [x] **Step 1: 编写路由集成测试**
 
 创建 `apps/controlplane/src/routes/__tests__/copilot.test.ts`。
 
@@ -304,7 +304,7 @@ git add apps/controlplane/src/agents/tianji-agent.ts
 
 注意：SSE 响应的完整流测试比较复杂（需要 mock daemon 发送事件），在这个任务中只测 header 校验和节点校验。
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd /workspaces/dev_docker/tianji-ai/apps/controlplane && pnpm vitest run src/routes/__tests__/copilot.test.ts`
 
@@ -312,7 +312,7 @@ Expected: FAIL。
 
 ### Step 4b: 实现
 
-- [ ] **Step 3: 实现 copilot.ts 路由**
+- [x] **Step 3: 实现 copilot.ts 路由**
 
 创建 `apps/controlplane/src/routes/copilot.ts`。
 
@@ -365,13 +365,13 @@ export function createCopilotRoute(db: ControlPlaneDb): Hono {
 
 具体方式以 `@copilotkit/runtime` 实际 API 为准。
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd /workspaces/dev_docker/tianji-ai/apps/controlplane && pnpm vitest run src/routes/__tests__/copilot.test.ts`
 
 Expected: 全部 PASS。
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -389,7 +389,7 @@ git add apps/controlplane/src/routes/copilot.ts apps/controlplane/src/routes/__t
 
 **依赖:** Task 4（copilot 路由）
 
-- [ ] **Step 1: 改造 app.ts**
+- [x] **Step 1: 改造 app.ts**
 
 修改 `apps/controlplane/src/app.ts`：
 
@@ -429,13 +429,13 @@ export function createApp(db: ControlPlaneDb, logger: ObserverLogger): ControlPl
 }
 ```
 
-- [ ] **Step 2: 编译检查**
+- [x] **Step 2: 编译检查**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane exec -- tsc --noEmit --project tsconfig.json`
 
 Expected: 无类型错误。
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -456,7 +456,7 @@ git add apps/controlplane/src/app.ts
 
 **依赖:** Task 5（app.ts 已不再引用这些文件）
 
-- [ ] **Step 1: 删除旧路由文件**
+- [x] **Step 1: 删除旧路由文件**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -466,7 +466,7 @@ rm apps/controlplane/src/routes/ui-sessions.ts
 rm apps/controlplane/src/routes/ui-task-events.ts
 ```
 
-- [ ] **Step 2: 确认无残留引用**
+- [x] **Step 2: 确认无残留引用**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -475,13 +475,13 @@ grep -r "ui-tasks\|task-stream\|ui-sessions\|ui-task-events" apps/controlplane/s
 
 Expected: 无输出（没有残留引用）。如果有，修复。
 
-- [ ] **Step 3: 编译检查**
+- [x] **Step 3: 编译检查**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane exec -- tsc --noEmit --project tsconfig.json`
 
 Expected: 无错误。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -506,7 +506,7 @@ git add -u apps/controlplane/src/routes/
 
 ### Step 7a: 写测试
 
-- [ ] **Step 1: 编写 store 测试**
+- [x] **Step 1: 编写 store 测试**
 
 创建 `apps/controlplane/src/web/stores/__tests__/app-store.test.ts`。
 
@@ -515,7 +515,7 @@ git add -u apps/controlplane/src/routes/
 2. **selectNode 联动更新 agentId** — 调用 `selectNode('node-1', 'agent-1')`，断言 `selectedNodeId` 和 `selectedAgentId` 都被设置
 3. **selectNode 切换节点时 sessionId 清空** — 先 `setSessionId('session-1')`，再 `selectNode('node-2', 'agent-2')`，断言 `sessionId` 变为 `null`
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd /workspaces/dev_docker/tianji-ai/apps/controlplane && pnpm vitest run src/web/stores/__tests__/app-store.test.ts`
 
@@ -523,7 +523,7 @@ Expected: FAIL。
 
 ### Step 7b: 实现
 
-- [ ] **Step 3: 创建 nodes-api.ts**
+- [x] **Step 3: 创建 nodes-api.ts**
 
 创建 `apps/controlplane/src/web/lib/nodes-api.ts`：
 
@@ -551,7 +551,7 @@ export async function fetchNodes(): Promise<readonly UiNode[]> {
 }
 ```
 
-- [ ] **Step 4: 创建 app-store.ts**
+- [x] **Step 4: 创建 app-store.ts**
 
 创建 `apps/controlplane/src/web/stores/app-store.ts`：
 
@@ -598,13 +598,13 @@ export const useAppStore = create<AppState>((set) => ({
 }))
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 Run: `cd /workspaces/dev_docker/tianji-ai/apps/controlplane && pnpm vitest run src/web/stores/__tests__/app-store.test.ts`
 
 Expected: 全部 PASS。
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -633,7 +633,7 @@ git add apps/controlplane/src/web/stores/app-store.ts apps/controlplane/src/web/
 - CopilotKit 的 `<CopilotKit>` provider 和 `<CopilotChat>` 组件 API
 - `@copilotkit/react-ui` 的样式导入方式
 
-- [ ] **Step 1: 创建 workspace-panel.tsx**
+- [x] **Step 1: 创建 workspace-panel.tsx**
 
 创建 `apps/controlplane/src/web/components/workspace-panel.tsx`：
 
@@ -649,7 +649,7 @@ export function WorkspacePanel() {
 }
 ```
 
-- [ ] **Step 2: 改造 node-list.tsx**
+- [x] **Step 2: 改造 node-list.tsx**
 
 修改 `apps/controlplane/src/web/components/node-list.tsx`，将数据源从 props 改为直接读 Zustand store：
 
@@ -692,7 +692,7 @@ export function NodeList() {
 }
 ```
 
-- [ ] **Step 3: 创建 layout.tsx**
+- [x] **Step 3: 创建 layout.tsx**
 
 创建 `apps/controlplane/src/web/components/layout.tsx`：
 
@@ -735,7 +735,7 @@ export function Layout() {
 
 注意：`CopilotChat` 的具体 props API 以 `@copilotkit/react-ui` 实际版本为准。可能需要查看包的类型定义来确认可用 props。
 
-- [ ] **Step 4: 改造 index.tsx**
+- [x] **Step 4: 改造 index.tsx**
 
 重写 `apps/controlplane/src/web/routes/index.tsx`：
 
@@ -787,7 +787,7 @@ export function IndexRouteComponent() {
 }
 ```
 
-- [ ] **Step 5: 改造 main.tsx**
+- [x] **Step 5: 改造 main.tsx**
 
 重写 `apps/controlplane/src/web/main.tsx`：
 
@@ -812,13 +812,13 @@ createRoot(rootElement).render(
 )
 ```
 
-- [ ] **Step 6: 编译检查**
+- [x] **Step 6: 编译检查**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane exec -- tsc --noEmit --project tsconfig.web.json`
 
 Expected: 无错误。如果有 CopilotKit 类型问题，根据实际 API 调整。
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -842,7 +842,7 @@ git add apps/controlplane/src/web/components/layout.tsx apps/controlplane/src/we
 
 **依赖:** Task 8（新前端已不引用这些文件）
 
-- [ ] **Step 1: 删除旧前端文件**
+- [x] **Step 1: 删除旧前端文件**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -855,7 +855,7 @@ rm apps/controlplane/src/web/components/chat-composer.tsx
 rm apps/controlplane/src/web/components/message-list.tsx
 ```
 
-- [ ] **Step 2: 确认无残留引用**
+- [x] **Step 2: 确认无残留引用**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -864,13 +864,13 @@ grep -r "chat-shell\|chat-composer\|message-list\|query-client\|task-stream\|fro
 
 Expected: 无输出。
 
-- [ ] **Step 3: 编译检查**
+- [x] **Step 3: 编译检查**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane exec -- tsc --noEmit --project tsconfig.web.json`
 
 Expected: 无错误。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -890,7 +890,7 @@ git add -u apps/controlplane/src/web/
 
 **必须:** 在开始实现前，调用 `frontend-aesthetics` skill 获取视觉设计指导。
 
-- [ ] **Step 1: 调用 frontend-aesthetics skill**
+- [x] **Step 1: 调用 frontend-aesthetics skill**
 
 使用 `frontend-aesthetics` skill，输入以下上下文：
 - 这是一个开发者工具的 controlplane 界面
@@ -900,7 +900,7 @@ git add -u apps/controlplane/src/web/
 - 字体：Inter 或等宽
 - 响应式：窄屏三栏→两栏→单栏
 
-- [ ] **Step 2: 重写 styles.css**
+- [x] **Step 2: 重写 styles.css**
 
 根据 frontend-aesthetics skill 的指导，完整重写 `apps/controlplane/src/web/styles.css`。
 
@@ -914,13 +914,13 @@ git add -u apps/controlplane/src/web/
 - 响应式 media queries
 - CopilotKit CSS 变量覆盖（如 `--copilot-kit-primary-color` 等，具体变量名以 `@copilotkit/react-ui/styles.css` 中实际定义为准）
 
-- [ ] **Step 3: 构建前端确认无错误**
+- [x] **Step 3: 构建前端确认无错误**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane run build:web`
 
 Expected: 构建成功。
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 cd /workspaces/dev_docker/tianji-ai
@@ -935,30 +935,30 @@ git add apps/controlplane/src/web/styles.css
 
 **依赖:** 所有前述 Task
 
-- [ ] **Step 1: TypeScript 检查（后端 + 前端）**
+- [x] **Step 1: TypeScript 检查（后端 + 前端）**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane run typecheck`
 
 Expected: 无错误。
 
-- [ ] **Step 2: 运行所有测试**
+- [x] **Step 2: 运行所有测试**
 
 Run: `cd /workspaces/dev_docker/tianji-ai/apps/controlplane && pnpm vitest run`
 
 Expected: 全部 PASS。
 
-- [ ] **Step 3: 完整构建**
+- [x] **Step 3: 完整构建**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm --filter @tianji/controlplane run build`
 
 Expected: 构建成功。
 
-- [ ] **Step 4: pnpm check**
+- [x] **Step 4: pnpm check**
 
 Run: `cd /workspaces/dev_docker/tianji-ai && pnpm check`
 
 Expected: 无错误、无警告。如果有，修复并重新运行。
 
-- [ ] **Step 5: 最终 Commit（如有修复）**
+- [x] **Step 5: 最终 Commit（如有修复）**
 
 如果 Step 1-4 中有修复，提交修复。使用 git-commit skill。
