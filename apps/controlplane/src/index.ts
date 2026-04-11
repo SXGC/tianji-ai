@@ -6,3 +6,4 @@
 
 export { createApp } from './app.js'
 export { createDatabase } from './db/index.js'
+export { TianjiAgent } from './agents/tianji-agent.js'
