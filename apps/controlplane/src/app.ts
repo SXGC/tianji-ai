@@ -3,14 +3,11 @@ import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from './db/index.js'
 import { createCommandPollRoute } from './routes/command-poll.js'
+import { createCopilotRoute } from './routes/copilot.js'
 import { createNodeHeartbeatRoute } from './routes/node-heartbeat.js'
 import { createNodeRegisterRoute } from './routes/node-register.js'
 import { createTaskEventsRoute } from './routes/task-events.js'
-import { createTaskStreamRoute } from './routes/task-stream.js'
 import { createUiNodesRoute } from './routes/ui-nodes.js'
-import { createUiSessionsRoute } from './routes/ui-sessions.js'
-import { createUiTaskEventsRoute } from './routes/ui-task-events.js'
-import { createUiTasksRoute } from './routes/ui-tasks.js'
 import { createWebUiRoute } from './routes/web-ui.js'
 import { ObservationMonitor } from './services/observation-monitor.js'
 
@@ -36,10 +33,7 @@ export function createApp(db: ControlPlaneDb, logger: ObserverLogger): ControlPl
   app.route('/', createTaskEventsRoute(db, logger))
 
   app.route('/', createUiNodesRoute(db))
-  app.route('/', createUiTasksRoute(db))
-  app.route('/', createUiSessionsRoute(db))
-  app.route('/', createUiTaskEventsRoute(db))
-  app.route('/', createTaskStreamRoute(db))
+  app.route('/', createCopilotRoute(db))
   app.route('/', createWebUiRoute())
 
   return {
