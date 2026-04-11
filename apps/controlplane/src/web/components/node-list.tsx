@@ -1,25 +1,27 @@
-import type { UiNode } from '../lib/api'
+import { useAppStore } from '../stores/app-store'
 
-interface NodeListProps {
-  readonly nodes: readonly UiNode[]
-  readonly selectedNodeId: string | null
-  readonly onSelect: (nodeId: string, agentId: string | null) => void
-}
+export function NodeList() {
+  const { nodes, selectedNodeId, selectNode } = useAppStore()
 
-export function NodeList(props: NodeListProps) {
   return (
-    <div className="node-list">
-      {props.nodes.map((node) => {
+    <aside className="node-list">
+      <h1 className="brand">Tianji</h1>
+      <p className="subtitle">Controlplane</p>
+      {nodes.map((node) => {
         const firstAgent = node.agents[0]
         const disabled = node.status !== 'online' || firstAgent === undefined
-        const active = node.nodeId === props.selectedNodeId
+        const active = node.nodeId === selectedNodeId
 
         return (
           <button
             key={node.nodeId}
             className={active ? 'node-item active' : 'node-item'}
             disabled={disabled}
-            onClick={() => props.onSelect(node.nodeId, firstAgent?.agentId ?? null)}
+            onClick={() => {
+              if (firstAgent !== undefined) {
+                selectNode(node.nodeId, firstAgent.agentId)
+              }
+            }}
             type="button"
           >
             <strong>{node.hostname}</strong>
@@ -29,6 +31,6 @@ export function NodeList(props: NodeListProps) {
           </button>
         )
       })}
-    </div>
+    </aside>
   )
 }

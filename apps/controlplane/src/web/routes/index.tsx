@@ -1,72 +1,10 @@
-import { useQuery } from '@tanstack/react-query'
+import { CopilotKit } from '@copilotkit/react-core'
 import { createRoute } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect } from 'react'
 
-import { ChatShell } from '../components/chat-shell'
-import type { ChatMessage } from '../components/message-list'
-import { createTask, fetchNodes } from '../lib/api'
-import { streamTask } from '../lib/task-stream'
+import { Layout } from '../components/layout'
+import { useAppStore } from '../stores/app-store'
 import { Route as RootRoute } from './__root'
-
-/**
- * 将流式 delta 追加到指定消息的文本末尾。
- *
- * @param messages - 当前消息列表
- * @param targetId - 目标消息 id
- * @param delta - 本次增量文本
- */
-function appendDeltaToMessage(
-  messages: ChatMessage[],
-  targetId: string,
-  delta: string
-): ChatMessage[] {
-  return messages.map((message) =>
-    message.id === targetId ? { ...message, text: message.text + delta } : message
-  )
-}
-
-/**
- * 若目标消息文本为空，则填充兜底文本。
- *
- * @param messages - 当前消息列表
- * @param targetId - 目标消息 id
- * @param fallbackText - 兜底文本
- */
-function fillEmptyMessage(
-  messages: ChatMessage[],
-  targetId: string,
-  fallbackText: string
-): ChatMessage[] {
-  return messages.map((message) =>
-    message.id === targetId && message.text.trim().length === 0
-      ? { ...message, text: fallbackText }
-      : message
-  )
-}
-
-/**
- * 将目标消息的文本替换为指定内容，保留已有文本作为兜底。
- *
- * @param messages - 当前消息列表
- * @param targetId - 目标消息 id
- * @param text - 替换文本
- * @param fallbackText - 当 text 为空且消息文本也为空时的兜底文本
- */
-function replaceMessageText(
-  messages: ChatMessage[],
-  targetId: string,
-  text: string | null,
-  fallbackText: string
-): ChatMessage[] {
-  return messages.map((message) =>
-    message.id === targetId
-      ? {
-          ...message,
-          text: text ?? (message.text.trim().length > 0 ? message.text : fallbackText),
-        }
-      : message
-  )
-}
 
 export const Route = createRoute({
   getParentRoute: () => RootRoute,
@@ -75,113 +13,30 @@ export const Route = createRoute({
 })
 
 export function IndexRouteComponent() {
-  const { data: nodes = [], error } = useQuery({
-    queryKey: ['ui-nodes'],
-    queryFn: fetchNodes,
-  })
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null)
-  const [sessionId, setSessionId] = useState<string | null>(null)
-  const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [sending, setSending] = useState(false)
-  const streamCleanupRef = useRef<(() => void) | null>(null)
+  const { fetchNodes, selectedNodeId, selectedAgentId, nodes, selectNode } = useAppStore()
 
   useEffect(() => {
-    if (selectedNodeId !== null) {
-      return
-    }
+    void fetchNodes()
+  }, [fetchNodes])
 
-    const firstOnlineNode = nodes.find(
-      (node) => node.status === 'online' && node.agents[0] !== undefined
-    )
-    if (firstOnlineNode !== undefined) {
-      setSelectedNodeId(firstOnlineNode.nodeId)
-      setSelectedAgentId(firstOnlineNode.agents[0]?.agentId ?? null)
-    }
-  }, [nodes, selectedNodeId])
-
+  // Auto-select first online node
   useEffect(() => {
-    return () => {
-      streamCleanupRef.current?.()
+    if (selectedNodeId !== null) return
+    const firstOnline = nodes.find((n) => n.status === 'online' && n.agents[0] !== undefined)
+    if (firstOnline !== undefined) {
+      selectNode(firstOnline.nodeId, firstOnline.agents[0]!.agentId)
     }
-  }, [])
-
-  async function handleSubmit(value: string): Promise<void> {
-    if (selectedNodeId === null || selectedAgentId === null) {
-      setMessages((current) => [
-        ...current,
-        { id: `system-${Date.now()}`, role: 'system', text: '请先选择一个在线节点。' },
-      ])
-      return
-    }
-
-    const assistantId = `assistant-${Date.now()}`
-    setMessages((current) => [
-      ...current,
-      { id: `user-${Date.now()}`, role: 'user', text: value },
-      { id: assistantId, role: 'assistant', text: '' },
-    ])
-    setSending(true)
-
-    try {
-      const createdTask = await createTask({
-        nodeId: selectedNodeId,
-        agentId: selectedAgentId,
-        goal: value,
-        sessionId,
-      })
-
-      streamCleanupRef.current?.()
-      streamCleanupRef.current = streamTask(createdTask.taskId, {
-        onSessionAttached: (nextSessionId) => {
-          setSessionId(nextSessionId)
-        },
-        onMessageDelta: (delta) => {
-          setMessages((current) => appendDeltaToMessage(current, assistantId, delta))
-        },
-        onDone: () => {
-          setSending(false)
-          setMessages((current) =>
-            fillEmptyMessage(current, assistantId, '任务已完成，但当前没有可显示的文本输出。')
-          )
-        },
-        onError: (errorMessage) => {
-          setSending(false)
-          setMessages((current) =>
-            replaceMessageText(current, assistantId, errorMessage, '任务执行失败。')
-          )
-        },
-      })
-    } catch (submitError) {
-      setSending(false)
-      setMessages((current) =>
-        current.map((message) =>
-          message.id === assistantId
-            ? {
-                ...message,
-                text: submitError instanceof Error ? submitError.message : String(submitError),
-              }
-            : message
-        )
-      )
-    }
-  }
+  }, [nodes, selectedNodeId, selectNode])
 
   return (
-    <ChatShell
-      messages={messages}
-      nodes={nodes}
-      onSelectNode={(nodeId, agentId) => {
-        setSelectedNodeId(nodeId)
-        setSelectedAgentId(agentId)
-        setSessionId(null)
+    <CopilotKit
+      runtimeUrl="/api/copilot"
+      headers={{
+        'x-node-id': selectedNodeId ?? '',
+        'x-agent-id': selectedAgentId ?? '',
       }}
-      onSubmit={handleSubmit}
-      selectedAgentId={selectedAgentId}
-      selectedNodeId={selectedNodeId}
-      sending={sending}
-      sessionId={sessionId}
-      statusText={error instanceof Error ? error.message : '选择一个在线节点开始。'}
-    />
+    >
+      <Layout />
+    </CopilotKit>
   )
 }
