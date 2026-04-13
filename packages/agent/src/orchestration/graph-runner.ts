@@ -1,6 +1,7 @@
 import type { ObserverLogger } from '@tianji/observer'
 import type { RunId, RuntimeEvent } from '@tianji/shared'
 import { type CompileOptions, compileOrchestrationGraph } from './graph-compiler.js'
+import { renderOrchestrationGraphMermaid } from './graph-mermaid.js'
 import type { OrchestrationGraph } from './graph-schema.js'
 
 export interface RunOrchestrationGraphOptions {
@@ -13,6 +14,7 @@ export interface RunOrchestrationGraphOptions {
   readonly initialState?: Record<string, unknown>
   readonly observer?: ObserverLogger
   readonly abortSignal?: AbortSignal
+  readonly onMermaid?: (diagram: string) => void
 }
 
 export interface OrchestrationRunResult {
@@ -88,6 +90,10 @@ export function runOrchestrationGraph(
     emitRuntimeEvent: emit,
     abortSignal: options.abortSignal,
   })
+
+  if (options.onMermaid !== undefined) {
+    options.onMermaid(renderOrchestrationGraphMermaid(options.graph))
+  }
 
   emit({
     type: 'graph.started',

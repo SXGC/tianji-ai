@@ -134,6 +134,15 @@ export async function createAgentSession(
           compileOptions: graphOptions.compileOptions,
           observer: options?.logger,
           abortSignal: controller.signal,
+          onMermaid: (diagram) => {
+            void options?.logger?.info(['agent', 'orchestration'], 'graph.mermaid', {
+              sessionId,
+              runId,
+              graphId: graph.id,
+              graphVersion: graph.version,
+              diagram,
+            })
+          },
         })
 
         // GraphEvent 是 RuntimeEvent 的一个成员（详见 @tianji/shared events.ts），

@@ -27,7 +27,6 @@ import {
 type DaemonShutdownReason =
   | { readonly type: 'signal'; readonly signal: NodeJS.Signals }
   | { readonly type: 'uncaughtException'; readonly error: unknown }
-  | { readonly type: 'unhandledRejection'; readonly error: unknown }
 
 function formatErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -207,12 +206,6 @@ export async function runDaemonEntry(): Promise<void> {
         })
       }
 
-      if (reason.type === 'unhandledRejection') {
-        await logError(context.paths, ['daemon'], 'Daemon crashed with unhandled rejection', {
-          error: formatErrorMessage(reason.error),
-        })
-      }
-
       controlPlaneHandle?.connection.stop()
       await server.shutdown()
 
@@ -238,7 +231,9 @@ export async function runDaemonEntry(): Promise<void> {
     void shutdown({ type: 'uncaughtException', error })
   })
   process.on('unhandledRejection', (error) => {
-    void shutdown({ type: 'unhandledRejection', error })
+    void logError(context.paths, ['daemon'], 'Daemon caught unhandled rejection', {
+      error: formatErrorMessage(error),
+    })
   })
 }
 

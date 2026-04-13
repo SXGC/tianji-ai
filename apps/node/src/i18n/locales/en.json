@@ -50,6 +50,7 @@
   "daemon.register.confirm_overwrite": "Stored controlplane config differs from the provided register URL. Overwrite?",
   "daemon.register.saved": "Controlplane configuration saved.",
   "daemon.register.declined": "Overwrite declined. Exiting without starting daemon.",
+  "daemon.restart.no_config": "No controlplane configuration found. Run `tianji daemon start --register <url>` first",
   "daemon.restart.found_running": "Found running daemon (pid={pid}), stopping...",
   "daemon.restart.shutdown_sent": "Shutdown request sent to daemon (pid={pid})",
   "daemon.restart.shutdown_failed": "Shutdown request failed, escalating to force stop",

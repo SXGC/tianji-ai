@@ -339,6 +339,9 @@ describe('daemon restart', () => {
       const result = await runCommand(['daemon', 'restart', '--fg'], {
         getUserConfigPaths: () => paths,
         runDaemonEntry,
+        loadConfig: async () => ({
+          controlPlane: { baseUrl: 'http://localhost:3000', enrollmentToken: 'tok', nodeId: 'n1' },
+        }),
       })
 
       expect(result.exitCode).toBe(0)
@@ -358,6 +361,13 @@ describe('daemon restart', () => {
         const result = await runCommand(['daemon', 'restart', '--fg'], {
           getUserConfigPaths: () => first.paths,
           runDaemonEntry: replacement,
+          loadConfig: async () => ({
+            controlPlane: {
+              baseUrl: 'http://localhost:3000',
+              enrollmentToken: 'tok',
+              nodeId: 'n1',
+            },
+          }),
         })
 
         expect(result.exitCode).toBe(0)

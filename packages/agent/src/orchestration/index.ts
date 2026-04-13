@@ -10,6 +10,10 @@ export {
   type OrchestrationRunResult,
   type RunOrchestrationGraphOptions,
 } from './graph-runner.js'
+export {
+  renderOrchestrationGraphMermaid,
+  type RenderOrchestrationGraphMermaidOptions,
+} from './graph-mermaid.js'
 export { validateOrchestrationGraph, type ValidationResult } from './graph-validator.js'
 export { compileStateChannels } from './state-channels.js'
 export {

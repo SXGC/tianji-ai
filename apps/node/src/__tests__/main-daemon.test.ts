@@ -216,10 +216,44 @@ describe('runCli daemon commands', () => {
       const exitCode = await runCli(['daemon', 'restart', '--fg'], {
         getUserConfigPaths: () => paths,
         runDaemonEntry,
+        loadConfig: async () => ({
+          controlPlane: {
+            baseUrl: 'http://localhost:3000',
+            enrollmentToken: 'tok',
+            nodeId: 'n1',
+          },
+        }),
       })
 
       expect(exitCode).toBe(0)
       expect(runDaemonEntry).toHaveBeenCalledOnce()
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('daemon restart fails when no controlplane config is stored', async () => {
+    const runDaemonEntry = vi.fn(async () => undefined)
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      const stderrSpy = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+      const exitCode = await runCli(['daemon', 'restart', '--fg'], {
+        getUserConfigPaths: () => paths,
+        runDaemonEntry,
+        loadConfig: async () => ({}),
+      })
+
+      expect(exitCode).toBe(1)
+      expect(runDaemonEntry).not.toHaveBeenCalled()
+      expect(
+        stderrSpy.mock.calls.some(
+          ([chunk]) => typeof chunk === 'string' && chunk.includes('controlplane')
+        )
+      ).toBe(true)
+
+      stderrSpy.mockRestore()
     } finally {
       await cleanup()
     }
@@ -281,6 +315,13 @@ describe('runCli daemon commands', () => {
       const exitCode = await isolatedRunCli(['daemon', 'restart', '--fg'], {
         getUserConfigPaths: () => paths,
         runDaemonEntry,
+        loadConfig: async () => ({
+          controlPlane: {
+            baseUrl: 'http://localhost:3000',
+            enrollmentToken: 'tok',
+            nodeId: 'n1',
+          },
+        }),
       })
 
       expect(exitCode).toBe(1)
@@ -352,6 +393,13 @@ describe('runCli daemon commands', () => {
       const exitCode = await isolatedRunCli(['daemon', 'restart', '--fg'], {
         getUserConfigPaths: () => paths,
         runDaemonEntry,
+        loadConfig: async () => ({
+          controlPlane: {
+            baseUrl: 'http://localhost:3000',
+            enrollmentToken: 'tok',
+            nodeId: 'n1',
+          },
+        }),
       })
 
       expect(exitCode).toBe(1)
@@ -416,6 +464,13 @@ describe('runCli daemon commands', () => {
       const exitCode = await isolatedRunCli(['daemon', 'restart', '--fg'], {
         getUserConfigPaths: () => paths,
         runDaemonEntry,
+        loadConfig: async () => ({
+          controlPlane: {
+            baseUrl: 'http://localhost:3000',
+            enrollmentToken: 'tok',
+            nodeId: 'n1',
+          },
+        }),
       })
 
       expect(exitCode).toBe(0)

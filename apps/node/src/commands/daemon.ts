@@ -581,11 +581,15 @@ const daemonRestartCommand: CommandDefinition = {
       foreground: options.fg === true,
     })
 
-    if (storedControlPlaneConfig) {
-      process.stdout.write(
-        `Control plane: ${storedControlPlaneConfig.baseUrl}, nodeId=${storedControlPlaneConfig.nodeId}\n`
-      )
+    if (!storedControlPlaneConfig) {
+      await logError(paths, DAEMON_RESTART_SCOPE, 'Missing controlplane config for restart')
+      process.stderr.write(`${i18n.t('daemon.restart.no_config')}\n`)
+      return 1
     }
+
+    process.stdout.write(
+      `Control plane: ${storedControlPlaneConfig.baseUrl}, nodeId=${storedControlPlaneConfig.nodeId}\n`
+    )
 
     const oldPid = await readDaemonPid(paths)
     const existingClient = await tryCreateDaemonClient(paths)

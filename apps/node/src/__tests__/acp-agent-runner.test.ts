@@ -249,27 +249,49 @@ describe('AgentRunner', () => {
       expect(unsubscribe).toHaveBeenCalled()
     })
 
-    it('unsubscribes even when prompt rejects', async () => {
+    it('propagates prompt rejection as a thrown error and logs it', async () => {
       const unsubscribe = vi.fn()
       mockOnSessionUpdate.mockReturnValue(unsubscribe)
-      mockPrompt.mockRejectedValue(new Error('prompt failed'))
+      const upstreamError = new Error(
+        '500 empty_stream: upstream stream closed before first payload'
+      )
+      mockPrompt.mockRejectedValue(upstreamError)
+
+      const logError = vi.fn().mockResolvedValue(undefined)
+      const logger = {
+        logInfo: vi.fn().mockResolvedValue(undefined),
+        logDebug: vi.fn().mockResolvedValue(undefined),
+        logError,
+        logWarn: vi.fn().mockResolvedValue(undefined),
+      }
 
       const AgentRunner = await importRunner()
       const runner = new AgentRunner({
         agentId: 'test-agent',
         command: 'tianji-agent',
+        logger: logger as unknown as ConstructorParameters<typeof AgentRunner>[0]['logger'],
       })
 
       await runner.connect()
 
-      const events = []
-      for await (const event of runner.query('hello')) {
-        events.push(event)
+      const consume = async () => {
+        const events = []
+        for await (const event of runner.query('hello')) {
+          events.push(event)
+        }
+        return events
       }
 
-      // prompt rejection 被静默处理（设置 promptDone=true），仍应产生 run.completed
-      expect(events[events.length - 1]!.type).toBe('run.completed')
+      await expect(consume()).rejects.toThrow(upstreamError)
       expect(unsubscribe).toHaveBeenCalled()
+      expect(logError).toHaveBeenCalledWith(
+        ['acp', 'runner'],
+        'Agent prompt failed',
+        expect.objectContaining({
+          agentId: 'test-agent',
+          errorMessage: upstreamError.message,
+        })
+      )
     })
   })
 

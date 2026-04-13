@@ -108,12 +108,14 @@ export class AgentRunner {
       })
 
       let promptDone = false
+      let promptError: unknown = null
       void promptResult.then(
         () => {
           promptDone = true
         },
-        () => {
+        (error: unknown) => {
           promptDone = true
+          promptError = error
         }
       )
 
@@ -126,6 +128,18 @@ export class AgentRunner {
         } else {
           await new Promise((resolve) => setTimeout(resolve, 10))
         }
+      }
+
+      if (promptError !== null) {
+        const errorMessage =
+          promptError instanceof Error ? promptError.message : String(promptError)
+        const stack = promptError instanceof Error ? promptError.stack : undefined
+        await this.#config.logger?.logError(['acp', 'runner'], 'Agent prompt failed', {
+          agentId: this.#config.agentId,
+          errorMessage,
+          stack,
+        })
+        throw promptError
       }
 
       await this.#config.logger?.logInfo(['acp', 'runner'], 'Agent chat completed', {

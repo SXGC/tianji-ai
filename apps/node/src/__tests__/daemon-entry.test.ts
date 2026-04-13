@@ -300,7 +300,7 @@ describe('runDaemonEntry', () => {
     stdoutSpy.mockRestore()
   })
 
-  it('logs error when daemon catches unhandledRejection and exits non-zero', async () => {
+  it('logs error when daemon catches unhandledRejection and keeps running', async () => {
     const processOnSpy = vi.spyOn(process, 'on')
     const processExitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
@@ -316,22 +316,22 @@ describe('runDaemonEntry', () => {
     unhandledRejectionHandler?.('rejected')
 
     await waitFor(() => {
-      expect(shutdownMock).toHaveBeenCalledOnce()
+      expect(logErrorMock).toHaveBeenCalledWith(
+        paths,
+        ['daemon'],
+        'Daemon caught unhandled rejection',
+        {
+          error: 'rejected',
+        }
+      )
     })
 
-    expect(logErrorMock).toHaveBeenCalledWith(
-      paths,
-      ['daemon'],
-      'Daemon crashed with unhandled rejection',
-      {
-        error: 'rejected',
-      }
-    )
-    expect(logInfoMock).toHaveBeenCalledWith(paths, ['daemon'], 'Daemon exiting', {
+    expect(shutdownMock).not.toHaveBeenCalled()
+    expect(logInfoMock).not.toHaveBeenCalledWith(paths, ['daemon'], 'Daemon exiting', {
       reason: 'unhandledRejection',
       signal: undefined,
     })
-    expect(processExitSpy).toHaveBeenCalledWith(1)
+    expect(processExitSpy).not.toHaveBeenCalled()
 
     stdoutSpy.mockRestore()
   })

@@ -63,10 +63,15 @@ describe('orchestration e2e', () => {
       ],
     }
 
+    const mermaidDiagrams: string[] = []
+
     const result = runOrchestrationGraph({
       graph,
       runId: 'run_e2e_1' as RunId,
       compileOptions: { agentExecutorFactory: factory },
+      onMermaid: (diagram) => {
+        mermaidDiagrams.push(diagram)
+      },
     })
 
     const collectedEvents: RuntimeEvent[] = []
@@ -78,6 +83,11 @@ describe('orchestration e2e', () => {
 
     const finalState = await result.finished
     await collectionPromise
+
+    expect(mermaidDiagrams).toHaveLength(1)
+    expect(mermaidDiagrams[0]).toContain('flowchart TD')
+    expect(mermaidDiagrams[0]).toContain('planner[agent: planner]')
+    expect(mermaidDiagrams[0]).toContain('planner --> coder')
 
     expect(finalState.plan).toContain('plan')
     expect(finalState.code).toContain('console.log')

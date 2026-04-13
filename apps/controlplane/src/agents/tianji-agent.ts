@@ -81,8 +81,7 @@ export class TianjiAgent extends AbstractAgent {
 
           // 从最后一条用户消息中提取 goal
           const lastUserMsg = [...input.messages].reverse().find((m) => m.role === 'user')
-          const rawContent = lastUserMsg?.content ?? ''
-          const goalText = typeof rawContent === 'string' ? rawContent : JSON.stringify(rawContent)
+          const goalText = extractUserMessageText(lastUserMsg?.content)
 
           // 校验节点存在且在线
           const node = this.#db.raw
@@ -220,4 +219,29 @@ export class TianjiAgent extends AbstractAgent {
   clone(): TianjiAgent {
     return new TianjiAgent(this.#db, this.#nodeId, this.#cpAgentId)
   }
+}
+
+function extractUserMessageText(content: unknown): string {
+  if (typeof content === 'string') {
+    return content
+  }
+
+  if (!Array.isArray(content)) {
+    return ''
+  }
+
+  const textParts = content
+    .filter((part): part is { type: 'text'; text: string } => {
+      return (
+        typeof part === 'object' &&
+        part !== null &&
+        'type' in part &&
+        part.type === 'text' &&
+        'text' in part &&
+        typeof part.text === 'string'
+      )
+    })
+    .map((part) => part.text)
+
+  return textParts.join('\n')
 }

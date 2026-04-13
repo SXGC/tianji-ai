@@ -1,6 +1,7 @@
 import type { SessionRuntime } from '@tianji/runtime'
 import * as runtimeModule from '@tianji/runtime'
 import { FileSnapshotStore } from '@tianji/runtime'
+import type { ObserverLogger } from '@tianji/runtime'
 import type { GraphEvent } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -172,6 +173,21 @@ describe('agent session queryWithGraph', () => {
     return { session, runtime, createSessionRuntimeSpy }
   }
 
+  function createLoggerSpy(): ObserverLogger {
+    return {
+      log: vi.fn(async () => undefined),
+      trace: vi.fn(async () => undefined),
+      debug: vi.fn(async () => undefined),
+      info: vi.fn(async () => undefined),
+      warn: vi.fn(async () => undefined),
+      error: vi.fn(async () => undefined),
+      fatal: vi.fn(async () => undefined),
+      child: vi.fn(function (this: ObserverLogger) {
+        return this
+      }),
+    }
+  }
+
   it('正常路径：转发 graph.started / 节点事件 / graph.completed', async () => {
     const { session, createSessionRuntimeSpy } = await prepareSession()
 
@@ -220,6 +236,37 @@ describe('agent session queryWithGraph', () => {
     // 最终状态里 stub 工厂写入的 result 字段应该被保留
     expect((completed as { finalState: Record<string, unknown> }).finalState.result).toBe(
       'ran-worker'
+    )
+
+    createSessionRuntimeSpy.mockRestore()
+  })
+
+  it('会把 orchestration mermaid 写入 logger', async () => {
+    const runtime = createStubRuntime()
+    const createSessionRuntimeSpy = vi
+      .spyOn(runtimeModule, 'createSessionRuntime')
+      .mockReturnValue(runtime)
+    const logger = createLoggerSpy()
+    const session = await createAgentSession(createFakeContext(), { logger })
+
+    const happyPathFactory: AgentExecutorFactory = () => async () => ({ result: 'ran-worker' })
+
+    for await (const _event of session.queryWithGraph(buildSingleNodeGraph(), {
+      compileOptions: { agentExecutorFactory: happyPathFactory },
+    })) {
+      // 消费完整事件流，等待执行结束
+    }
+
+    expect(logger.info).toHaveBeenCalledWith(
+      ['agent', 'orchestration'],
+      'graph.mermaid',
+      expect.objectContaining({
+        sessionId: expect.stringMatching(/^session_/),
+        runId: expect.stringMatching(/^run_graph_/),
+        graphId: 'test-graph',
+        graphVersion: 1,
+        diagram: expect.stringContaining('flowchart TD'),
+      })
     )
 
     createSessionRuntimeSpy.mockRestore()

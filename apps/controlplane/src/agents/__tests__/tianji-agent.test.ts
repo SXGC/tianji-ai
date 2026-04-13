@@ -191,4 +191,39 @@ describe('TianjiAgent', () => {
     expect(runEvents[0]).toMatchObject({ type: 'RUN_STARTED' })
     expect(runEvents[1]).toMatchObject({ type: 'RUN_ERROR', message: 'Node is offline' })
   })
+
+  it('结构化用户消息会被提取为发送给节点的纯文本 goal', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+
+    await firstValueFrom(
+      agent.run({
+        messages: [
+          {
+            id: 'msg-1',
+            role: 'user',
+            content: [
+              { type: 'text', text: '第一段输入' },
+              { type: 'text', text: '第二段输入' },
+            ],
+          },
+        ],
+        tools: [],
+        context: [],
+        forwardedProps: {},
+        state: {},
+      })
+    )
+
+    const commandRow = db.raw
+      .prepare('SELECT payload FROM commands ORDER BY created_at DESC LIMIT 1')
+      .get() as { payload: string } | undefined
+
+    expect(commandRow).toBeDefined()
+    expect(JSON.parse(commandRow!.payload)).toMatchObject({
+      goal: '第一段输入\n第二段输入',
+    })
+  })
 })
