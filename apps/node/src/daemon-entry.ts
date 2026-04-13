@@ -10,6 +10,7 @@ import {
   createDeepagentsExecutorFactory,
   loadDefaultOrchestrationGraph,
 } from '@tianji/agent'
+import { resolveAgentModel } from '@tianji/runtime'
 
 import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
@@ -52,9 +53,21 @@ export async function runDaemonEntry(): Promise<void> {
     agentConfigs: context.config.agents?.items ?? {},
   })
   const executorFactory = createDeepagentsExecutorFactory({
-    resolveModel: (modelRef) => modelRef,
+    // 走 runtime 的 resolveAgentModel：当 provider 配置了自定义 baseUrl 时，
+    // 预先实例化 ChatOpenAI，避免 deepagents 内部的 initChatModel 无法识别 provider。
+    resolveModel: (modelRef) => resolveAgentModel(modelRef, context.config.providers),
     observer: logger.observerLogger,
   })
+  await logDebug(
+    context.paths,
+    ['daemon', 'controlplane'],
+    'Prepared native runtime dependencies',
+    {
+      hasDefaultGraph: defaultGraph !== undefined,
+      defaultGraphId: defaultGraph.id,
+      hasExecutorFactory: executorFactory !== undefined,
+    }
+  )
   let controlPlaneStatus: ControlPlaneStatusSnapshot = DEFAULT_CONTROL_PLANE_STATUS
 
   const updateControlPlaneStatus = (
@@ -103,6 +116,8 @@ export async function runDaemonEntry(): Promise<void> {
       ...controlPlaneConfig,
       agentConfigs: context.config.agents?.items ?? {},
       nativeAgentContext: context,
+      defaultGraph,
+      executorFactory,
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
       logger,
       observerLogger: logger.observerLogger,
@@ -232,5 +247,25 @@ const _isMain =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
 
 if (_isMain) {
-  await runDaemonEntry()
+  try {
+    await runDaemonEntry()
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const stack = error instanceof Error ? error.stack : undefined
+    process.stderr.write(`[daemon] Fatal startup error: ${message}\n`)
+    if (stack) {
+      process.stderr.write(`${stack}\n`)
+    }
+    try {
+      const { getUserConfigPaths } = await import('./config.js')
+      const paths = getUserConfigPaths()
+      await logError(paths, ['daemon'], 'Fatal startup error', {
+        error: message,
+        stack,
+      })
+    } catch {
+      // 日志写入失败时不再尝试
+    }
+    process.exit(1)
+  }
 }

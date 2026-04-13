@@ -9,6 +9,24 @@ import type { AgentInfo, NodeExecutionState, NodeId, PollCommandResponse } from 
 import type { RuntimeLogger } from '../logger.js'
 import { ControlPlaneAuthError, ControlPlaneClient } from './client.js'
 
+function toErrorLogData(error: unknown): Record<string, unknown> {
+  const message = error instanceof Error ? error.message : String(error)
+
+  if (!(error instanceof Error)) {
+    return { error: message }
+  }
+
+  const cause = error.cause
+  const errorCause =
+    cause instanceof Error ? cause.message : cause === undefined ? undefined : String(cause)
+
+  return {
+    error: message,
+    errorName: error.name,
+    errorCause,
+  }
+}
+
 export interface ControlPlaneConnectionConfig {
   readonly baseUrl: string
   readonly nodeId: NodeId
@@ -64,7 +82,7 @@ export class ControlPlaneConnection {
     await this.#register()
     this.#config.onConnectionStateChange?.({ status: 'connected' })
     this.#startHeartbeat()
-    void this.#pollLoop()
+    this.#runInBackground(() => this.#pollLoop())
   }
 
   stop(): void {
@@ -92,8 +110,23 @@ export class ControlPlaneConnection {
   #startHeartbeat(): void {
     const interval = this.#config.heartbeatIntervalMs ?? 30000
     this.#heartbeatTimer = setInterval(() => {
-      void this.#heartbeatOnce()
+      this.#runInBackground(() => this.#heartbeatOnce())
     }, interval)
+  }
+
+  /**
+   * 启动后台异步任务，并吞掉最外层 rejection，避免 daemon 因未处理拒绝退出。
+   */
+  #runInBackground(task: () => Promise<void>): void {
+    void task().catch(async (error) => {
+      try {
+        await this.#config.logger?.logError(this.#scope, 'Control plane background task failed', {
+          ...toErrorLogData(error),
+        })
+      } catch {
+        // 后台兜底日志也失败时，直接吞掉，避免再次触发 unhandledRejection。
+      }
+    })
   }
 
   async #heartbeatOnce(): Promise<void> {
@@ -110,14 +143,17 @@ export class ControlPlaneConnection {
         executionState: this.#executionState,
       })
     } catch (error) {
+      const errorData = toErrorLogData(error)
+
       this.#config.onConnectionStateChange?.({
         status: 'heartbeat_failed',
-        error: error instanceof Error ? error.message : String(error),
+        error: String(errorData.error),
       })
       await this.#config.logger?.logError(this.#scope, 'Control plane heartbeat failed', {
         nodeId: this.#config.nodeId,
         executionState: this.#executionState,
-        error: error instanceof Error ? error.message : String(error),
+        baseUrl: this.#config.baseUrl,
+        ...errorData,
       })
       if (error instanceof ControlPlaneAuthError) {
         await this.#reRegister()

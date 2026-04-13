@@ -95,4 +95,36 @@ describe('POST /api/copilot', () => {
     const body = (await response.json()) as { error: string }
     expect(body.error).toContain('offline')
   })
+
+  it('在线节点聊天请求不会因 this.run 丢失而报错', async () => {
+    const { app } = setup()
+    insertNode('node-1', 'online')
+
+    const response = await app.request('/api/copilot', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-node-id': 'node-1',
+        'x-agent-id': 'agent-1',
+      },
+      body: JSON.stringify({
+        method: 'agent/run',
+        params: {
+          agentId: 'default',
+        },
+        body: {
+          threadId: 'thread-1',
+          runId: 'run-1',
+          messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
+          tools: [],
+          context: [],
+          forwardedProps: {},
+          state: {},
+        },
+      }),
+    })
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/event-stream')
+  })
 })

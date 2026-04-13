@@ -62,6 +62,23 @@ export class TianjiAgent extends AbstractAgent {
 
       const execute = async (): Promise<void> => {
         try {
+          const runId = input.runId ?? randomUUID()
+          const threadId = input.threadId ?? this.#nodeId
+          let emittedRunStarted = false
+
+          const emitRunStarted = () => {
+            if (emittedRunStarted) {
+              return
+            }
+
+            subscriber.next({ type: EventType.RUN_STARTED, threadId, runId } as BaseEvent)
+            emittedRunStarted = true
+          }
+
+          emitRunStarted()
+          // AG-UI 运行流要求首个事件必须是 RUN_STARTED，快照放在其后。
+          subscriber.next(createInitialStateSnapshot())
+
           // 从最后一条用户消息中提取 goal
           const lastUserMsg = [...input.messages].reverse().find((m) => m.role === 'user')
           const rawContent = lastUserMsg?.content ?? ''
@@ -106,14 +123,12 @@ export class TianjiAgent extends AbstractAgent {
             )
             .run(taskId, commandId, this.#nodeId, this.#cpAgentId, goalText, 'pending', now, now)
 
-          // 推送初始状态快照
-          subscriber.next(createInitialStateSnapshot())
-
           // 轮询事件流
           const eventStore = new EventStore(this.#db)
           const ctx: EventMapperContext = { inThinking: false, taskId }
           let lastSequence = 0
           let hasTextMessage = false
+          let sawTerminalEvent = false
 
           while (!aborted) {
             const events = eventStore.getEvents(taskId, lastSequence, 1000)
@@ -121,8 +136,14 @@ export class TianjiAgent extends AbstractAgent {
             for (const event of events) {
               const agUiEvents = mapTaskEventToAgUiEvents(event, ctx)
               for (const e of agUiEvents) {
+                if (e.type === EventType.RUN_STARTED) {
+                  emittedRunStarted = true
+                }
                 subscriber.next(e)
                 if (e.type === 'TEXT_MESSAGE_START') hasTextMessage = true
+                if (e.type === EventType.RUN_FINISHED || e.type === EventType.RUN_ERROR) {
+                  sawTerminalEvent = true
+                }
               }
               lastSequence = event.sequence
             }
@@ -139,8 +160,14 @@ export class TianjiAgent extends AbstractAgent {
               for (const event of remaining) {
                 const agUiEvents = mapTaskEventToAgUiEvents(event, ctx)
                 for (const e of agUiEvents) {
+                  if (e.type === EventType.RUN_STARTED) {
+                    emittedRunStarted = true
+                  }
                   subscriber.next(e)
                   if (e.type === 'TEXT_MESSAGE_START') hasTextMessage = true
+                  if (e.type === EventType.RUN_FINISHED || e.type === EventType.RUN_ERROR) {
+                    sawTerminalEvent = true
+                  }
                 }
                 lastSequence = event.sequence
               }
@@ -159,6 +186,14 @@ export class TianjiAgent extends AbstractAgent {
                   delta: '任务已完成',
                 } as BaseEvent)
                 subscriber.next({ type: 'TEXT_MESSAGE_END', messageId: fbMsgId } as BaseEvent)
+              }
+
+              if (!sawTerminalEvent) {
+                subscriber.next(
+                  status === 'completed'
+                    ? ({ type: EventType.RUN_FINISHED, threadId, runId } as BaseEvent)
+                    : ({ type: EventType.RUN_ERROR, message: `Task ${status}` } as BaseEvent)
+                )
               }
 
               subscriber.complete()
@@ -180,5 +215,9 @@ export class TianjiAgent extends AbstractAgent {
         aborted = true
       }
     })
+  }
+
+  clone(): TianjiAgent {
+    return new TianjiAgent(this.#db, this.#nodeId, this.#cpAgentId)
   }
 }

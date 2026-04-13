@@ -179,6 +179,8 @@ describe('runDaemonEntry', () => {
     expect(runtimeConfig).toEqual(
       expect.objectContaining({
         nativeAgentContext: expect.objectContaining({ paths, config: expect.any(Object) }),
+        defaultGraph: expect.objectContaining({ id: 'test', name: 'test' }),
+        executorFactory: expect.any(Function),
       })
     )
 
@@ -203,6 +205,30 @@ describe('runDaemonEntry', () => {
       baseUrl: 'http://127.0.0.1:3000',
       lastError: 'fetch failed',
     })
+
+    stdoutSpy.mockRestore()
+  })
+
+  it('passes native runtime dependencies into controlplane runtime', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    const { runDaemonEntry } = await import('../daemon-entry.js')
+    const controlPlaneRuntimeModule = await import('../node-runtime/controlplane-runtime.js')
+    await runDaemonEntry()
+
+    const runtimeConfig = vi
+      .mocked(controlPlaneRuntimeModule.createControlPlaneRuntime)
+      .mock.calls.at(0)
+      ?.at(0) as Record<string, unknown> | undefined
+
+    expect(runtimeConfig).toBeDefined()
+    expect(runtimeConfig?.nativeAgentContext).toEqual(
+      expect.objectContaining({ paths, config: expect.any(Object) })
+    )
+    expect(runtimeConfig?.defaultGraph).toEqual(
+      expect.objectContaining({ id: 'test', name: 'test', nodes: [], edges: [] })
+    )
+    expect(runtimeConfig?.executorFactory).toBeTypeOf('function')
 
     stdoutSpy.mockRestore()
   })

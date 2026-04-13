@@ -205,6 +205,12 @@ async function waitForDaemonReady(
   while (Date.now() < deadline) {
     const port = await readDaemonPort(paths)
     if (port !== undefined) {
+      const pid = await readDaemonPid(paths)
+      if (pid !== undefined && !isProcessAlive(pid)) {
+        await cleanupStaleDaemonFiles(paths)
+        throw new Error(`Daemon process exited before becoming ready (pid=${pid})`)
+      }
+
       const client = await tryCreateDaemonClient(paths)
       if (client === undefined) {
         await new Promise((resolve) => setTimeout(resolve, 200))
@@ -212,7 +218,6 @@ async function waitForDaemonReady(
       }
       try {
         await client.ping()
-        const pid = await readDaemonPid(paths)
         return { pid: pid ?? 0, port }
       } catch {
         // Daemon not accepting connections yet.

@@ -118,6 +118,5 @@ pnpm sonar
 ### sonar
 
 环境变量中已经有 SONAR_HOST_URL 和 SONAR_TOKEN
-- 用户要求直接开始执行时，不要因为 todo 计划再等待确认，直接推进。
 
 Sonar 的 api/ce/task 可以查询 Compute Engine 任务；质量门可以用 api/qualitygates/project_status 查；问题列表可以用 api/issues/search 查；指标可以走 api/measures

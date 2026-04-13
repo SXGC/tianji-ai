@@ -48,7 +48,7 @@ export function createCopilotRoute(db: ControlPlaneDb): Hono {
 
     const agent = new TianjiAgent(db, nodeId, agentId)
     const runtime = new CopilotRuntime({
-      agents: { tianji: agent },
+      agents: { default: agent },
     })
 
     const handler = copilotRuntimeNodeHttpEndpoint({

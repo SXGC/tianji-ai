@@ -76,6 +76,15 @@ function createTestConfig(
   }
 }
 
+function createLoggerDouble() {
+  return {
+    logDebug: vi.fn(async () => undefined),
+    logInfo: vi.fn(async () => undefined),
+    logWarn: vi.fn(async () => undefined),
+    logError: vi.fn(async () => undefined),
+  }
+}
+
 function createTestCommand(): Command {
   return {
     commandId: 'cmd-001' as never,
@@ -372,6 +381,7 @@ describe('createRunner routing', () => {
   })
 
   it('routes native agents to InProcessAgentRunner when nativeAgentContext exists', async () => {
+    const logger = createLoggerDouble()
     const runtime = createControlPlaneRuntime(
       createTestConfig({
         agentConfigs: {
@@ -386,6 +396,7 @@ describe('createRunner routing', () => {
         },
         defaultGraph: {} as never,
         executorFactory: {} as never,
+        logger,
       }),
       {
         createConnection: () => createConnectionDouble(),
@@ -400,10 +411,23 @@ describe('createRunner routing', () => {
         nativeAgentContext: expect.any(Object),
       })
     )
+    expect(logger.logDebug).toHaveBeenCalledWith(
+      ['daemon', 'task'],
+      'Resolved task runner type',
+      expect.objectContaining({
+        agentId: 'default',
+        resolvedAgentType: 'native',
+        hasNativeAgentContext: true,
+        hasDefaultGraph: true,
+        hasExecutorFactory: true,
+        runnerType: 'inprocess',
+      })
+    )
     expect(agentRunnerMock).not.toHaveBeenCalled()
   })
 
   it('routes external agents to AgentRunner', async () => {
+    const logger = createLoggerDouble()
     const runtime = createControlPlaneRuntime(
       createTestConfig({
         agentConfigs: {
@@ -416,6 +440,7 @@ describe('createRunner routing', () => {
           resolvedEnvVars: [],
           snapshotStore: {} as never,
         },
+        logger,
       }),
       {
         createConnection: () => createConnectionDouble(),
@@ -429,6 +454,18 @@ describe('createRunner routing', () => {
         agentId: 'default',
         command: 'codex',
         args: ['--acp'],
+      })
+    )
+    expect(logger.logDebug).toHaveBeenCalledWith(
+      ['daemon', 'task'],
+      'Resolved task runner type',
+      expect.objectContaining({
+        agentId: 'default',
+        resolvedAgentType: 'external',
+        hasNativeAgentContext: true,
+        hasDefaultGraph: false,
+        hasExecutorFactory: false,
+        runnerType: 'acp',
       })
     )
     expect(inProcessRunnerMock).not.toHaveBeenCalled()

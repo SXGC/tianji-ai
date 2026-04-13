@@ -11,6 +11,7 @@ import { Readable, Writable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
 import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk'
 
+import { resolveAgentModel } from '@tianji/runtime'
 import type { TianjiAgentConfig } from '@tianji/shared'
 
 import { TianjiAcpAgent } from './acp/agent-bridge.js'
@@ -38,7 +39,9 @@ export async function runAcpAgent(): Promise<void> {
   const defaultGraph = await loadDefaultOrchestrationGraph({ configDir, agentConfigs })
 
   const executorFactory = createDeepagentsExecutorFactory({
-    resolveModel: (modelRef) => modelRef,
+    // 走 runtime 的 resolveAgentModel：当 provider 配置了自定义 baseUrl 时，
+    // 预先实例化 ChatOpenAI，避免 deepagents 内部的 initChatModel 无法识别 provider。
+    resolveModel: (modelRef) => resolveAgentModel(modelRef, context.config.providers),
   })
 
   const output = Writable.toWeb(process.stdout) as WritableStream<Uint8Array>

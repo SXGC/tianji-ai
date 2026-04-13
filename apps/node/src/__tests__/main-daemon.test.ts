@@ -659,4 +659,93 @@ describe('runCli daemon commands', () => {
       await cleanup()
     }
   })
+
+  it('reports daemon crash reason instead of timeout when background start dies early', async () => {
+    const { paths, cleanup } = await createTempCliPaths()
+
+    try {
+      vi.resetModules()
+      vi.doMock('@tianji/agent', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('@tianji/agent')>()
+
+        return {
+          ...actual,
+          DaemonClient: vi.fn().mockImplementation(() => ({
+            ping: vi.fn(async () => {
+              throw new Error('daemon unavailable')
+            }),
+            close: vi.fn(),
+          })),
+        }
+      })
+
+      const processKillSpy = vi
+        .spyOn(process, 'kill')
+        .mockImplementation((pid: number, signal?: NodeJS.Signals | number) => {
+          if (signal === 0 && pid === 4321) {
+            throw new Error('process exited')
+          }
+
+          return true
+        })
+
+      const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+      const originalDateNow = Date.now
+      let now = 0
+      vi.spyOn(Date, 'now').mockImplementation(() => {
+        now += 200
+        return now
+      })
+
+      const readFileSpy = vi.fn(async (path: string) => {
+        if (path === paths.daemonPortPath) {
+          return '32123'
+        }
+
+        if (path === paths.daemonPidPath) {
+          return '4321'
+        }
+
+        throw new Error(`unexpected path: ${path}`)
+      })
+
+      vi.doMock('node:fs/promises', async (importOriginal) => {
+        const actual = await importOriginal<typeof import('node:fs/promises')>()
+
+        return {
+          ...actual,
+          readFile: readFileSpy,
+        }
+      })
+
+      const { runCli: isolatedRunCli } = await import('../main.js')
+
+      const exitCode = await isolatedRunCli(
+        [
+          'daemon',
+          'start',
+          '--register',
+          'http://127.0.0.1:3000/register?enrollment-token=test-token',
+        ],
+        {
+          getUserConfigPaths: () => paths,
+          loadConfig: async () => ({}),
+          saveConfig: vi.fn(async () => undefined),
+        }
+      )
+
+      expect(exitCode).toBe(1)
+      expect(stderrSpy).toHaveBeenCalledWith(
+        'Daemon process exited before becoming ready (pid=4321)'
+      )
+
+      Date.now = originalDateNow
+      processKillSpy.mockRestore()
+      stderrSpy.mockRestore()
+      vi.doUnmock('@tianji/agent')
+      vi.doUnmock('node:fs/promises')
+    } finally {
+      await cleanup()
+    }
+  })
 })

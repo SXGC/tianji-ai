@@ -110,11 +110,6 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
     case 'task.started':
       return [
         ev({
-          type: EventType.RUN_STARTED,
-          threadId: ctx.taskId,
-          runId: ctx.taskId,
-        }),
-        ev({
           type: EventType.STATE_DELTA,
           delta: [
             { op: 'replace', path: '/taskStatus', value: 'running' },
@@ -139,24 +134,24 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
     case 'task.failed':
       return [
         ev({
-          type: EventType.RUN_ERROR,
-          message: payload.error ?? '',
-        }),
-        ev({
           type: EventType.STATE_DELTA,
           delta: [{ op: 'replace', path: '/taskStatus', value: 'failed' }],
+        }),
+        ev({
+          type: EventType.RUN_ERROR,
+          message: payload.error ?? '',
         }),
       ]
 
     case 'task.cancelled':
       return [
         ev({
-          type: EventType.RUN_ERROR,
-          message: 'Task cancelled',
-        }),
-        ev({
           type: EventType.STATE_DELTA,
           delta: [{ op: 'replace', path: '/taskStatus', value: 'cancelled' }],
+        }),
+        ev({
+          type: EventType.RUN_ERROR,
+          message: 'Task cancelled',
         }),
       ]
 

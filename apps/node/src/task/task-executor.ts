@@ -102,10 +102,18 @@ export class TaskExecutor {
       })
 
       let turn: TurnSummary | null = null
+      let sawTerminalRunEvent = false
 
       for await (const event of runner.query(command.payload.goal)) {
         if (event != null) {
           turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
+          if (
+            event.type === 'run.completed' ||
+            event.type === 'run.failed' ||
+            event.type === 'run.cancelled'
+          ) {
+            sawTerminalRunEvent = true
+          }
         }
 
         await eventStream.write(
@@ -116,6 +124,10 @@ export class TaskExecutor {
           })
         )
         sequence += 1
+      }
+
+      if (!sawTerminalRunEvent) {
+        throw new Error('Agent run ended without a terminal event')
       }
 
       await this.#config.logger?.logDebug(this.#scope, 'Writing task completed lifecycle event', {

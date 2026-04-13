@@ -157,12 +157,24 @@ export function createControlPlaneRuntime(
           throw new Error(`Agent config not found for agentId "${command.payload.agentId}"`)
         }
 
-        if (
-          resolveAgentType(agentConfig) === 'native' &&
+        const resolvedAgentType = resolveAgentType(agentConfig)
+        const useInProcessRunner =
+          resolvedAgentType === 'native' &&
           config.nativeAgentContext !== undefined &&
           config.defaultGraph !== undefined &&
           config.executorFactory !== undefined
-        ) {
+
+        await config.logger?.logDebug(['daemon', 'task'], 'Resolved task runner type', {
+          taskId: command.payload.taskId,
+          agentId: command.payload.agentId,
+          resolvedAgentType,
+          hasNativeAgentContext: config.nativeAgentContext !== undefined,
+          hasDefaultGraph: config.defaultGraph !== undefined,
+          hasExecutorFactory: config.executorFactory !== undefined,
+          runnerType: useInProcessRunner ? 'inprocess' : 'acp',
+        })
+
+        if (useInProcessRunner) {
           return new InProcessAgentRunner({
             agentId: command.payload.agentId,
             nativeAgentContext: config.nativeAgentContext,

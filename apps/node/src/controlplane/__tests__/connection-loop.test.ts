@@ -216,6 +216,116 @@ describe('ControlPlaneConnectionConfig', () => {
     expect(register.mock.calls.length).toBeGreaterThanOrEqual(2)
   })
 
+  it('writes structured heartbeat failure details', async () => {
+    const written: Array<{ level: string; message: string; data?: Record<string, unknown> }> = []
+    const logger = createCliLogger({
+      sink: {
+        async write(entry) {
+          written.push({
+            level: entry.level,
+            message: entry.message,
+            data: entry.data,
+          })
+        },
+      },
+    })
+
+    const connection = new ControlPlaneConnection({
+      baseUrl: 'http://localhost:3000',
+      nodeId: createNodeId('node-001'),
+      enrollmentToken: 'token-abc',
+      hostname: 'dev-machine',
+      platform: 'linux',
+      version: '3.0.0',
+      agentList: [],
+      heartbeatIntervalMs: 10,
+      emptyPollBackoffMs: 5,
+      onCommand: vi.fn(),
+      logger,
+    })
+
+    const heartbeatError = new Error('fetch failed', {
+      cause: new Error('connect ECONNREFUSED 127.0.0.1:3000'),
+    })
+    heartbeatError.name = 'TypeError'
+
+    Object.assign(connection.client, {
+      register: vi.fn(async () => ({ accessToken: 'token', expiresAt: Date.now() + 60_000 })),
+      heartbeat: vi.fn(async () => {
+        throw heartbeatError
+      }),
+      pollCommand: vi.fn<() => Promise<null>>().mockResolvedValue(null),
+    })
+
+    await connection.start()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    connection.stop()
+
+    const failureLog = written.find(
+      (entry) => entry.level === 'error' && entry.message === 'Control plane heartbeat failed'
+    )
+
+    expect(failureLog?.data).toMatchObject({
+      nodeId: 'node-001',
+      executionState: 'idle',
+      baseUrl: 'http://localhost:3000',
+      error: 'fetch failed',
+      errorName: 'TypeError',
+      errorCause: 'connect ECONNREFUSED 127.0.0.1:3000',
+    })
+  })
+
+  it('should not emit unhandledRejection when heartbeat failure logging throws', async () => {
+    const unhandledRejections: unknown[] = []
+    const onUnhandledRejection = (error: unknown) => {
+      unhandledRejections.push(error)
+    }
+    process.on('unhandledRejection', onUnhandledRejection)
+
+    const logger = createCliLogger({
+      sink: {
+        async write(entry) {
+          if (entry.level === 'error' && entry.message === 'Control plane heartbeat failed') {
+            throw new Error('log sink failed')
+          }
+        },
+      },
+    })
+
+    const connection = new ControlPlaneConnection({
+      baseUrl: 'http://localhost:3000',
+      nodeId: createNodeId('node-001'),
+      enrollmentToken: 'token-abc',
+      hostname: 'dev-machine',
+      platform: 'linux',
+      version: '3.0.0',
+      agentList: [],
+      heartbeatIntervalMs: 10,
+      emptyPollBackoffMs: 5,
+      onCommand: vi.fn(),
+      logger,
+    })
+
+    Object.assign(connection.client, {
+      register: vi.fn(async () => ({ accessToken: 'token', expiresAt: Date.now() + 60_000 })),
+      heartbeat: vi.fn(async () => {
+        throw new Error('fetch failed')
+      }),
+      pollCommand: vi.fn<() => Promise<null>>().mockResolvedValue(null),
+    })
+
+    try {
+      await connection.start()
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      connection.stop()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+
+      expect(unhandledRejections).toHaveLength(0)
+    } finally {
+      process.off('unhandledRejection', onUnhandledRejection)
+    }
+  })
+
   it('should exit poll loop silently on AbortError', async () => {
     const connection = new ControlPlaneConnection({
       baseUrl: 'http://localhost:3000',

@@ -33,6 +33,7 @@ export {
   type RuntimeToolSideEffect,
   type ToolCatalog,
 } from './tool-catalog.js'
+export { resolveAgentModel } from './model-resolver.js'
 export {
   createSessionRuntime,
   type CreateSessionOptions,

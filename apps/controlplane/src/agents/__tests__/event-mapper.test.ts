@@ -90,6 +90,14 @@ describe('createInitialStateSnapshot', () => {
     const event = createInitialStateSnapshot() as { snapshot: unknown }
     expect(event.snapshot).toEqual({ sessionId: null, taskStatus: null, taskId: null })
   })
+
+  it('不会作为运行流的首个事件，运行流首个事件由上层运行器负责发出 RUN_STARTED', () => {
+    const initial = createInitialStateSnapshot()
+    const started = mapTaskEventToAgUiEvents(makeLifecycleEvent('task.started'), freshCtx())
+
+    expect(initial.type).toBe(EventType.STATE_SNAPSHOT)
+    expect(started[0]?.type).toBe(EventType.STATE_DELTA)
+  })
 })
 
 // ============================================================================
@@ -97,27 +105,18 @@ describe('createInitialStateSnapshot', () => {
 // ============================================================================
 
 describe('lifecycle 事件映射', () => {
-  describe('task.started → RUN_STARTED + STATE_DELTA', () => {
-    it('产生两个事件：RUN_STARTED 和 STATE_DELTA', () => {
+  describe('task.started → STATE_DELTA', () => {
+    it('只产生一个 STATE_DELTA 事件', () => {
       const stored = makeLifecycleEvent('task.started')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      expect(result).toHaveLength(2)
-      expect(result[0].type).toBe(EventType.RUN_STARTED)
-      expect(result[1].type).toBe(EventType.STATE_DELTA)
-    })
-
-    it('RUN_STARTED 的 threadId 和 runId 均为 taskId', () => {
-      const stored = makeLifecycleEvent('task.started')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const ev = result[0] as { threadId: string; runId: string }
-      expect(ev.threadId).toBe('task-001')
-      expect(ev.runId).toBe('task-001')
+      expect(result).toHaveLength(1)
+      expect(result[0].type).toBe(EventType.STATE_DELTA)
     })
 
     it('STATE_DELTA 包含 /taskStatus=running 和 /taskId patch', () => {
       const stored = makeLifecycleEvent('task.started')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const delta = result[1] as { delta: unknown[] }
+      const delta = result[0] as { delta: unknown[] }
       expect(delta.delta).toEqual([
         { op: 'replace', path: '/taskStatus', value: 'running' },
         { op: 'replace', path: '/taskId', value: 'task-001' },
@@ -150,57 +149,57 @@ describe('lifecycle 事件映射', () => {
     })
   })
 
-  describe('task.failed → RUN_ERROR + STATE_DELTA', () => {
-    it('产生两个事件：RUN_ERROR 和 STATE_DELTA', () => {
+  describe('task.failed → STATE_DELTA + RUN_ERROR', () => {
+    it('产生两个事件：先 STATE_DELTA，再 RUN_ERROR', () => {
       const stored = makeLifecycleEvent('task.failed', { error: '任务执行超时' })
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
       expect(result).toHaveLength(2)
-      expect(result[0].type).toBe(EventType.RUN_ERROR)
-      expect(result[1].type).toBe(EventType.STATE_DELTA)
+      expect(result[0].type).toBe(EventType.STATE_DELTA)
+      expect(result[1].type).toBe(EventType.RUN_ERROR)
     })
 
     it('RUN_ERROR 的 message 为 error 字段内容', () => {
       const stored = makeLifecycleEvent('task.failed', { error: '任务执行超时' })
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const ev = result[0] as { message: string }
+      const ev = result[1] as { message: string }
       expect(ev.message).toBe('任务执行超时')
     })
 
     it('error 为空时 message 为空字符串', () => {
       const stored = makeLifecycleEvent('task.failed')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const ev = result[0] as { message: string }
+      const ev = result[1] as { message: string }
       expect(ev.message).toBe('')
     })
 
     it('STATE_DELTA 包含 /taskStatus=failed patch', () => {
       const stored = makeLifecycleEvent('task.failed')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const delta = result[1] as { delta: unknown[] }
+      const delta = result[0] as { delta: unknown[] }
       expect(delta.delta).toEqual([{ op: 'replace', path: '/taskStatus', value: 'failed' }])
     })
   })
 
-  describe('task.cancelled → RUN_ERROR + STATE_DELTA', () => {
-    it('产生两个事件：RUN_ERROR 和 STATE_DELTA', () => {
+  describe('task.cancelled → STATE_DELTA + RUN_ERROR', () => {
+    it('产生两个事件：先 STATE_DELTA，再 RUN_ERROR', () => {
       const stored = makeLifecycleEvent('task.cancelled')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
       expect(result).toHaveLength(2)
-      expect(result[0].type).toBe(EventType.RUN_ERROR)
-      expect(result[1].type).toBe(EventType.STATE_DELTA)
+      expect(result[0].type).toBe(EventType.STATE_DELTA)
+      expect(result[1].type).toBe(EventType.RUN_ERROR)
     })
 
     it('RUN_ERROR 的 message 固定为 "Task cancelled"', () => {
       const stored = makeLifecycleEvent('task.cancelled')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const ev = result[0] as { message: string }
+      const ev = result[1] as { message: string }
       expect(ev.message).toBe('Task cancelled')
     })
 
     it('STATE_DELTA 包含 /taskStatus=cancelled patch', () => {
       const stored = makeLifecycleEvent('task.cancelled')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const delta = result[1] as { delta: unknown[] }
+      const delta = result[0] as { delta: unknown[] }
       expect(delta.delta).toEqual([{ op: 'replace', path: '/taskStatus', value: 'cancelled' }])
     })
   })

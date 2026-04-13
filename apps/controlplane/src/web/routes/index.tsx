@@ -28,12 +28,16 @@ export function IndexRouteComponent() {
     }
   }, [nodes, selectedNodeId, selectNode])
 
+  if (selectedNodeId === null || selectedAgentId === null) {
+    return <Layout />
+  }
+
   return (
     <CopilotKit
       runtimeUrl="/api/copilot"
       headers={{
-        'x-node-id': selectedNodeId ?? '',
-        'x-agent-id': selectedAgentId ?? '',
+        'x-node-id': selectedNodeId,
+        'x-agent-id': selectedAgentId,
       }}
     >
       <Layout />

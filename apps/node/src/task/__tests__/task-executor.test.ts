@@ -202,6 +202,62 @@ describe('TaskExecutorConfig', () => {
     })
   })
 
+  it('writes task.failed lifecycle event when runner ends without run completion', async () => {
+    const module = await import('../task-executor.js')
+    const writes: string[] = []
+
+    const executor = new module.TaskExecutor({
+      nodeId: createNodeId('node-001'),
+      onExecutionStateChange: () => undefined,
+      createRunner: async () => ({
+        agentId: 'default',
+        connect: async () => undefined,
+        disconnect: async () => undefined,
+        async *query() {
+          yield {
+            type: 'run.started',
+            runId: 'run-test' as never,
+            sessionId: 'session-test' as never,
+            triggerType: 'new',
+            timestamp: Date.now(),
+          }
+        },
+      }),
+      openEventStream: async () => ({
+        write: async (json: string) => {
+          writes.push(json)
+        },
+        writeKeepalive: async () => undefined,
+        close: async () => undefined,
+        abort: () => undefined,
+      }),
+    })
+
+    await expect(
+      executor.execute(createCommand(createTaskId('task-001'), 'missing terminal event'))
+    ).rejects.toThrow('Agent run ended without a terminal event')
+
+    expect(writes).toHaveLength(3)
+    expect(JSON.parse(writes[0] ?? 'null')).toMatchObject({
+      kind: 'lifecycle',
+      sequence: 1,
+      type: 'task.started',
+    })
+    expect(JSON.parse(writes[1] ?? 'null')).toMatchObject({
+      kind: 'agent',
+      sequence: 2,
+      event: {
+        type: 'run.started',
+      },
+    })
+    expect(JSON.parse(writes[2] ?? 'null')).toMatchObject({
+      kind: 'lifecycle',
+      sequence: 3,
+      type: 'task.failed',
+      error: 'Agent run ended without a terminal event',
+    })
+  })
+
   it('logs message.completed, tool.completed, and tool.failed events', async () => {
     const module = await import('../task-executor.js')
     const written: Array<{ level: string; message: string; data?: Record<string, unknown> }> = []
