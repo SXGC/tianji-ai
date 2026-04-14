@@ -29,32 +29,6 @@ You are the default Tianji agent.
 
 const DEFAULT_AGENT_NAME = 'default'
 
-/** 单节点默认编排图：一个 agent 节点引用 defaultAgent，__start__ → agent → __end__ */
-const DEFAULT_ORCHESTRATION_GRAPH = {
-  id: 'default',
-  name: 'default',
-  version: 1,
-  source: 'static',
-  locked: false,
-  state: {
-    input: { type: 'string' },
-    output: { type: 'string' },
-  },
-  nodes: [
-    {
-      id: 'agent',
-      type: 'agent',
-      agent: 'default',
-      input: ['input'],
-      output: ['output'],
-    },
-  ],
-  edges: [
-    { from: '__start__', to: 'agent' },
-    { from: 'agent', to: '__end__' },
-  ],
-} as const
-
 export interface AgentAppPaths {
   readonly configDir: string
   readonly agentsDir: string
@@ -140,23 +114,6 @@ export async function ensureDefaultUserConfig(
   await mkdir(dirname(defaultSoulPath), { recursive: true })
   if (!(await pathExists(defaultSoulPath))) {
     await writeFile(defaultSoulPath, DEFAULT_AGENT_SOUL_MARKDOWN, 'utf8')
-  }
-
-  const orchestrationPath = join(paths.configDir, 'default-orchestration.json')
-  if (!(await pathExists(orchestrationPath))) {
-    const graph = {
-      ...DEFAULT_ORCHESTRATION_GRAPH,
-      nodes: [
-        {
-          id: 'agent',
-          type: 'agent',
-          agent: defaultAgentName,
-          input: ['input'],
-          output: ['output'],
-        },
-      ],
-    }
-    await writeFile(orchestrationPath, `${JSON.stringify(graph, null, 2)}\n`, 'utf8')
   }
 
   return paths

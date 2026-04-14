@@ -172,58 +172,6 @@ describe('ensureDefaultUserConfig', () => {
       expect.stringContaining('Default Tianji Agent'),
       'utf8'
     )
-    expect(fs.writeFile).toHaveBeenCalledWith(
-      '/tmp/tianji-ctx-test/default-orchestration.json',
-      expect.stringContaining('"input"'),
-      'utf8'
-    )
-  })
-
-  it('writes default orchestration with input/output mapping', async () => {
-    const paths = createTestPaths()
-    const mockedAccess = vi.mocked(fs.access)
-    mockedAccess.mockRejectedValue(new Error('ENOENT'))
-
-    vi.mocked(runtime.loadResolvedConfig).mockResolvedValue({
-      config: {},
-      resolvedEnvVars: [],
-      paths: {} as never,
-      workspace: {} as never,
-      layers: [],
-    })
-
-    vi.mocked(shared.getAgentSoulPath).mockReturnValue(
-      '/tmp/tianji-ctx-test/agents/default/SOUL.md'
-    )
-
-    await ensureDefaultUserConfig(paths)
-
-    const orchestrationWrite = vi
-      .mocked(fs.writeFile)
-      .mock.calls.find((call) => call[0] === '/tmp/tianji-ctx-test/default-orchestration.json')
-
-    expect(orchestrationWrite).toBeDefined()
-    const content = orchestrationWrite?.[1]
-    expect(typeof content).toBe('string')
-
-    const graph = JSON.parse(String(content)) as {
-      state: Record<string, unknown>
-      nodes: Array<Record<string, unknown>>
-    }
-
-    expect(graph.state).toEqual({
-      input: { type: 'string' },
-      output: { type: 'string' },
-    })
-    expect(graph.nodes).toEqual([
-      {
-        id: 'agent',
-        type: 'agent',
-        agent: 'default',
-        input: ['input'],
-        output: ['output'],
-      },
-    ])
   })
 
   it('skips writing files when they already exist', async () => {
