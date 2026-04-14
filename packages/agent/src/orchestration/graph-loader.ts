@@ -1,10 +1,22 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { type TianjiAgentConfig, getAgentSoulPath, resolveAgentType } from '@tianji/shared'
 
 import type { GraphNode, OrchestrationGraph } from './graph-schema.js'
 import { buildSystemPrompt } from './system-prompt-builder.js'
+
+/**
+ * 随 `@tianji/agent` 发布的包内默认编排图位置。
+ *
+ * 运行时从 `packages/agent/src/orchestration/graph-loader.ts` 出发，向上两级再进入 `config/`。
+ * 发布后结构相同（`dist/orchestration/graph-loader.js` → `config/...`），只要 `package.json`
+ * 的 `files` 字段包含 `config` 就能被 npm 打包带走。
+ */
+const BUNDLED_DEFAULT_ORCHESTRATION_PATH = fileURLToPath(
+  new URL('../../config/default-orchestration.json', import.meta.url)
+)
 
 export interface GraphLoaderOptions {
   /** configDir，用于定位 default-orchestration.json 和各 agent 的 SOUL.md */
@@ -49,14 +61,8 @@ interface RawOrchestrationGraph {
 export async function loadDefaultOrchestrationGraph(
   options: GraphLoaderOptions
 ): Promise<OrchestrationGraph> {
-  const jsonPath = join(options.configDir, 'default-orchestration.json')
-
-  let rawJson: string
-  try {
-    rawJson = await readFile(jsonPath, 'utf8')
-  } catch {
-    throw new Error(`Default orchestration graph file does not exist: ${jsonPath}`)
-  }
+  const userJsonPath = join(options.configDir, 'default-orchestration.json')
+  const rawJson = await readUserOrBundledOrchestration(userJsonPath)
 
   const raw = JSON.parse(rawJson) as RawOrchestrationGraph
   const expandedNodes: GraphNode[] = []
@@ -131,4 +137,24 @@ async function expandAgentNode(raw: RawAgentNode, options: GraphLoaderOptions): 
     input: raw.input,
     output: raw.output,
   }
+}
+
+/**
+ * 读 user configDir 的 default-orchestration.json；当且仅当 ENOENT 时 fallback 读包内 bundled。
+ *
+ * 其它 IO 错误（权限、目录损坏等）必须暴露，不可静默降级。
+ *
+ * @param userPath - 用户目录下的 JSON 绝对路径
+ * @returns 原始 JSON 文本
+ */
+async function readUserOrBundledOrchestration(userPath: string): Promise<string> {
+  try {
+    return await readFile(userPath, 'utf8')
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code
+    if (code !== 'ENOENT') {
+      throw err
+    }
+  }
+  return await readFile(BUNDLED_DEFAULT_ORCHESTRATION_PATH, 'utf8')
 }

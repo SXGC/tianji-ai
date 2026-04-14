@@ -64,13 +64,28 @@ describe('loadDefaultOrchestrationGraph', () => {
     }
   })
 
-  it('default-orchestration.json 不存在时报错', async () => {
-    await expect(
-      loadDefaultOrchestrationGraph({
-        configDir: tempDir,
-        agentConfigs: {},
-      })
-    ).rejects.toThrow(/default-orchestration\.json/)
+  it('用户 configDir 无 default-orchestration.json 时 fallback 到包内 bundled 图', async () => {
+    const agentDir = join(tempDir, 'agents', 'default')
+    await mkdir(agentDir, { recursive: true })
+    await writeFile(join(agentDir, 'SOUL.md'), 'bundled fallback soul.\n', 'utf8')
+
+    const graph = await loadDefaultOrchestrationGraph({
+      configDir: tempDir,
+      agentConfigs: { default: { model: 'openai/gpt-4' } },
+    })
+
+    expect(graph.id).toBe('default')
+    expect(graph.state).toEqual({
+      input: { type: 'string' },
+      output: { type: 'string' },
+    })
+    const agentNode = graph.nodes.find((n) => n.id === 'agent')
+    expect(agentNode).toBeDefined()
+    if (agentNode!.type === 'agent') {
+      expect(agentNode!.input).toEqual(['input'])
+      expect(agentNode!.output).toEqual(['output'])
+      expect(agentNode!.agent.model).toBe('openai/gpt-4')
+    }
   })
 
   it('引用不存在的 agent name 时报错', async () => {
@@ -121,6 +136,17 @@ describe('loadDefaultOrchestrationGraph', () => {
         agentConfigs: configs,
       })
     ).rejects.toThrow(/external.*acp-agent/i)
+  })
+
+  it('用户 default-orchestration.json 格式损坏时直接抛，不 fallback', async () => {
+    await writeFile(join(tempDir, 'default-orchestration.json'), '{ this is not valid json', 'utf8')
+
+    await expect(
+      loadDefaultOrchestrationGraph({
+        configDir: tempDir,
+        agentConfigs: { default: { model: 'openai/gpt-4' } },
+      })
+    ).rejects.toThrow(/JSON/i)
   })
 
   it('非 agent 节点原样透传', async () => {
