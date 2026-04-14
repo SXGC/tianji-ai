@@ -14,7 +14,7 @@
   "bin": {
     "tianji-agent": "./dist/acp-entry.js"
   },
-  "files": ["dist", "src"],
+  "files": ["dist", "src", "config"],
   "scripts": {
     "build": "tsc --project tsconfig.build.json",
     "build:acp": "pnpm build && node scripts/build-acp-bundle.mjs",
