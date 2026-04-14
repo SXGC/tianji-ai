@@ -124,27 +124,24 @@ describe('lifecycle 事件映射', () => {
     })
   })
 
-  describe('task.completed → RUN_FINISHED + STATE_DELTA', () => {
-    it('产生两个事件：RUN_FINISHED 和 STATE_DELTA', () => {
+  describe('task.completed → STATE_DELTA', () => {
+    it('只产生一个 STATE_DELTA 事件，由上层运行器统一发送 RUN_FINISHED', () => {
       const stored = makeLifecycleEvent('task.completed')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      expect(result).toHaveLength(2)
-      expect(result[0].type).toBe(EventType.RUN_FINISHED)
-      expect(result[1].type).toBe(EventType.STATE_DELTA)
+      expect(result).toHaveLength(1)
+      expect(result[0].type).toBe(EventType.STATE_DELTA)
     })
 
-    it('RUN_FINISHED 的 threadId 和 runId 均为 taskId', () => {
+    it('不会直接产出 RUN_FINISHED，避免在终止事件后继续发送状态更新', () => {
       const stored = makeLifecycleEvent('task.completed')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const ev = result[0] as { threadId: string; runId: string }
-      expect(ev.threadId).toBe('task-001')
-      expect(ev.runId).toBe('task-001')
+      expect(result.some((event) => event.type === EventType.RUN_FINISHED)).toBe(false)
     })
 
     it('STATE_DELTA 包含 /taskStatus=completed patch', () => {
       const stored = makeLifecycleEvent('task.completed')
       const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const delta = result[1] as { delta: unknown[] }
+      const delta = result[0] as { delta: unknown[] }
       expect(delta.delta).toEqual([{ op: 'replace', path: '/taskStatus', value: 'completed' }])
     })
   })

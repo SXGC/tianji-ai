@@ -36,8 +36,19 @@ const DEFAULT_ORCHESTRATION_GRAPH = {
   version: 1,
   source: 'static',
   locked: false,
-  state: {},
-  nodes: [{ id: 'agent', type: 'agent', agent: 'default' }],
+  state: {
+    input: { type: 'string' },
+    output: { type: 'string' },
+  },
+  nodes: [
+    {
+      id: 'agent',
+      type: 'agent',
+      agent: 'default',
+      input: ['input'],
+      output: ['output'],
+    },
+  ],
   edges: [
     { from: '__start__', to: 'agent' },
     { from: 'agent', to: '__end__' },
@@ -135,7 +146,15 @@ export async function ensureDefaultUserConfig(
   if (!(await pathExists(orchestrationPath))) {
     const graph = {
       ...DEFAULT_ORCHESTRATION_GRAPH,
-      nodes: [{ id: 'agent', type: 'agent', agent: defaultAgentName }],
+      nodes: [
+        {
+          id: 'agent',
+          type: 'agent',
+          agent: defaultAgentName,
+          input: ['input'],
+          output: ['output'],
+        },
+      ],
     }
     await writeFile(orchestrationPath, `${JSON.stringify(graph, null, 2)}\n`, 'utf8')
   }

@@ -121,11 +121,6 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
     case 'task.completed':
       return [
         ev({
-          type: EventType.RUN_FINISHED,
-          threadId: ctx.taskId,
-          runId: ctx.taskId,
-        }),
-        ev({
           type: EventType.STATE_DELTA,
           delta: [{ op: 'replace', path: '/taskStatus', value: 'completed' }],
         }),
