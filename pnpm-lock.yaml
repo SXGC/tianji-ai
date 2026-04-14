@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  fast-json-patch@3.1.1:
+    hash: 0d3ff1b8de896e66580f4b1dce9e44a964c0fb195a2074f632bab5c68c1fa2ce
+    path: patches/fast-json-patch@3.1.1.patch
+
 importers:
 
   .:
@@ -5331,7 +5336,7 @@ snapshots:
       '@ag-ui/proto': 0.0.52
       '@types/uuid': 10.0.0
       compare-versions: 6.1.1
-      fast-json-patch: 3.1.1
+      fast-json-patch: 3.1.1(patch_hash=0d3ff1b8de896e66580f4b1dce9e44a964c0fb195a2074f632bab5c68c1fa2ce)
       rxjs: 7.8.1
       untruncate-json: 0.0.1
       uuid: 11.1.0
@@ -8352,7 +8357,7 @@ snapshots:
       merge2: 1.4.1
       micromatch: 4.0.8
 
-  fast-json-patch@3.1.1: {}
+  fast-json-patch@3.1.1(patch_hash=0d3ff1b8de896e66580f4b1dce9e44a964c0fb195a2074f632bab5c68c1fa2ce): {}
 
   fast-safe-stringify@2.1.1: {}
 

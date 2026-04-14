@@ -4,3 +4,6 @@ packages:
 
 onlyBuiltDependencies:
   - better-sqlite3
+
+patchedDependencies:
+  fast-json-patch@3.1.1: patches/fast-json-patch@3.1.1.patch

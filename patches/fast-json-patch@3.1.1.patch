@@ -1,0 +1,20 @@
+diff --git a/package.json b/package.json
+index 688a6d0fb714a57ff5b247f2a13db31ba29c6726..2c9be027d8b2056b66aed0bb5e1275c8285e7ec5 100644
+--- a/package.json
++++ b/package.json
+@@ -25,6 +25,15 @@
+     "main": "index.js",
+     "module": "index.mjs",
+     "typings": "index.d.ts",
++    "exports": {
++        ".": {
++            "types": "./index.d.ts",
++            "import": "./index.mjs",
++            "require": "./index.js",
++            "default": "./index.js"
++        },
++        "./package.json": "./package.json"
++    },
+     "devDependencies": {
+         "benchmark": "^2.1.4",
+         "bluebird": "^3.5.5",
