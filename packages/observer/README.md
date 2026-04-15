@@ -10,6 +10,7 @@
 - 数据脱敏：`sanitizeObserverLogData`、`getDefaultObserverSensitiveKeys`
 - tracing：`initTracing`、`shutdownTracing`、`isTracingEnabled`、`getTracer`
 - span 辅助：`startSessionSpan`、`startRunSpan`、`startToolSpan`、`startLlmCallSpan`
+- EventBus 适配器：`subscribeEventBusLogger`、`subscribeOtelAdapter`、`formatEnvelopeLog`、`handleSpanEvent`
 
 ## Logger API
 
@@ -114,6 +115,29 @@ await disposeTracing()
 - `initTracing()` 会初始化全局 tracer，并返回一个异步清理函数。
 - `exporters` 当前支持 `otlp` 和 `langfuse` 两种配置类型。
 - `startSessionSpan`、`startRunSpan`、`startToolSpan`、`startLlmCallSpan` 都返回 `{ span, end }`，便于在应用层显式结束 span。
+
+## EventBus 适配器
+
+`@tianji/observer` 提供两个适配器函数，将 `EventBus` 产出的 `DomainEventEnvelope` 路由到 logger 和 OTel tracing。适配器输入统一为 `DomainEventEnvelope`（而非旧版 `RuntimeEvent` / `TaskEvent`），envelope 携带 `correlationId`、`causationId`、`sequence` 等因果链字段。
+
+```ts
+import { subscribeEventBusLogger, subscribeOtelAdapter } from '@tianji/observer'
+
+// Observer Logger 适配器：全聚合订阅，每条 envelope 以 trace 级别写入 logger
+// JSONL data 包含 correlationId / causationId / sequence / aggregateType / aggregateId / payload
+const logHandle = subscribeEventBusLogger(bus, logger)
+
+// OTel 适配器：只订阅 RunStarted / RunCompleted / RunFailed / ToolStarted / ToolCompleted / ToolFailed
+// 若 tracing 未初始化则静默跳过
+const otelHandle = subscribeOtelAdapter(bus)
+
+// 停止时取消订阅
+logHandle.unsubscribe()
+otelHandle.unsubscribe()
+```
+
+- 两个函数均返回 `SubscriptionHandle`，可随时调用 `unsubscribe()` 取消订阅。
+- 建议在进程启动时（bus 创建后、pipeline 创建后）立即调用，确保不丢失早期事件。
 
 ## 依赖方边界
 
