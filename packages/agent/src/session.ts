@@ -23,6 +23,17 @@ export interface AgentRuntimeOptions {
 }
 
 /**
+ * 会话恢复参数。
+ *
+ * @param checkpointId - 要从哪个检查点恢复的 ID（由 runtime 层保存）
+ * @param sessionId - 原始 session 的 ID，用于关联已有 session 快照
+ */
+export interface ResumeAgentSessionOptions {
+  readonly checkpointId: string
+  readonly sessionId: SessionId
+}
+
+/**
  * 通过 OrchestrationGraph 启动一轮多智能体编排所需的参数。
  *
  * compileOptions 中的 `runId`、`observer`、`emitGraphEvent`、`abortSignal`
@@ -112,7 +123,7 @@ export async function createAgentSession(
   // 必须只在 AgentSession 工厂里调用一次,否则后续每轮 query 都会清掉前一轮 runTurn 累加的多轮历史。
   await runtime.createSession({ sessionId })
 
-  void options?.emitEvent?.({
+  await options?.emitEvent?.({
     type: 'SessionCreated',
     sessionId,
     timestamp: Date.now(),
@@ -131,11 +142,20 @@ export async function createAgentSession(
       for (const controller of activeGraphControllers) {
         controller.abort()
       }
-      void options?.emitEvent?.({
+      // close() 是同步方法，无法 await。用 .catch 显式捕获，防止 fire-and-forget 丢失错误。
+      const result = options?.emitEvent?.({
         type: 'SessionClosed',
         sessionId,
         timestamp: Date.now(),
       })
+      if (result instanceof Promise) {
+        result.catch((err: unknown) => {
+          void options?.logger?.error(['agent', 'session'], 'SessionClosed emitEvent failed', {
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        })
+      }
     },
     async *queryWithGraph(
       graph: OrchestrationGraph,
@@ -173,6 +193,102 @@ export async function createAgentSession(
       } finally {
         // 无论正常结束、消费者 break、还是底层抛错，都要从集合中移除 controller，
         // 避免悬挂的 controller 影响后续 abort() 语义。
+        activeGraphControllers.delete(controller)
+      }
+    },
+  }
+}
+
+/**
+ * 会话恢复入口：从指定检查点重建 runtime session，并通过 pipeline 发射 SessionResumed 事件。
+ *
+ * 按照 spec §三，SessionResumed 必须由 agent 层发射，checkpointId 随 payload 携带。
+ * 当前无调用者，但入口必须建立以便 Stage 07+ 集成。
+ *
+ * @param context - 已加载的 agent bootstrap 上下文
+ * @param resumeOptions - 恢复参数（checkpointId + sessionId）
+ * @param runtimeOptions - 运行时选项（logger、emitEvent）
+ * @returns 复用同一 sessionId 的 AgentSession 实例
+ */
+export async function resumeAgentSession(
+  context: LoadedAgentContext,
+  resumeOptions: ResumeAgentSessionOptions,
+  runtimeOptions?: AgentRuntimeOptions
+): Promise<AgentSession> {
+  const { checkpointId, sessionId } = resumeOptions
+  const runtime = await createAgentRuntime(context, runtimeOptions)
+  const activeGraphControllers = new Set<AbortController>()
+
+  // 恢复语义：runtime.createSession 使用已有 sessionId，runtime 内部会加载已有快照。
+  // 与 createAgentSession 的"初始化语义"不同，这里只是让 runtime 找到该 session。
+  await runtime.createSession({ sessionId })
+
+  await runtimeOptions?.emitEvent?.({
+    type: 'SessionResumed',
+    sessionId,
+    checkpointId,
+    timestamp: Date.now(),
+  })
+
+  return {
+    sessionId,
+    abort(): void {
+      for (const controller of activeGraphControllers) {
+        controller.abort()
+      }
+    },
+    close(): void {
+      for (const controller of activeGraphControllers) {
+        controller.abort()
+      }
+      // close() 是同步方法，无法 await。用 .catch 显式捕获，防止 fire-and-forget 丢失错误。
+      const result = runtimeOptions?.emitEvent?.({
+        type: 'SessionClosed',
+        sessionId,
+        timestamp: Date.now(),
+      })
+      if (result instanceof Promise) {
+        result.catch((err: unknown) => {
+          void runtimeOptions?.logger?.error(
+            ['agent', 'session'],
+            'SessionClosed emitEvent failed',
+            { sessionId, error: err instanceof Error ? err.message : String(err) }
+          )
+        })
+      }
+    },
+    async *queryWithGraph(
+      graph: OrchestrationGraph,
+      graphOptions: ChatWithGraphOptions
+    ): AsyncIterable<DomainEvent> {
+      const runId = `run_graph_${Date.now()}` as RunId
+      const controller = new AbortController()
+      activeGraphControllers.add(controller)
+
+      try {
+        const result = runOrchestrationGraph({
+          graph,
+          runId,
+          initialState: graphOptions.initialState,
+          compileOptions: graphOptions.compileOptions,
+          observer: runtimeOptions?.logger,
+          abortSignal: controller.signal,
+          onMermaid: (diagram) => {
+            void runtimeOptions?.logger?.info(['agent', 'orchestration'], 'graph.mermaid', {
+              sessionId,
+              runId,
+              graphId: graph.id,
+              graphVersion: graph.version,
+              diagram,
+            })
+          },
+        })
+
+        for await (const event of result.events) {
+          yield event
+        }
+        await result.finished
+      } finally {
         activeGraphControllers.delete(controller)
       }
     },
