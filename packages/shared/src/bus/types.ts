@@ -3,7 +3,6 @@
  * @module bus/types
  */
 
-import type { DomainEvent } from '../events/domain-event.js'
 import type { AggregateType, DomainEventEnvelope } from '../events/envelope.js'
 
 export interface EventFilter {
@@ -31,7 +30,6 @@ export interface EventBus {
     handler: EventHandler,
     options: SubscribeOptions
   ): SubscriptionHandle
-  replay(filter: EventFilter, fromSequence?: number): AsyncIterable<DomainEventEnvelope>
 }
 
 export type LagSink = (info: {
@@ -42,4 +40,9 @@ export type LagSink = (info: {
   occurredAt: string
 }) => void
 
-export type _UnusedDomainEvent = DomainEvent
+export type ErrorSink = (info: {
+  subscriberName?: string
+  subscriptionId: string
+  envelope: DomainEventEnvelope
+  error: unknown
+}) => void
