@@ -104,10 +104,11 @@ describe('EventBus', () => {
     expect(seen).toEqual([])
   })
 
-  it('handler throw 不阻断其他订阅者', async () => {
-    const bus = createEventBus({ lagSink: vi.fn() })
-    const err = vi.fn()
+  it('handler throw 调用 errorSink 且不阻断其他订阅者', async () => {
+    const errorSink = vi.fn()
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink })
     const ok: string[] = []
+
     bus.subscribe(
       {},
       () => {
@@ -122,10 +123,43 @@ describe('EventBus', () => {
       },
       { name: 'good' }
     )
+
     bus.publish(mk({ eventId: 'e1' }))
     await flush()
     await flush()
+
+    // errorSink 被调用，且携带正确 payload
+    expect(errorSink).toHaveBeenCalledTimes(1)
+    expect(errorSink.mock.calls[0][0]).toMatchObject({
+      subscriberName: 'bad',
+      envelope: expect.objectContaining({ eventId: 'e1' }),
+      error: expect.any(Error),
+    })
+
+    // 其他订阅者正常处理
     expect(ok).toEqual(['e1'])
-    void err
+  })
+
+  it('handler throw 后同一订阅者继续处理后续事件', async () => {
+    const errorSink = vi.fn()
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink })
+    const seen: string[] = []
+
+    bus.subscribe(
+      {},
+      (env) => {
+        if (env.eventId === 'e1') throw new Error('first fails')
+        seen.push(env.eventId)
+      },
+      { name: 'flaky' }
+    )
+
+    bus.publish(mk({ eventId: 'e1' }))
+    bus.publish(mk({ eventId: 'e2' }))
+    for (let i = 0; i < 5; i++) await flush()
+
+    // e1 抛出后 e2 仍然被处理
+    expect(seen).toEqual(['e2'])
+    expect(errorSink).toHaveBeenCalledTimes(1)
   })
 })
