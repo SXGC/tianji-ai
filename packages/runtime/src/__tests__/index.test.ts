@@ -160,6 +160,7 @@ describe('@tianji/runtime', () => {
       '@tianji/shared',
       'deepagents',
       'langchain',
+      'ulid',
     ])
   })
 
