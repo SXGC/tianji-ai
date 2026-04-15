@@ -15,13 +15,11 @@ import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 
 import { ChatOpenAI } from '@langchain/openai'
-import { type ObserverLogger, type ObserverStartedSpan, startToolSpan } from '@tianji/observer'
+import { type ObserverStartedSpan, startToolSpan } from '@tianji/observer'
 import {
-  type AppMessage,
   CancelledError,
   DEFAULT_EXECUTION_POLICY,
   type DomainEvent,
-  type ExecutionPolicy,
   type MessageCompletedEvent,
   ProviderError,
   type RunId,
@@ -42,126 +40,48 @@ import { resolveConfigPaths } from './config.js'
 import { type DeepagentsRunResult, executeDeepagentsRun } from './engines/deepagents-engine.js'
 import { ReplayableEventStream } from './event-stream.js'
 import type { LlmGenerationConfig } from './llm/index.js'
-import type { SnapshotStore } from './snapshot-store.js'
+import type {
+  AbortSignalScope,
+  ActiveRun,
+  CreateSessionOptions,
+  DeepagentsInterruptRecord,
+  DeepagentsRunWorkflowState,
+  ExecuteRunInput,
+  ResumeRunOptions,
+  RunExecutionContext,
+  RunLineageFields,
+  RunRuntimeMetadata,
+  RunTurnOptions,
+  SessionRuntime,
+  SessionRuntimeEngine,
+  SessionRuntimeMetadata,
+  SessionRuntimeOptions,
+} from './runtime/types.js'
 import { InMemorySnapshotStore } from './snapshot-store.js'
-import { type RuntimeToolDefinition, type ToolCatalog, ToolRegistry } from './tool-catalog.js'
+import type { SnapshotStore } from './snapshot-store.js'
+import { ToolRegistry } from './tool-catalog.js'
+import type { ToolCatalog } from './tool-catalog.js'
 import type { SessionRuntimeDeepagentsConfig } from './types.js'
 
-export interface CreateSessionOptions {
-  readonly sessionId?: SessionId
-  readonly messages?: readonly AppMessage[]
-  readonly metadata?: Record<string, unknown>
-  readonly policy?: ExecutionPolicy
-}
-
-export interface RunTurnOptions {
-  readonly sessionId: SessionId
-  readonly message: AppMessage
-  readonly abortSignal?: AbortSignal
-  readonly systemPrompt?: string
-  readonly config?: LlmGenerationConfig
-  readonly metadata?: Record<string, unknown>
-  readonly policy?: ExecutionPolicy
-}
-
-export interface ResumeRunOptions {
-  readonly runId: RunId
-  readonly abortSignal?: AbortSignal
-  readonly systemPrompt?: string
-  readonly config?: LlmGenerationConfig
-  readonly resumeValue?: unknown
-}
-
-export type SessionRuntimeEngine = 'legacy' | 'deepagents'
-
-export interface SessionRuntimeMetadata {
-  readonly engine: SessionRuntimeEngine
-}
-
-export interface RunRuntimeMetadata extends SessionRuntimeMetadata {
-  readonly threadId?: string
-  readonly checkpointId?: string
-}
-
 export type { RuntimeProviderConfig, SessionRuntimeDeepagentsConfig } from './types.js'
-
-export interface DeepagentsInterruptRecord {
-  readonly id?: string
-  readonly value?: unknown
-}
-
-export interface DeepagentsRunWorkflowState {
-  readonly kind: 'deepagents-interrupt'
-  readonly threadId: string
-  readonly checkpointId?: string
-  readonly interrupts: readonly DeepagentsInterruptRecord[]
-}
-
 export type { ObserverLogger } from '@tianji/observer'
-
-export interface SessionRuntimeOptions {
-  readonly engine?: Extract<SessionRuntimeEngine, 'deepagents'>
-  readonly deepagents?: SessionRuntimeDeepagentsConfig
-  readonly logger?: ObserverLogger
-  readonly snapshotStore?: SnapshotStore
-  readonly toolCatalog?: ToolCatalog | ToolRegistry | readonly RuntimeToolDefinition[]
-}
-
-export interface SessionRuntime {
-  readonly createSession: (options?: CreateSessionOptions) => Promise<SessionSnapshot>
-  readonly closeSession: (sessionId: SessionId) => Promise<SessionSnapshot>
-  readonly getSessionSnapshot: (sessionId: SessionId) => Promise<SessionSnapshot | undefined>
-  readonly getRunSnapshot: (runId: RunId) => Promise<RunSnapshot | undefined>
-  readonly runTurn: (options: RunTurnOptions) => Promise<RunId>
-  readonly resumeRun: (options: ResumeRunOptions) => Promise<RunId>
-  readonly streamEvents: (runId: RunId) => AsyncIterable<DomainEvent>
-  readonly cancelRun: (runId: RunId) => boolean
-}
-
-interface ActiveRun {
-  readonly runId: RunId
-  readonly sessionId: SessionId
-  readonly controller: AbortController
-  readonly events: ReplayableEventStream<DomainEvent>
-}
-
-interface ExecuteRunInput {
-  readonly runId: RunId
-  readonly sessionSnapshot: SessionSnapshot
-  readonly messages: readonly AppMessage[]
-  readonly policy: ExecutionPolicy
-  readonly triggerType: RunSnapshot['triggerType']
-  readonly parentRunId?: RunId
-  readonly abortSignal?: AbortSignal
-  readonly systemPrompt?: string
-  readonly config?: LlmGenerationConfig
-  readonly sourceRunId?: RunId
-  readonly threadId?: string
-  readonly checkpointId?: string
-  readonly resumeValue?: unknown
-}
-
-interface RunExecutionContext {
-  readonly signal: AbortSignal
-  readonly toolCatalog: ToolCatalog
-  readonly sequence: {
-    current: number
-  }
-  readonly pendingOperations: Map<string, RunSnapshot['pendingOperations'][number]>
-  readonly destructiveOperationIds: Set<string>
-}
-
-interface AbortSignalScope {
-  readonly signal: AbortSignal | undefined
-  readonly cleanup: () => void
-}
-
-interface RunLineageFields {
-  readonly sessionId: SessionId
-  readonly runId: RunId
-  readonly triggerType: RunSnapshot['triggerType']
-  readonly parentRunId?: RunId
-}
+export type {
+  AbortSignalScope,
+  ActiveRun,
+  CreateSessionOptions,
+  DeepagentsInterruptRecord,
+  DeepagentsRunWorkflowState,
+  ExecuteRunInput,
+  ResumeRunOptions,
+  RunExecutionContext,
+  RunLineageFields,
+  RunRuntimeMetadata,
+  RunTurnOptions,
+  SessionRuntime,
+  SessionRuntimeEngine,
+  SessionRuntimeMetadata,
+  SessionRuntimeOptions,
+} from './runtime/types.js'
 
 export function createSessionRuntime(options: SessionRuntimeOptions): SessionRuntime {
   const normalizedOptions = normalizeSessionRuntimeOptions(options)
