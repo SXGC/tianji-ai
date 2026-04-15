@@ -1,26 +1,26 @@
 /**
- * Maps ACP SessionUpdate notifications to RuntimeEvent.
+ * Maps ACP SessionUpdate notifications to DomainEvent.
  *
  * @module acp/event-adapter
  */
 
 import type { SessionNotification } from '@agentclientprotocol/sdk'
-import type { RunId, RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent, RunId } from '@tianji/shared'
 
 let deltaSequence = 0
 
-/** 将 ACP SessionUpdate 通知映射为 RuntimeEvent。不可映射时返回 null。 */
+/** 将 ACP SessionUpdate 通知映射为 DomainEvent。不可映射时返回 null。 */
 export function mapSessionUpdateToRuntimeEvent(
   notification: SessionNotification,
   runId: RunId
-): RuntimeEvent | null {
+): DomainEvent | null {
   const update = notification.update
   const now = Date.now()
 
   switch (update.sessionUpdate) {
     case 'agent_message_chunk':
       return {
-        type: 'message.delta',
+        type: 'MessageDelta',
         runId,
         messageId: `acp_msg_${now}`,
         sequence: deltaSequence++,
@@ -31,7 +31,7 @@ export function mapSessionUpdateToRuntimeEvent(
 
     case 'agent_thought_chunk':
       return {
-        type: 'message.delta',
+        type: 'MessageDelta',
         runId,
         messageId: `acp_msg_${now}`,
         sequence: deltaSequence++,
@@ -42,7 +42,7 @@ export function mapSessionUpdateToRuntimeEvent(
 
     case 'tool_call':
       return {
-        type: 'tool.started',
+        type: 'ToolStarted',
         runId,
         toolCallId: update.toolCallId,
         invocation: {
@@ -56,7 +56,7 @@ export function mapSessionUpdateToRuntimeEvent(
     case 'tool_call_update':
       if (update.status === 'completed') {
         return {
-          type: 'tool.completed',
+          type: 'ToolCompleted',
           runId,
           toolCallId: update.toolCallId,
           invocation: {

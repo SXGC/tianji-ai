@@ -27,7 +27,7 @@ function createRunnerDouble() {
     disconnect: vi.fn(async () => undefined),
     async *query() {
       yield {
-        type: 'run.completed',
+        type: 'RunCompleted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',

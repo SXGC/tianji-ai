@@ -11,12 +11,12 @@ import type { RuntimeLogger } from '../logger.js'
 import type { ObserverLogScope } from '@tianji/observer'
 import type {
   Command,
-  LegacyMessageCompletedEvent as MessageCompletedEvent,
+  DomainEvent,
+  MessageCompletedEvent,
   NodeExecutionState,
   NodeId,
-  RuntimeEvent,
-  LegacyToolCompletedEvent as ToolCompletedEvent,
-  LegacyToolFailedEvent as ToolFailedEvent,
+  ToolCompletedEvent,
+  ToolFailedEvent,
 } from '@tianji/shared'
 
 interface TurnSummary {
@@ -108,9 +108,9 @@ export class TaskExecutor {
         if (event != null) {
           turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
           if (
-            event.type === 'run.completed' ||
-            event.type === 'run.failed' ||
-            event.type === 'run.cancelled'
+            event.type === 'RunCompleted' ||
+            event.type === 'RunFailed' ||
+            event.type === 'RunCancelled'
           ) {
             sawTerminalRunEvent = true
           }
@@ -193,7 +193,7 @@ function extractTextContent(event: MessageCompletedEvent): string {
 }
 
 function extractToolCallLabel(event: ToolCompletedEvent | ToolFailedEvent): string {
-  const status = event.type === 'tool.completed' ? 'completed' : 'failed'
+  const status = event.type === 'ToolCompleted' ? 'completed' : 'failed'
   return `${event.invocation.toolName} [${status}]`
 }
 
@@ -202,9 +202,9 @@ async function handleEvent(
   scope: ObserverLogScope,
   taskId: string,
   turn: TurnSummary | null,
-  event: RuntimeEvent
+  event: DomainEvent
 ): Promise<TurnSummary | null> {
-  if (event.type === 'run.started') {
+  if (event.type === 'RunStarted') {
     return { runId: event.runId, eventCount: 1, messageCount: 0, toolCallCount: 0 }
   }
 
@@ -214,7 +214,7 @@ async function handleEvent(
 
   turn.eventCount += 1
 
-  if (event.type === 'message.completed') {
+  if (event.type === 'MessageCompleted') {
     turn.messageCount += 1
     await logger?.logInfo(scope, 'Message completed', {
       taskId,
@@ -222,7 +222,7 @@ async function handleEvent(
       messageId: event.messageId,
       content: extractTextContent(event),
     })
-  } else if (event.type === 'tool.completed') {
+  } else if (event.type === 'ToolCompleted') {
     turn.toolCallCount += 1
     await logger?.logInfo(scope, 'Tool call completed', {
       taskId,
@@ -232,7 +232,7 @@ async function handleEvent(
       args: event.invocation.args,
       result: event.result.result,
     })
-  } else if (event.type === 'tool.failed') {
+  } else if (event.type === 'ToolFailed') {
     turn.toolCallCount += 1
     await logger?.logError(scope, 'Tool call failed', {
       taskId,
@@ -244,9 +244,9 @@ async function handleEvent(
       errorMessage: event.error.message,
     })
   } else if (
-    event.type === 'run.completed' ||
-    event.type === 'run.failed' ||
-    event.type === 'run.cancelled'
+    event.type === 'RunCompleted' ||
+    event.type === 'RunFailed' ||
+    event.type === 'RunCancelled'
   ) {
     await logger?.logInfo(scope, 'Run turn summary', {
       taskId,

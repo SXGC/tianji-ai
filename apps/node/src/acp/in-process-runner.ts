@@ -7,7 +7,7 @@ import {
   createAgentSession,
   loadAgentContextForName,
 } from '@tianji/agent'
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent } from '@tianji/shared'
 
 /**
  * Runs native agents inside the daemon process to avoid ACP subprocess overhead.
@@ -42,11 +42,11 @@ export class InProcessAgentRunner {
   }
 
   /**
-   * 通过 queryWithGraph 向 session 发送 prompt，产出 RuntimeEvent 流。
+   * 通过 queryWithGraph 向 session 发送 prompt，产出 DomainEvent 流。
    *
    * @param prompt - 用户输入的文本
    */
-  async *query(prompt: string): AsyncIterable<RuntimeEvent> {
+  async *query(prompt: string): AsyncIterable<DomainEvent> {
     if (this.#session === null) {
       throw new Error('Not connected. Call connect() first.')
     }
@@ -63,7 +63,7 @@ export class InProcessAgentRunner {
         return
       }
 
-      if (event.type === 'run.completed') {
+      if (event.type === 'RunCompleted') {
         if (completedSeen) {
           continue
         }

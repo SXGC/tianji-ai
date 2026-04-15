@@ -1,5 +1,5 @@
 import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
-import { type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
+import { type DomainEvent, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { InProcessAgentRunner } from '../acp/in-process-runner.js'
@@ -130,7 +130,7 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
     expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
     expect(parsed[1]).toMatchObject({ kind: 'agent', sequence: 2 })
-    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('message.delta')
+    expect((parsed[1] as { event: DomainEvent }).event.type).toBe('MessageDelta')
     expect(parsed[2]).toMatchObject({
       kind: 'lifecycle',
       sequence: 3,
@@ -204,8 +204,8 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     expect(successWriter.lines).toHaveLength(4)
     const parsed = successWriter.lines.map((l) => JSON.parse(l) as Record<string, unknown>)
     expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
-    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('message.delta')
-    expect((parsed[2] as { event: RuntimeEvent }).event.type).toBe('run.completed')
+    expect((parsed[1] as { event: DomainEvent }).event.type).toBe('MessageDelta')
+    expect((parsed[2] as { event: DomainEvent }).event.type).toBe('RunCompleted')
     expect(parsed[3]).toMatchObject({ kind: 'lifecycle', sequence: 4, type: 'task.completed' })
 
     // Executor is idle after both calls

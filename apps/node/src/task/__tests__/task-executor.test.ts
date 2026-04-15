@@ -27,14 +27,14 @@ function createRunnerStub(): IAgentRunner {
     disconnect: async () => undefined,
     async *query() {
       yield {
-        type: 'run.started',
+        type: 'RunStarted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
       }
       yield {
-        type: 'run.completed',
+        type: 'RunCompleted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
@@ -215,7 +215,7 @@ describe('TaskExecutorConfig', () => {
         disconnect: async () => undefined,
         async *query() {
           yield {
-            type: 'run.started',
+            type: 'RunStarted',
             runId: 'run-test' as never,
             sessionId: 'session-test' as never,
             triggerType: 'new',
@@ -247,7 +247,7 @@ describe('TaskExecutorConfig', () => {
       kind: 'agent',
       sequence: 2,
       event: {
-        type: 'run.started',
+        type: 'RunStarted',
       },
     })
     expect(JSON.parse(writes[2] ?? 'null')).toMatchObject({
@@ -286,14 +286,14 @@ describe('TaskExecutorConfig', () => {
         disconnect: async () => undefined,
         async *query() {
           yield {
-            type: 'run.started',
+            type: 'RunStarted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
           }
           yield {
-            type: 'message.completed',
+            type: 'MessageCompleted',
             runId,
             messageId: 'msg-1',
             message: {
@@ -305,7 +305,7 @@ describe('TaskExecutorConfig', () => {
             timestamp: now,
           }
           yield {
-            type: 'tool.completed',
+            type: 'ToolCompleted',
             runId,
             toolCallId: 'tc-1',
             invocation: { toolCallId: 'tc-1', toolName: 'read_file', args: { path: '/a.ts' } },
@@ -313,7 +313,7 @@ describe('TaskExecutorConfig', () => {
             timestamp: now,
           }
           yield {
-            type: 'tool.failed',
+            type: 'ToolFailed',
             runId,
             toolCallId: 'tc-2',
             invocation: { toolCallId: 'tc-2', toolName: 'write_file', args: { path: '/b.ts' } },
@@ -321,7 +321,7 @@ describe('TaskExecutorConfig', () => {
             timestamp: now,
           }
           yield {
-            type: 'run.completed',
+            type: 'RunCompleted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
@@ -372,7 +372,7 @@ describe('TaskExecutorConfig', () => {
         async *query() {
           // 先发 message.completed，此时 turn 为 null，应被忽略
           yield {
-            type: 'message.completed',
+            type: 'MessageCompleted',
             runId,
             messageId: 'msg-orphan',
             message: {
@@ -384,14 +384,14 @@ describe('TaskExecutorConfig', () => {
             timestamp: now,
           }
           yield {
-            type: 'run.started',
+            type: 'RunStarted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
           }
           yield {
-            type: 'run.completed',
+            type: 'RunCompleted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
@@ -438,14 +438,14 @@ describe('TaskExecutorConfig', () => {
         disconnect: async () => undefined,
         async *query() {
           yield {
-            type: 'run.started',
+            type: 'RunStarted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
           }
           yield {
-            type: 'run.failed',
+            type: 'RunFailed',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
@@ -467,7 +467,7 @@ describe('TaskExecutorConfig', () => {
     const failedSummary = written.find(
       (e) =>
         e.message === 'Run turn summary' &&
-        (e.data as Record<string, unknown>)?.endReason === 'run.failed'
+        (e.data as Record<string, unknown>)?.endReason === 'RunFailed'
     )
     expect(failedSummary).toBeDefined()
 
@@ -483,14 +483,14 @@ describe('TaskExecutorConfig', () => {
         disconnect: async () => undefined,
         async *query() {
           yield {
-            type: 'run.started',
+            type: 'RunStarted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
           }
           yield {
-            type: 'run.cancelled',
+            type: 'RunCancelled',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
@@ -511,7 +511,7 @@ describe('TaskExecutorConfig', () => {
     const cancelledSummary = written.find(
       (e) =>
         e.message === 'Run turn summary' &&
-        (e.data as Record<string, unknown>)?.endReason === 'run.cancelled'
+        (e.data as Record<string, unknown>)?.endReason === 'RunCancelled'
     )
     expect(cancelledSummary).toBeDefined()
   })

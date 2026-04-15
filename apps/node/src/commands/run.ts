@@ -1,6 +1,6 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 
-import type { RunId, RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent, RunId } from '@tianji/shared'
 
 import { AgentRunner } from '../acp/index.js'
 import { type UserConfigPaths, getUserConfigPaths, loadUserConfigContext } from '../config.js'
@@ -72,7 +72,9 @@ async function executeRunTurn(
   let currentSessionId: string | undefined
 
   for await (const event of runner.query(prompt)) {
-    currentRunId = event.runId
+    if ('runId' in event && event.runId !== undefined) {
+      currentRunId = event.runId
+    }
     if ('sessionId' in event && event.sessionId !== undefined) {
       currentSessionId = String(event.sessionId)
     }
@@ -88,9 +90,9 @@ async function executeRunTurn(
   return 0
 }
 
-async function handleRuntimeEvent(event: RuntimeEvent, logger: CliLogger): Promise<void> {
+async function handleRuntimeEvent(event: DomainEvent, logger: CliLogger): Promise<void> {
   switch (event.type) {
-    case 'message.delta':
+    case 'MessageDelta':
       await logger.logDebug(CLI_RUN_EVENT_SCOPE, 'Received runtime event', {
         eventType: event.type,
         runId: String(event.runId),
@@ -104,7 +106,7 @@ async function handleRuntimeEvent(event: RuntimeEvent, logger: CliLogger): Promi
         process.stdout.write(event.payload.content)
       }
       break
-    case 'run.failed':
+    case 'RunFailed':
       await logger.logError(CLI_RUN_EVENT_SCOPE, 'Received runtime failure event', {
         eventType: event.type,
         sessionId: String(event.sessionId),
@@ -113,7 +115,7 @@ async function handleRuntimeEvent(event: RuntimeEvent, logger: CliLogger): Promi
         errorMessage: event.error.message,
       })
       throw new Error(`Run failed: ${event.error.message}`)
-    case 'run.completed':
+    case 'RunCompleted':
       await logger.logInfo(CLI_RUN_EVENT_SCOPE, 'Received runtime completion event', {
         eventType: event.type,
         sessionId: String(event.sessionId),

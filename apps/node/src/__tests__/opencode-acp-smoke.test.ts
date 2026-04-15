@@ -28,7 +28,7 @@ describe('ACP → OpenCode smoke', () => {
       for await (const event of runner.query('Say exactly: __ACP_SMOKE_OK__')) {
         events.push(event.type)
 
-        if (event.type === 'message.delta' && event.channel === 'text') {
+        if (event.type === 'MessageDelta' && event.channel === 'text') {
           if (event.payload.content.includes('__ACP_SMOKE_OK__')) {
             break
           }
@@ -39,6 +39,6 @@ describe('ACP → OpenCode smoke', () => {
     }
 
     expect(events.length).toBeGreaterThan(0)
-    expect(events).toContain('message.delta')
+    expect(events).toContain('MessageDelta')
   }, 30_000)
 })

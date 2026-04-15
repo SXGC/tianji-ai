@@ -7,7 +7,7 @@
 import { ClientSideConnection, ndJsonStream } from '@agentclientprotocol/sdk'
 import {
   DEFAULT_AGENT_COMMAND,
-  type RuntimeEvent,
+  type DomainEvent,
   createRunId,
   createSessionId,
 } from '@tianji/shared'
@@ -80,7 +80,7 @@ export class AgentRunner {
     })
   }
 
-  async *query(prompt: string): AsyncIterable<RuntimeEvent> {
+  async *query(prompt: string): AsyncIterable<DomainEvent> {
     if (this.#connection === null || this.#client === null || this.#acpSessionId === null) {
       throw new Error('Not connected. Call connect() first.')
     }
@@ -92,7 +92,7 @@ export class AgentRunner {
 
     const runId = createRunId(`run_${Date.now()}`)
     const sessionId = createSessionId(this.#acpSessionId)
-    const eventBuffer: RuntimeEvent[] = []
+    const eventBuffer: DomainEvent[] = []
 
     const unsubscribe = this.#client.onSessionUpdate((update) => {
       const event = mapSessionUpdateToRuntimeEvent(update, runId)
@@ -147,7 +147,7 @@ export class AgentRunner {
       })
 
       yield {
-        type: 'run.completed',
+        type: 'RunCompleted',
         runId,
         sessionId,
         triggerType: 'new',

@@ -6,7 +6,7 @@
  * constructor), validating the full path from runtime to agent session.
  */
 import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
-import { type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
+import { type DomainEvent, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ControlPlaneConnectionLike } from '../node-runtime/controlplane-runtime.js'
@@ -62,7 +62,7 @@ function createConnectionDouble(
 
 describe('ControlPlaneRuntime native agent routing integration', () => {
   it('routes native agent command through real InProcessAgentRunner', async () => {
-    const events: RuntimeEvent[] = [messageDeltaEvent(), runCompletedEvent()]
+    const events: DomainEvent[] = [messageDeltaEvent(), runCompletedEvent()]
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,

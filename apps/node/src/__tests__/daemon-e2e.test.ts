@@ -17,7 +17,7 @@ import {
   DaemonServer,
   type OrchestrationGraph,
 } from '@tianji/agent'
-import type { RunId, RuntimeEvent, SessionId } from '@tianji/shared'
+import type { DomainEvent, RunId, SessionId } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { UserConfigPaths } from '../config.js'
@@ -82,12 +82,12 @@ function createRecordingSession(prompts: string[]): AgentSession {
   return {
     sessionId,
     abort: () => undefined,
-    async *queryWithGraph(_graph, options): AsyncIterable<RuntimeEvent> {
+    async *queryWithGraph(_graph, options): AsyncIterable<DomainEvent> {
       const prompt = String(options.initialState?.input ?? '')
       prompts.push(prompt)
       const runId = `run_${Date.now()}` as RunId
       yield {
-        type: 'message.delta',
+        type: 'MessageDelta',
         runId,
         messageId: `msg_${Date.now()}`,
         sequence: 0,
@@ -96,7 +96,7 @@ function createRecordingSession(prompts: string[]): AgentSession {
         timestamp: Date.now(),
       }
       yield {
-        type: 'run.completed',
+        type: 'RunCompleted',
         runId,
         sessionId,
         triggerType: 'new',
@@ -114,8 +114,8 @@ async function runCommand(argv: readonly string[], deps: RunCommandDependencies)
   return { exitCode, stdout }
 }
 
-async function collectEvents(stream: AsyncIterable<RuntimeEvent>): Promise<RuntimeEvent[]> {
-  const events: RuntimeEvent[] = []
+async function collectEvents(stream: AsyncIterable<DomainEvent>): Promise<DomainEvent[]> {
+  const events: DomainEvent[] = []
   for await (const event of stream) {
     events.push(event)
   }
@@ -173,7 +173,7 @@ describe('daemon start/status/stop', () => {
       expect(ping.sessionId).toBeTruthy()
 
       const events = await collectEvents(live.client.sendChat('hello'))
-      expect(events.some((event) => event.type === 'message.delta')).toBe(true)
+      expect(events.some((event) => event.type === 'MessageDelta')).toBe(true)
     } finally {
       await live.cleanup()
     }
@@ -425,7 +425,7 @@ describe('chat and end-to-end flow', () => {
     const live = await setupLiveDaemon(createStubSession(['hello', ' world']))
     try {
       const events = await collectEvents(live.client.sendChat('hello'))
-      const deltas = events.filter((event) => event.type === 'message.delta')
+      const deltas = events.filter((event) => event.type === 'MessageDelta')
       expect(deltas).toHaveLength(2)
     } finally {
       await live.cleanup()
@@ -455,7 +455,7 @@ describe('chat and end-to-end flow', () => {
         expect(status1.exitCode).toBe(0)
 
         const events = await collectEvents(live.client.sendChat('hello'))
-        expect(events.some((event) => event.type === 'run.completed')).toBe(true)
+        expect(events.some((event) => event.type === 'RunCompleted')).toBe(true)
 
         const stop = await runCommand(['daemon', 'stop'], {
           getUserConfigPaths: () => live.paths,

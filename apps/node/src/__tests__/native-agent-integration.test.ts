@@ -1,5 +1,5 @@
 import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
-import { type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
+import { type DomainEvent, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { InProcessAgentRunner } from '../acp/in-process-runner.js'
@@ -45,7 +45,7 @@ beforeEach(async () => {
 
 describe('TaskExecutor + InProcessAgentRunner integration', () => {
   it('produces correct NDJSON event sequence for a successful run', async () => {
-    const events: RuntimeEvent[] = [messageDeltaEvent(), runCompletedEvent()]
+    const events: DomainEvent[] = [messageDeltaEvent(), runCompletedEvent()]
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,
@@ -85,16 +85,16 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
     expect(executor.executionState).toBe('idle')
     expect(executor.currentTaskId).toBeNull()
 
-    // NDJSON output: task.started(1) -> message.delta(2) -> run.completed(3) -> task.completed(4)
+    // NDJSON output: task.started(1) -> MessageDelta(2) -> RunCompleted(3) -> task.completed(4)
     expect(lines).toHaveLength(4)
 
     const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
 
     expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
     expect(parsed[1]).toMatchObject({ kind: 'agent', sequence: 2 })
-    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('message.delta')
+    expect((parsed[1] as { event: DomainEvent }).event.type).toBe('MessageDelta')
     expect(parsed[2]).toMatchObject({ kind: 'agent', sequence: 3 })
-    expect((parsed[2] as { event: RuntimeEvent }).event.type).toBe('run.completed')
+    expect((parsed[2] as { event: DomainEvent }).event.type).toBe('RunCompleted')
     expect(parsed[3]).toMatchObject({ kind: 'lifecycle', sequence: 4, type: 'task.completed' })
 
     // Sequences are contiguous with no gaps
@@ -105,7 +105,7 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
   })
 
   it('serializes tool events in correct NDJSON format', async () => {
-    const events: RuntimeEvent[] = [toolStartedEvent(), toolCompletedEvent(), runCompletedEvent()]
+    const events: DomainEvent[] = [toolStartedEvent(), toolCompletedEvent(), runCompletedEvent()]
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,
@@ -134,23 +134,23 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
 
     await executor.execute(createCommand(createTaskId('task-002'), 'use tools'))
 
-    // 5 total events: started + tool.started + tool.completed + run.completed + completed
+    // 5 total events: started + ToolStarted + ToolCompleted + RunCompleted + completed
     expect(lines).toHaveLength(5)
 
     const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
 
     expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
     expect(parsed[1]).toMatchObject({ kind: 'agent', sequence: 2 })
-    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('tool.started')
+    expect((parsed[1] as { event: DomainEvent }).event.type).toBe('ToolStarted')
     expect(parsed[2]).toMatchObject({ kind: 'agent', sequence: 3 })
-    expect((parsed[2] as { event: RuntimeEvent }).event.type).toBe('tool.completed')
+    expect((parsed[2] as { event: DomainEvent }).event.type).toBe('ToolCompleted')
     expect(parsed[3]).toMatchObject({ kind: 'agent', sequence: 4 })
-    expect((parsed[3] as { event: RuntimeEvent }).event.type).toBe('run.completed')
+    expect((parsed[3] as { event: DomainEvent }).event.type).toBe('RunCompleted')
     expect(parsed[4]).toMatchObject({ kind: 'lifecycle', sequence: 5, type: 'task.completed' })
   })
 
-  it('deduplicates repeated run.completed events through the full pipeline', async () => {
-    const events: RuntimeEvent[] = [runCompletedEvent(), runCompletedEvent(), runCompletedEvent()]
+  it('deduplicates repeated RunCompleted events through the full pipeline', async () => {
+    const events: DomainEvent[] = [runCompletedEvent(), runCompletedEvent(), runCompletedEvent()]
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
     vi.mocked(agentMock.createAgentSession).mockReturnValue({
       sessionId: SESSION_ID,
@@ -179,14 +179,14 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
 
     await executor.execute(createCommand(createTaskId('task-003'), 'duplicate test'))
 
-    // Only 3 events: task.started + 1x run.completed + task.completed (duplicates stripped)
+    // Only 3 events: task.started + 1x RunCompleted + task.completed (duplicates stripped)
     expect(lines).toHaveLength(3)
 
     const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
 
     expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
     expect(parsed[1]).toMatchObject({ kind: 'agent', sequence: 2 })
-    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('run.completed')
+    expect((parsed[1] as { event: DomainEvent }).event.type).toBe('RunCompleted')
     expect(parsed[2]).toMatchObject({ kind: 'lifecycle', sequence: 3, type: 'task.completed' })
   })
 })

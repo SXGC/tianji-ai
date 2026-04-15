@@ -53,7 +53,7 @@ export const chatCommand: CommandDefinition = {
       }
 
       for await (const event of client.sendChat(trimmed)) {
-        if (event.type === 'message.delta' && event.channel === 'text') {
+        if (event.type === 'MessageDelta' && event.channel === 'text') {
           process.stdout.write(event.payload.content)
         }
       }

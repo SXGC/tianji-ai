@@ -8,7 +8,7 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
   const runId = createRunId('run-001')
   const sessionId = 'session-001'
 
-  it('should map agent_message_chunk to message.delta (text)', () => {
+  it('should map agent_message_chunk to MessageDelta (text)', () => {
     const update: SessionNotification = {
       sessionId,
       update: {
@@ -20,14 +20,14 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    expect(result?.type).toBe('message.delta')
-    if (result?.type === 'message.delta') {
+    expect(result?.type).toBe('MessageDelta')
+    if (result?.type === 'MessageDelta') {
       expect(result.channel).toBe('text')
       expect(result.payload.content).toBe('Hello')
     }
   })
 
-  it('should map agent_thought_chunk to message.delta (thinking)', () => {
+  it('should map agent_thought_chunk to MessageDelta (thinking)', () => {
     const update: SessionNotification = {
       sessionId,
       update: {
@@ -39,12 +39,12 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    if (result?.type === 'message.delta') {
+    if (result?.type === 'MessageDelta') {
       expect(result.channel).toBe('thinking')
     }
   })
 
-  it('should map tool_call to tool.started', () => {
+  it('should map tool_call to ToolStarted', () => {
     const update: SessionNotification = {
       sessionId,
       update: {
@@ -60,10 +60,10 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    expect(result?.type).toBe('tool.started')
+    expect(result?.type).toBe('ToolStarted')
   })
 
-  it('should map tool_call_update with status completed to tool.completed', () => {
+  it('should map tool_call_update with status completed to ToolCompleted', () => {
     const update: SessionNotification = {
       sessionId,
       update: {
@@ -78,8 +78,8 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    expect(result?.type).toBe('tool.completed')
-    if (result?.type === 'tool.completed') {
+    expect(result?.type).toBe('ToolCompleted')
+    if (result?.type === 'ToolCompleted') {
       expect(result.toolCallId).toBe('tc-2')
       expect(result.invocation.toolName).toBe('write_file')
     }
@@ -116,7 +116,7 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    if (result?.type === 'tool.started') {
+    if (result?.type === 'ToolStarted') {
       expect(result.invocation.toolName).toBe('unknown')
     }
   })
@@ -135,7 +135,7 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    if (result?.type === 'tool.completed') {
+    if (result?.type === 'ToolCompleted') {
       expect(result.invocation.toolName).toBe('unknown')
     }
   })
@@ -152,7 +152,7 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    if (result?.type === 'message.delta') {
+    if (result?.type === 'MessageDelta') {
       expect(result.payload.content).toBe('')
     }
   })

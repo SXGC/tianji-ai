@@ -166,12 +166,12 @@ describe('chatCommand', () => {
 
     async function* fakeSendChat(_prompt: string) {
       yield {
-        type: 'message.delta' as const,
+        type: 'MessageDelta' as const,
         channel: 'text' as const,
         payload: { content: 'Hello' },
       }
       yield {
-        type: 'message.delta' as const,
+        type: 'MessageDelta' as const,
         channel: 'text' as const,
         payload: { content: ' World' },
       }
@@ -237,7 +237,7 @@ describe('chatCommand', () => {
 
     const mockPing = vi.fn(async () => ({ pid: 1234 }))
     const mockSendChat = vi.fn(async function* () {
-      yield { type: 'message.delta' as const, channel: 'text' as const, payload: { content: 'ok' } }
+      yield { type: 'MessageDelta' as const, channel: 'text' as const, payload: { content: 'ok' } }
     })
 
     MockedDaemonClient.mockImplementation(
