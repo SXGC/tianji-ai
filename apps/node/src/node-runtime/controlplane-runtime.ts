@@ -3,6 +3,8 @@ import type { ObserverLogger } from '@tianji/observer'
 import type {
   AgentInfo,
   Command,
+  DomainEvent,
+  DomainEventEnvelope,
   NodeExecutionState,
   NodeId,
   PollCommandResponse,
@@ -40,6 +42,15 @@ export interface ControlPlaneRuntimeConfig {
   readonly logger?: RuntimeLogger
   /** 传给 SessionRuntime 的 observer logger，用于 runtime 层日志（如 token usage）。 */
   readonly observerLogger?: ObserverLogger
+  /**
+   * 发射 Task 生命周期领域事件，由 daemon-entry 注入（连接 pipeline → bus）。
+   * 仅在有 controlplane 配置时使用。
+   */
+  readonly emitEvent: (event: DomainEvent) => void
+  /**
+   * 将 agent runner 产生的 DomainEventEnvelope publish 到 bus，由 daemon-entry 注入。
+   */
+  readonly publishEnvelope: (envelope: DomainEventEnvelope) => void
 }
 
 export interface ControlPlaneCallbacks {
@@ -52,13 +63,9 @@ export interface ControlPlaneRuntimeDeps {
 }
 
 export interface ControlPlaneConnectionLike {
+  /** 暴露给 daemon-entry 的 HTTP client，用于 forwarder 的 postTaskEvents。 */
   readonly client?: {
-    openEventStream(taskId: string): Promise<{
-      write(json: string): Promise<void>
-      close(): Promise<void>
-      abort(): void
-      writeKeepalive(): Promise<void>
-    }>
+    postTaskEvents(taskId: string, ndjson: string): Promise<void>
   }
   start(): Promise<void>
   stop(): void
@@ -192,13 +199,8 @@ export function createControlPlaneRuntime(
           logger: config.logger,
         })
       },
-      openEventStream: async (taskId) => {
-        if (connection.client === undefined) {
-          throw new Error('Control plane client is not available')
-        }
-
-        return connection.client.openEventStream(taskId)
-      },
+      emitEvent: config.emitEvent,
+      publishEnvelope: config.publishEnvelope,
     } satisfies TaskExecutorConfig)
 
   taskExecutorRef = taskExecutor

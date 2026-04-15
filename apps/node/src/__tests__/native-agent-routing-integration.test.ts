@@ -6,7 +6,12 @@
  * constructor), validating the full path from runtime to agent session.
  */
 import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
-import { type DomainEvent, createNodeId, createTaskId } from '@tianji/shared'
+import {
+  type DomainEvent,
+  type DomainEventEnvelope,
+  createNodeId,
+  createTaskId,
+} from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ControlPlaneConnectionLike } from '../node-runtime/controlplane-runtime.js'
@@ -15,7 +20,6 @@ import {
   SESSION_ID,
   createCommand,
   createFakeContext,
-  createNdjsonWriterStub,
   messageDeltaEvent,
   runCompletedEvent,
 } from './helpers/native-agent-test-utils.js'
@@ -43,20 +47,39 @@ beforeEach(async () => {
   agentMock = await import('@tianji/agent')
 })
 
-/**
- * Creates a ControlPlaneConnectionLike double with an event stream backed
- * by the provided NDJSON writer stub.
- */
-function createConnectionDouble(
-  writerStub: ReturnType<typeof createNdjsonWriterStub>['writer']
-): ControlPlaneConnectionLike {
+/** 创建 ControlPlaneConnectionLike double，client 提供 postTaskEvents stub。 */
+function createConnectionDouble(): ControlPlaneConnectionLike {
   return {
     start: vi.fn(async () => undefined),
     stop: vi.fn(),
     setExecutionState: vi.fn(),
     client: {
-      openEventStream: vi.fn(async () => writerStub),
+      postTaskEvents: vi.fn(async () => undefined),
     },
+  }
+}
+
+/** 构造最小合法的 runtime config，包含 emitEvent/publishEnvelope 收集器。 */
+function createRuntimeConfig(
+  emittedEvents: DomainEvent[],
+  publishedEnvelopes: DomainEventEnvelope[]
+) {
+  return {
+    baseUrl: 'http://localhost:3000',
+    nodeId: createNodeId('node-routing'),
+    enrollmentToken: 'tok',
+    hostname: 'testhost',
+    platform: 'linux',
+    version: '1.0.0',
+    agentList: [] as never[],
+    agentConfigs: {
+      'test-agent': { model: 'openai/gpt-4o-mini' },
+    },
+    nativeAgentContext: createFakeContext(),
+    defaultGraph: stubDefaultGraph,
+    executorFactory: stubExecutorFactory,
+    emitEvent: (ev: DomainEvent) => emittedEvents.push(ev),
+    publishEnvelope: (env: DomainEventEnvelope) => publishedEnvelopes.push(env),
   }
 }
 
@@ -72,28 +95,13 @@ describe('ControlPlaneRuntime native agent routing integration', () => {
       abort: vi.fn(),
     })
 
-    const { lines, writer } = createNdjsonWriterStub()
-    const connectionDouble = createConnectionDouble(writer)
+    const emittedEvents: DomainEvent[] = []
+    const publishedEnvelopes: DomainEventEnvelope[] = []
+    const connectionDouble = createConnectionDouble()
 
     const runtime = createControlPlaneRuntime(
-      {
-        baseUrl: 'http://localhost:3000',
-        nodeId: createNodeId('node-routing'),
-        enrollmentToken: 'tok',
-        hostname: 'testhost',
-        platform: 'linux',
-        version: '1.0.0',
-        agentList: [],
-        agentConfigs: {
-          'test-agent': { model: 'openai/gpt-4o-mini' },
-        },
-        nativeAgentContext: createFakeContext(),
-        defaultGraph: stubDefaultGraph,
-        executorFactory: stubExecutorFactory,
-      },
-      {
-        createConnection: () => connectionDouble,
-      }
+      createRuntimeConfig(emittedEvents, publishedEnvelopes),
+      { createConnection: () => connectionDouble }
     )
 
     const taskId = createTaskId('task-routing-001')
@@ -105,15 +113,14 @@ describe('ControlPlaneRuntime native agent routing integration', () => {
     // createAgentSession was called
     expect(agentMock.createAgentSession).toHaveBeenCalled()
 
-    // Events written include task.started and task.completed
-    expect(lines).toHaveLength(4)
-    const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
-    expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
-    expect(parsed[parsed.length - 1]).toMatchObject({
-      kind: 'lifecycle',
-      sequence: 4,
-      type: 'task.completed',
-    })
+    // lifecycle events via emitEvent
+    const lifecycleTypes = emittedEvents.map((e) => e.type)
+    expect(lifecycleTypes).toContain('TaskStarted')
+    expect(lifecycleTypes).toContain('TaskCompleted')
+    expect(lifecycleTypes).not.toContain('TaskFailed')
+
+    // agent envelopes published (MessageDelta + RunCompleted)
+    expect(publishedEnvelopes.map((e) => e.payload.type)).toEqual(['MessageDelta', 'RunCompleted'])
 
     // connectionDouble.setExecutionState was called with 'busy' then last called with 'idle'
     const setStateFn = vi.mocked(connectionDouble.setExecutionState)
@@ -124,28 +131,13 @@ describe('ControlPlaneRuntime native agent routing integration', () => {
   it('propagates agent session failure and recovers to idle', async () => {
     vi.mocked(agentMock.loadAgentContextForName).mockRejectedValue(new Error('soul file missing'))
 
-    const { lines, writer } = createNdjsonWriterStub()
-    const connectionDouble = createConnectionDouble(writer)
+    const emittedEvents: DomainEvent[] = []
+    const publishedEnvelopes: DomainEventEnvelope[] = []
+    const connectionDouble = createConnectionDouble()
 
     const runtime = createControlPlaneRuntime(
-      {
-        baseUrl: 'http://localhost:3000',
-        nodeId: createNodeId('node-routing'),
-        enrollmentToken: 'tok',
-        hostname: 'testhost',
-        platform: 'linux',
-        version: '1.0.0',
-        agentList: [],
-        agentConfigs: {
-          'test-agent': { model: 'openai/gpt-4o-mini' },
-        },
-        nativeAgentContext: createFakeContext(),
-        defaultGraph: stubDefaultGraph,
-        executorFactory: stubExecutorFactory,
-      },
-      {
-        createConnection: () => connectionDouble,
-      }
+      createRuntimeConfig(emittedEvents, publishedEnvelopes),
+      { createConnection: () => connectionDouble }
     )
 
     const taskId = createTaskId('task-routing-002')
@@ -153,14 +145,10 @@ describe('ControlPlaneRuntime native agent routing integration', () => {
       'soul file missing'
     )
 
-    // Events written include task.started and task.failed
-    const parsed = lines.map((line) => JSON.parse(line) as Record<string, unknown>)
-    expect(parsed[0]).toMatchObject({ kind: 'lifecycle', type: 'task.started' })
-    expect(parsed[parsed.length - 1]).toMatchObject({
-      kind: 'lifecycle',
-      type: 'task.failed',
-      error: 'soul file missing',
-    })
+    // lifecycle events: TaskStarted + TaskFailed
+    const lifecycleTypes = emittedEvents.map((e) => e.type)
+    expect(lifecycleTypes).toContain('TaskStarted')
+    expect(lifecycleTypes).toContain('TaskFailed')
 
     // connectionDouble.setExecutionState last called with 'idle' (recovery)
     const setStateFn = vi.mocked(connectionDouble.setExecutionState)

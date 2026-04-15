@@ -30,8 +30,12 @@ export interface ForwarderDeps {
   readonly maxItems: number
   /** BatchCommitter 定时 flush 间隔（毫秒）。 */
   readonly flushIntervalMs: number
-  /** 当前 task 的路由 ID，将随 POST body 发送给 cp。 */
-  readonly currentTaskId: string
+  /**
+   * 动态获取当前 task 路由 ID 的 getter。
+   * daemon 是长进程，每次执行不同任务；通过 getter 动态获取当前 taskId。
+   * 返回 null 时 flush 将跳过（无任务执行中）。
+   */
+  readonly getCurrentTaskId: () => string | null
 }
 
 /** createForwarder 返回的句柄，含 subscription 与 dispose。 */
@@ -51,7 +55,12 @@ export function createForwarder(deps: ForwarderDeps): ForwarderHandle {
     maxItems: deps.maxItems,
     flushIntervalMs: deps.flushIntervalMs,
     flush: async (events) => {
-      await deps.post({ taskId: deps.currentTaskId, events })
+      const taskId = deps.getCurrentTaskId()
+      if (taskId === null) {
+        // 无任务执行中，丢弃（daemon 启动阶段的背景噪音事件无需转发）
+        return
+      }
+      await deps.post({ taskId, events })
     },
   })
 

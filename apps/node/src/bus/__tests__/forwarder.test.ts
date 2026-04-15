@@ -40,7 +40,7 @@ describe('Forwarder', () => {
       post,
       maxItems: 2,
       flushIntervalMs: 1000,
-      currentTaskId: 't1',
+      getCurrentTaskId: () => 't1',
     })
 
     bus.publish(makeEnvelope(1))
@@ -65,7 +65,7 @@ describe('Forwarder', () => {
       post,
       maxItems: 100,
       flushIntervalMs: 60_000,
-      currentTaskId: 'task-x',
+      getCurrentTaskId: () => 'task-x',
     })
 
     bus.publish(makeEnvelope(1))
@@ -90,7 +90,7 @@ describe('Forwarder', () => {
       post,
       maxItems: 1,
       flushIntervalMs: 60_000,
-      currentTaskId: 'task-y',
+      getCurrentTaskId: () => 'task-y',
     })
 
     const env = makeEnvelope(99)
@@ -108,5 +108,28 @@ describe('Forwarder', () => {
     expect(forwarded.eventId).toBe('e99')
 
     await fwd.dispose()
+  })
+
+  it('getCurrentTaskId 返回 null 时 flush 跳过，post 不被调用', async () => {
+    const post = vi.fn().mockResolvedValue(undefined)
+    const bus = createEventBus({ lagSink: vi.fn() })
+    const fwd = createForwarder({
+      bus,
+      post,
+      maxItems: 1,
+      flushIntervalMs: 60_000,
+      // 始终返回 null，模拟无任务执行中
+      getCurrentTaskId: () => null,
+    })
+
+    bus.publish(makeEnvelope(1))
+    await flushMicrotasks()
+    await flushMicrotasks()
+
+    expect(post).not.toHaveBeenCalled()
+
+    await fwd.dispose()
+    // dispose 也应跳过
+    expect(post).not.toHaveBeenCalled()
   })
 })

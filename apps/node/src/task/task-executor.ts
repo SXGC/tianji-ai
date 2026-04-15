@@ -5,19 +5,20 @@
  */
 
 import type { IAgentRunner } from '../acp/index.js'
-import type { NdjsonWriter } from '../controlplane/index.js'
 import type { RuntimeLogger } from '../logger.js'
 
 import type { ObserverLogScope } from '@tianji/observer'
 import type {
   Command,
   DomainEvent,
+  DomainEventEnvelope,
   MessageCompletedEvent,
   NodeExecutionState,
   NodeId,
   ToolCompletedEvent,
   ToolFailedEvent,
 } from '@tianji/shared'
+import { TianjiError } from '@tianji/shared'
 
 interface TurnSummary {
   runId: string
@@ -30,7 +31,16 @@ export interface TaskExecutorConfig {
   readonly nodeId: NodeId
   readonly onExecutionStateChange: (state: NodeExecutionState) => void
   readonly createRunner: (command: Command) => Promise<IAgentRunner>
-  readonly openEventStream: (taskId: string) => Promise<NdjsonWriter>
+  /**
+   * 发射 Task 生命周期领域事件（TaskStarted / TaskCompleted / TaskFailed 等）。
+   * 事件经 pipeline 包装后进入 bus，由 forwarder 批量转发至 cp。
+   */
+  readonly emitEvent: (event: DomainEvent) => void
+  /**
+   * 将 agent runner 产生的 DomainEventEnvelope 直接 publish 到 bus。
+   * bus 订阅的 forwarder 负责批量转发至 cp。
+   */
+  readonly publishEnvelope: (envelope: DomainEventEnvelope) => void
   readonly logger?: RuntimeLogger
 }
 
@@ -77,24 +87,14 @@ export class TaskExecutor {
       taskId,
       agentId: command.payload.agentId,
     })
-    const eventStream = await this.#config.openEventStream(taskId)
-    await this.#config.logger?.logDebug(this.#scope, 'Opened task event stream', {
-      taskId,
-    })
-    let sequence = 2
+
+    const now = (): number => Date.now()
 
     try {
-      await this.#config.logger?.logDebug(this.#scope, 'Writing task started lifecycle event', {
+      await this.#config.logger?.logDebug(this.#scope, 'Emitting TaskStarted lifecycle event', {
         taskId,
-        sequence: 1,
       })
-      await eventStream.write(
-        JSON.stringify({
-          kind: 'lifecycle',
-          sequence: 1,
-          type: 'task.started',
-        })
-      )
+      this.#config.emitEvent({ type: 'TaskStarted', taskId, timestamp: now() })
 
       await runner.connect()
       await this.#config.logger?.logDebug(this.#scope, 'Connected task runner', {
@@ -117,31 +117,18 @@ export class TaskExecutor {
           }
         }
 
-        await eventStream.write(
-          JSON.stringify({
-            kind: 'agent',
-            sequence,
-            event: envelope?.payload,
-          })
-        )
-        sequence += 1
+        // agent envelope 直接 publish 到 bus，由 forwarder 批量转发至 cp
+        this.#config.publishEnvelope(envelope)
       }
 
       if (!sawTerminalRunEvent) {
         throw new Error('Agent run ended without a terminal event')
       }
 
-      await this.#config.logger?.logDebug(this.#scope, 'Writing task completed lifecycle event', {
+      await this.#config.logger?.logDebug(this.#scope, 'Emitting TaskCompleted lifecycle event', {
         taskId,
-        sequence,
       })
-      await eventStream.write(
-        JSON.stringify({
-          kind: 'lifecycle',
-          sequence,
-          type: 'task.completed',
-        })
-      )
+      this.#config.emitEvent({ type: 'TaskCompleted', taskId, timestamp: now() })
       await this.#config.logger?.logDebug(this.#scope, 'Task execution finished successfully', {
         taskId,
       })
@@ -152,21 +139,12 @@ export class TaskExecutor {
         error: errorMessage,
       })
 
-      try {
-        await eventStream.write(
-          JSON.stringify({
-            kind: 'lifecycle',
-            sequence,
-            type: 'task.failed',
-            error: errorMessage,
-          })
-        )
-      } catch (streamError) {
-        await this.#config.logger?.logError(this.#scope, 'Failed to write task failure event', {
-          taskId,
-          error: streamError instanceof Error ? streamError.message : String(streamError),
-        })
-      }
+      this.#config.emitEvent({
+        type: 'TaskFailed',
+        taskId,
+        timestamp: now(),
+        error: new TianjiError('internal', 'TASK_EXECUTION_FAILED', errorMessage),
+      })
 
       throw error
     } finally {
@@ -174,7 +152,6 @@ export class TaskExecutor {
         taskId,
       })
       await runner.disconnect()
-      await eventStream.close()
       this.#executionState = 'idle'
       this.#currentTaskId = null
       this.#config.onExecutionStateChange(this.#executionState)

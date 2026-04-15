@@ -73,12 +73,7 @@ function createConnectionDouble(): ControlPlaneConnectionLike {
     stop: vi.fn(),
     setExecutionState: vi.fn(),
     client: {
-      openEventStream: vi.fn(async () => ({
-        write: vi.fn(async () => undefined),
-        close: vi.fn(async () => undefined),
-        abort: vi.fn(),
-        writeKeepalive: vi.fn(async () => undefined),
-      })),
+      postTaskEvents: vi.fn(async () => undefined),
     },
   }
 }
@@ -95,6 +90,8 @@ function createTestConfig(
     version: '1.0.0',
     agentList: [],
     agentConfigs: {},
+    emitEvent: vi.fn(),
+    publishEnvelope: vi.fn(),
     ...overrides,
   }
 }

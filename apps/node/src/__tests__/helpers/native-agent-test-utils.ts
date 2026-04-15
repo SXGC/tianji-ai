@@ -58,26 +58,6 @@ export function createCommand(taskId: ReturnType<typeof createTaskId>, goal: str
   }
 }
 
-/**
- * 构造 NDJSON writer stub，用于捕获写入的事件行。
- *
- * @returns lines 数组和 writer 对象
- */
-export function createNdjsonWriterStub() {
-  const lines: string[] = []
-  return {
-    lines,
-    writer: {
-      write: async (json: string) => {
-        lines.push(json)
-      },
-      writeKeepalive: async () => undefined,
-      close: async () => undefined,
-      abort: () => undefined,
-    },
-  }
-}
-
 /** 构造 MessageDelta 事件。 */
 export function messageDeltaEvent(): DomainEvent {
   return {

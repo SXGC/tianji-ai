@@ -22,6 +22,7 @@ import {
 } from '@tianji/runtime'
 import { createEventBus } from '@tianji/shared'
 
+import { createForwarder } from './bus/forwarder.js'
 import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
 import { getCliLogger, logDebug, logError, logInfo } from './logger.js'
@@ -164,6 +165,8 @@ export async function runDaemonEntry(): Promise<void> {
   // 如果用户配置中包含 controlplane 配置，则启动 controlplane 连接
   const controlPlaneConfig = readStoredControlPlaneConfig(context.config)
   let controlPlaneHandle: ControlPlaneRuntimeHandle | null = null
+  // forwarder 在有 cp 配置时装配，持有引用以便 shutdown 时 dispose
+  let forwarderDispose: (() => Promise<void>) | null = null
   if (controlPlaneConfig) {
     updateControlPlaneStatus({
       enabled: true,
@@ -185,6 +188,8 @@ export async function runDaemonEntry(): Promise<void> {
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
       logger,
       observerLogger: logger.observerLogger,
+      emitEvent: (ev) => pipeline.emitEvent(ev),
+      publishEnvelope: (env) => bus.publish(env),
       onConnectionStateChange: (event) => {
         if (event.status === 'connecting') {
           updateControlPlaneStatus({
@@ -234,6 +239,29 @@ export async function runDaemonEntry(): Promise<void> {
           nodeId: controlPlaneConfig.nodeId,
         }
       )
+
+      // ---- 装配 forwarder（订阅在 als.run() 外，符合 Stage 06 review 约束）----
+      // 从 connection.client 获取 postTaskEvents，当 client 不可用时直接抛出（let it crash）
+      const cpClient = runtime.connection.client
+      if (cpClient !== undefined) {
+        const forwarder = createForwarder({
+          bus,
+          post: async ({ taskId, events }) => {
+            const ndjson = events.map((e) => JSON.stringify(e)).join('\n')
+            await cpClient.postTaskEvents(taskId, ndjson)
+          },
+          maxItems: 500,
+          flushIntervalMs: 50,
+          // 动态获取当前执行任务的 taskId，null 时 flush 跳过
+          getCurrentTaskId: () => runtime.taskExecutor.currentTaskId,
+        })
+        forwarderDispose = () => forwarder.dispose()
+        await logDebug(context.paths, ['daemon', 'controlplane'], 'Forwarder subscribed to bus', {
+          maxItems: 500,
+          flushIntervalMs: 50,
+        })
+      }
+      // -------------------------------------------------------------------------
     } catch (error) {
       updateControlPlaneStatus({
         enabled: true,
@@ -272,6 +300,10 @@ export async function runDaemonEntry(): Promise<void> {
       }
 
       controlPlaneHandle?.connection.stop()
+      // forwarder final-flush：确保在途 envelope 在进程退出前发送到 cp
+      if (forwarderDispose !== null) {
+        await forwarderDispose()
+      }
       // TODO(Stage 06)：bus 当前无 close/drain 方法。Stage 06 引入 AsyncLocalStorage 时一并添加
       // bus.close()，确保所有在途 handler 完成后再退出。
       await server.shutdown()
