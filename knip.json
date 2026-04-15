@@ -1,20 +1,20 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "ignoreExportsUsedInFile": true,
-  "ignore": ["apps/controlplane/src/server.ts", "apps/node/src/bin.ts"],
+  "ignore": ["apps/node/src/bin.ts"],
   "workspaces": {
     "packages/shared": {
       "entry": ["scripts/*.ts"]
+    },
+    "apps/controlplane": {
+      "entry": ["src/server.ts", "src/migrate-cli.ts", "src/token-cli.ts", "src/index.ts"]
     }
   },
-  "ignoreDependencies": ["@tianji/runtime"],
   "ignoreIssues": {
     "apps/node/src/__tests__/helpers/**": ["exports", "types"],
     "packages/agent/src/__tests__/helpers/**": ["exports", "types"],
     "packages/runtime/src/__tests__/helpers/**": ["exports", "types"],
     "apps/node/src/logger.ts": ["types"],
-    "packages/agent/src/orchestration/executors/acp-executor.ts": ["files"],
-    "apps/controlplane/src/storage/event-log-recoverer.ts": ["files"],
-    "apps/controlplane/src/storage/event-log-subscriber.ts": ["files"]
+    "packages/agent/src/orchestration/executors/acp-executor.ts": ["files"]
   }
 }
