@@ -1,6 +1,8 @@
 import { unlink, writeFile } from 'node:fs/promises'
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http'
 
+import type { EventBus } from '@tianji/shared'
+
 import type { AgentAppPaths } from './context.js'
 import {
   type ChatErrorSseMessage,
@@ -22,6 +24,7 @@ export interface DaemonServerOptions {
   readonly session: AgentSession
   readonly defaultGraph: OrchestrationGraph
   readonly executorFactory: AgentExecutorFactory
+  readonly bus: EventBus
   readonly paths?: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'>
   readonly getControlPlaneStatus?: () => ControlPlaneStatusSnapshot
   /**
@@ -47,6 +50,7 @@ export class DaemonServer {
   readonly #session: AgentSession
   readonly #defaultGraph: OrchestrationGraph
   readonly #executorFactory: AgentExecutorFactory
+  readonly #bus: EventBus
   readonly #paths: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'> | undefined
   readonly #server: Server
   readonly #getControlPlaneStatus: (() => ControlPlaneStatusSnapshot) | undefined
@@ -61,6 +65,7 @@ export class DaemonServer {
     this.#session = options.session
     this.#defaultGraph = options.defaultGraph
     this.#executorFactory = options.executorFactory
+    this.#bus = options.bus
     this.#paths = options.paths
     this.#getControlPlaneStatus = options.getControlPlaneStatus
     this.#enterCorrelation = options.enterCorrelation
@@ -206,14 +211,21 @@ export class DaemonServer {
     const correlationId = crypto.randomUUID()
 
     const runChat = async (): Promise<void> => {
+      const subscription = this.#bus.subscribe(
+        { aggregateType: ['GraphRun', 'Run'] },
+        (env) => {
+          this.#sendSse(res, DAEMON_SSE_EVENT_NAME, { type: 'chat.event', event: env })
+        },
+        { name: 'daemon-sse', queueSize: 2_000 }
+      )
       try {
         const graphOptions: ChatWithGraphOptions = {
           initialState: { input: parsed.prompt },
           compileOptions: { agentExecutorFactory: this.#executorFactory },
         }
-        for await (const event of this.#session.queryWithGraph(this.#defaultGraph, graphOptions)) {
-          const message: ChatSseMessage = { type: 'chat.event', event }
-          this.#sendSse(res, DAEMON_SSE_EVENT_NAME, message)
+        // 消耗迭代器以驱动图运行；事件通过 bus 订阅推送给 SSE，不直接使用迭代值。
+        for await (const _ of this.#session.queryWithGraph(this.#defaultGraph, graphOptions)) {
+          // intentionally empty — events are delivered via bus subscription
         }
         this.#sendSse(res, DAEMON_SSE_DONE_NAME, { type: 'chat.done' } satisfies ChatSseMessage)
       } catch (err: unknown) {
@@ -224,6 +236,7 @@ export class DaemonServer {
           message,
         } satisfies ChatErrorSseMessage)
       } finally {
+        subscription.unsubscribe()
         this.#chatInProgress = false
         res.end()
       }

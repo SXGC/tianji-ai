@@ -1,69 +1,82 @@
 /**
- * Maps DomainEvent to ACP SessionUpdate notifications.
+ * Maps DomainEventEnvelope to ACP SessionUpdate notifications.
  *
- * 将 tianji 领域事件流转换为 ACP 协议的 session/update 通知。
+ * 将 tianji 领域事件信封流转换为 ACP 协议的 session/update 通知。
  * Run lifecycle 事件不映射为 SessionUpdate，因为 ACP 的 prompt() 返回值已隐含结束语义。
  *
  * @module acp/event-mapper
  */
 
 import type { SessionNotification } from '@agentclientprotocol/sdk'
-import type { DomainEvent } from '@tianji/shared'
+import type { DomainEventEnvelope } from '@tianji/shared'
 
 /**
- * 将单个 DomainEvent 映射为 ACP SessionUpdate 通知。
+ * 将单个 DomainEventEnvelope 映射为 ACP SessionUpdate 通知。
  * 不可映射的事件返回 null。
+ *
+ * 仅处理 aggregateType='Run' 的事件：MessageDelta、ToolStarted、ToolCompleted、ToolFailed。
  */
 export function mapRuntimeEventToSessionUpdate(
   sessionId: string,
-  event: DomainEvent
+  envelope: DomainEventEnvelope
 ): SessionNotification | null {
-  switch (event.type) {
-    case 'MessageDelta':
+  switch (envelope.type) {
+    case 'MessageDelta': {
+      const ev = envelope.payload
+      if (ev.type !== 'MessageDelta') return null
       return {
         sessionId,
         update: {
-          sessionUpdate:
-            event.channel === 'thinking' ? 'agent_thought_chunk' : 'agent_message_chunk',
+          sessionUpdate: ev.channel === 'thinking' ? 'agent_thought_chunk' : 'agent_message_chunk',
           content: {
             type: 'text',
-            text: event.payload.content,
+            text: ev.payload.content,
           },
         },
       }
+    }
 
-    case 'ToolStarted':
+    case 'ToolStarted': {
+      const ev = envelope.payload
+      if (ev.type !== 'ToolStarted') return null
       return {
         sessionId,
         update: {
           sessionUpdate: 'tool_call',
-          toolCallId: event.toolCallId,
-          title: event.invocation.toolName,
-          kind: mapToolKind(event.invocation.toolName),
+          toolCallId: ev.toolCallId,
+          title: ev.invocation.toolName,
+          kind: mapToolKind(ev.invocation.toolName),
           status: 'pending',
-          rawInput: event.invocation.args,
+          rawInput: ev.invocation.args,
         },
       }
+    }
 
-    case 'ToolCompleted':
+    case 'ToolCompleted': {
+      const ev = envelope.payload
+      if (ev.type !== 'ToolCompleted') return null
       return {
         sessionId,
         update: {
           sessionUpdate: 'tool_call_update',
-          toolCallId: event.toolCallId,
+          toolCallId: ev.toolCallId,
           status: 'completed',
         },
       }
+    }
 
-    case 'ToolFailed':
+    case 'ToolFailed': {
+      const ev = envelope.payload
+      if (ev.type !== 'ToolFailed') return null
       return {
         sessionId,
         update: {
           sessionUpdate: 'tool_call_update',
-          toolCallId: event.toolCallId,
+          toolCallId: ev.toolCallId,
           status: 'failed',
         },
       }
+    }
 
     case 'MessageStarted':
     case 'MessageCompleted':

@@ -138,6 +138,7 @@ export async function runDaemonEntry(): Promise<void> {
     session,
     defaultGraph,
     executorFactory,
+    bus,
     getControlPlaneStatus: () => controlPlaneStatus,
     paths: {
       daemonPortPath: context.paths.daemonPortPath,
