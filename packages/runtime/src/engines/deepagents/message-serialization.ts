@@ -276,3 +276,29 @@ export function parseToolArgs(value: string): unknown {
     return value
   }
 }
+
+/**
+ * 合并模型流式阶段观测到的工具调用片段，逐步补全参数文本并生成可比较的参数对象。
+ */
+export function registerObservedToolCalls(
+  chunk: unknown,
+  observedToolCalls: DeepagentsPendingToolCall[]
+): void {
+  for (const observedToolCall of readObservedToolCalls(chunk)) {
+    const existing = observedToolCalls.find(
+      (item) => item.toolCallId === observedToolCall.toolCallId
+    )
+
+    if (existing !== undefined) {
+      const mergedArgsText = `${existing.argsText}${observedToolCall.argsText}`
+      observedToolCalls.splice(observedToolCalls.indexOf(existing), 1, {
+        ...existing,
+        argsText: mergedArgsText,
+        args: parseToolArgs(mergedArgsText),
+      })
+      continue
+    }
+
+    observedToolCalls.push(observedToolCall)
+  }
+}
