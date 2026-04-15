@@ -57,8 +57,20 @@ export async function runDaemonEntry(): Promise<void> {
     lagSink: (info) => {
       void logger.observerLogger.warn(['daemon', 'bus'], 'node subscriber lag', { info })
     },
+    // I1：把订阅者异常路由到结构化日志，保证错误可观测性
+    errorSink: (err) => {
+      void logger.observerLogger.error(['daemon', 'bus'], 'daemon bus subscriber error', {
+        subscriberName: err.subscriberName,
+        subscriptionId: err.subscriptionId,
+        eventId: err.envelope.eventId,
+        eventType: err.envelope.type,
+        error: err.error instanceof Error ? err.error.message : String(err.error),
+      })
+    },
   })
   const counter = new SequenceCounter()
+  // TODO(Stage 06, Task 0)：contextRef 是进程级共享单例，并发 run 会互相污染 causation 链。
+  // 必须在 Stage 06 用 AsyncLocalStorage 替换，使每次请求持有独立的 CausalContext。
   const contextRef = { current: CausalContext.root(crypto.randomUUID()) }
   const pipeline = createRuntimeEventPipeline({
     publish: (env) => bus.publish(env),
@@ -67,6 +79,8 @@ export async function runDaemonEntry(): Promise<void> {
     source: { processKind: 'daemon', processId: process.pid.toString() },
     recoverer: NoopSequenceRecoverer,
   })
+  // I5：当前 bus 无订阅者（node 侧不直连 event_log）。
+  // Stage 07 的 forwarder 将订阅此 bus 并把 envelope 转发到 controlplane。
   // -----------------------------------------------------------------------------
 
   const session = await createAgentSession(context, {
@@ -233,6 +247,8 @@ export async function runDaemonEntry(): Promise<void> {
       }
 
       controlPlaneHandle?.connection.stop()
+      // TODO(Stage 06)：bus 当前无 close/drain 方法。Stage 06 引入 AsyncLocalStorage 时一并添加
+      // bus.close()，确保所有在途 handler 完成后再退出。
       await server.shutdown()
 
       await logInfo(context.paths, ['daemon'], 'Daemon exiting', {
