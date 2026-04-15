@@ -7,5 +7,6 @@
 export * from './causal-context.js'
 export * from './envelope-wrapper.js'
 export * from './event-target.js'
+export * from './pipeline.js'
 export * from './sequence-counter.js'
 export * from './sequence-recoverer.js'
