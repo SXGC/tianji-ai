@@ -1,4 +1,5 @@
 import type { ObserverLogger } from '@tianji/observer'
+import type { DomainEvent } from '@tianji/shared'
 
 import type { ControlPlaneDb } from '../db/index.js'
 import { HEARTBEAT_TIMEOUT_MS } from '../routes/node-heartbeat.js'
@@ -11,15 +12,22 @@ const SCOPE_MONITOR = ['controlplane', 'monitor'] as const
 export class ObservationMonitor {
   readonly #db: ControlPlaneDb
   readonly #logger: ObserverLogger
+  readonly #emitEvent: ((ev: DomainEvent) => void | Promise<void>) | undefined
   #timer: ReturnType<typeof setInterval> | null = null
 
   /**
    * @param db - controlplane 数据库实例
    * @param logger - 结构化日志实例
+   * @param emitEvent - 可选：DomainEvent 发射回调，用于发射 Node/Task 生命周期事件
    */
-  constructor(db: ControlPlaneDb, logger: ObserverLogger) {
+  constructor(
+    db: ControlPlaneDb,
+    logger: ObserverLogger,
+    emitEvent?: (ev: DomainEvent) => void | Promise<void>
+  ) {
     this.#db = db
     this.#logger = logger
+    this.#emitEvent = emitEvent
   }
 
   /** 启动周期检查。 */
@@ -55,6 +63,12 @@ export class ObservationMonitor {
 
       if (statusChange.changes > 0) {
         void this.#logger.warn(SCOPE_MONITOR, 'Node marked offline', { nodeId })
+        void this.#emitEvent?.({
+          type: 'NodeMarkedOffline',
+          nodeId,
+          reason: 'heartbeat-timeout',
+          timestamp: now,
+        })
       }
 
       const taskChange = this.#db.raw
