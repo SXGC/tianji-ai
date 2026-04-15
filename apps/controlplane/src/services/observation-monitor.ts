@@ -71,18 +71,35 @@ export class ObservationMonitor {
         })
       }
 
-      const taskChange = this.#db.raw
+      // 先查出受影响的 task_id，再批量更新状态，以便逐一发射 TaskObservationLost 事件。
+      const affectedTasks = this.#db.raw
         .prepare(
-          `UPDATE tasks SET status = 'observation_lost', failure_reason = 'observation_lost', updated_at = ?
+          `SELECT task_id, updated_at FROM tasks
            WHERE node_id = ? AND status IN ('running', 'waiting')`
         )
-        .run(now, nodeId)
+        .all(nodeId) as Array<{ task_id: string; updated_at: number }>
 
-      if (taskChange.changes > 0) {
+      if (affectedTasks.length > 0) {
+        this.#db.raw
+          .prepare(
+            `UPDATE tasks SET status = 'observation_lost', failure_reason = 'observation_lost', updated_at = ?
+             WHERE node_id = ? AND status IN ('running', 'waiting')`
+          )
+          .run(now, nodeId)
+
         void this.#logger.warn(SCOPE_MONITOR, 'Tasks marked as observation_lost', {
           nodeId,
-          taskCount: taskChange.changes,
+          taskCount: affectedTasks.length,
         })
+
+        for (const { task_id: taskId, updated_at: lastUpdatedAt } of affectedTasks) {
+          void this.#emitEvent?.({
+            type: 'TaskObservationLost',
+            taskId,
+            lastObservedAt: new Date(lastUpdatedAt).toISOString(),
+            timestamp: now,
+          })
+        }
       }
 
       this.#db.raw
