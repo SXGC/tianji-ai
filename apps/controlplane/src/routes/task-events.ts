@@ -59,7 +59,17 @@ export function createTaskEventsRoute(deps: TaskEventsRouteDeps): Hono<AuthVaria
     /** 处理单行 NDJSON 数据，parse 为 DomainEventEnvelope 并 ingest。 */
     async function processLine(line: string): Promise<void> {
       const env = JSON.parse(line) as DomainEventEnvelope
-      await ingest.ingest(env)
+      try {
+        await ingest.ingest(env)
+      } catch (err) {
+        void logger.error(['cp', 'ingest'], 'ingest rejected envelope', {
+          eventId: env.eventId,
+          eventType: env.type,
+          processKind: env.source.processKind,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        throw err
+      }
       accepted++
     }
 
