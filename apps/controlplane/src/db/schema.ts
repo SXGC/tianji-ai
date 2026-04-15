@@ -97,15 +97,6 @@ CREATE TABLE IF NOT EXISTS task_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_task_sessions_session ON task_sessions(session_id, attached_at DESC);
 
-CREATE TABLE IF NOT EXISTS task_events (
-  task_id TEXT NOT NULL REFERENCES tasks(task_id),
-  sequence INTEGER NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('lifecycle', 'agent')),
-  payload TEXT NOT NULL,
-  received_at INTEGER NOT NULL,
-  PRIMARY KEY (task_id, sequence)
-);
-
 CREATE TABLE IF NOT EXISTS event_log (
   event_id       TEXT PRIMARY KEY,
   type           TEXT NOT NULL,

@@ -34,7 +34,7 @@ describe('ControlPlaneDb', () => {
     expect(tableNames).toContain('tasks')
     expect(tableNames).toContain('sessions')
     expect(tableNames).toContain('task_sessions')
-    expect(tableNames).toContain('task_events')
+    expect(tableNames).not.toContain('task_events')
   })
 
   it('should enable WAL mode', () => {
