@@ -1,11 +1,11 @@
 /**
- * POST /api/tasks/:taskId/events 路由。
+ * POST /api/events 路由。
  *
  * 接收来自 node 进程的 DomainEventEnvelope NDJSON 流，
  * 经 createEventIngest 校验后 publish 到 cp EventBus。
  * 校验失败直接 throw（Let it crash）→ Hono 回 500 → node 侧断开连接。
  *
- * @module routes/task-events
+ * @module routes/events
  */
 
 import type { ObserverLogger } from '@tianji/observer'
@@ -22,7 +22,7 @@ type AuthVariables = {
   }
 }
 
-export interface TaskEventsRouteDeps {
+export interface EventsRouteDeps {
   readonly db: ControlPlaneDb
   readonly logger: ObserverLogger
   /** cp 进程内 EventBus，用于 publish 校验通过的 DomainEventEnvelope。 */
@@ -30,21 +30,21 @@ export interface TaskEventsRouteDeps {
 }
 
 /**
- * 创建 task 事件接收路由。
+ * 创建领域事件接收路由。
  *
  * 接收 NDJSON 格式的 DomainEventEnvelope 流，逐行 parse 后交给
  * createEventIngest 做 writer 归属校验，通过后 publish 到 cp bus。
  *
  * @param deps - 路由依赖：db、logger、bus
  */
-export function createTaskEventsRoute(deps: TaskEventsRouteDeps): Hono<AuthVariables> {
+export function createEventsRoute(deps: EventsRouteDeps): Hono<AuthVariables> {
   const { db, logger, bus } = deps
   const app = new Hono<AuthVariables>()
   const auth = createAuthMiddleware(db, logger)
 
   const ingest = createEventIngest({ publish: (env) => bus.publish(env) })
 
-  app.post('/api/tasks/:taskId/events', auth, async (c) => {
+  app.post('/api/events', auth, async (c) => {
     const body = c.req.raw.body
     if (body === null) {
       return c.json({ accepted: 0 })
