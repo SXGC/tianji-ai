@@ -7,7 +7,7 @@
  *   避免产生 unhandled promise rejection。
  * - `dispose()` 严格顺序：清定时器 → await flushChain → final flush → 设 disposed 标记。
  * - `push()` 在 disposed 后调用直接抛出。
- * @module storage/batch-committer
+ * @module util/batch-committer
  */
 
 export interface BatchCommitterOptions<T> {
@@ -20,7 +20,7 @@ export interface BatchCommitterOptions<T> {
 
 export class BatchCommitter<T> {
   private buffer: T[] = []
-  private timer: NodeJS.Timeout | null = null
+  private timer: ReturnType<typeof setTimeout> | null = null
   private disposed = false
   /**
    * 串行 flush chain：始终 resolve（失败通过 onFlushError 传递），

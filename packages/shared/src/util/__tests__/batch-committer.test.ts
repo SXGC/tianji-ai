@@ -1,5 +1,5 @@
-import { BatchCommitter } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
+import { BatchCommitter } from '../batch-committer.js'
 
 /** 等待所有挂起的微任务完成（对于多层 .then() chain 需要多次 await）。 */
 async function flushMicrotasks(): Promise<void> {

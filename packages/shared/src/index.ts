@@ -122,3 +122,6 @@ export {
   type RetryOptions,
   DEFAULT_RETRY_OPTIONS,
 } from './utils.js'
+
+// Batch utilities
+export { BatchCommitter, type BatchCommitterOptions } from './util/batch-committer.js'

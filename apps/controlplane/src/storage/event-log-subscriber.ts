@@ -9,7 +9,7 @@
 
 import type { ObserverLogger } from '@tianji/observer'
 import type { DomainEventEnvelope, ErrorSink, EventBus, EventLogStore } from '@tianji/shared'
-import { BatchCommitter } from './batch-committer.js'
+import { BatchCommitter } from '@tianji/shared'
 
 export interface EventLogSubscriberOptions {
   readonly maxItems?: number
