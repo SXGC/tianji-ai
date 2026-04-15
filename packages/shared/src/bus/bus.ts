@@ -26,6 +26,12 @@ interface Subscriber {
   readonly queue: DomainEventEnvelope[]
   running: boolean
   cancelled: boolean
+  /**
+   * 当前正在运行的 drain Promise（含后续排队的所有 envelope）。
+   * close() 通过 await 它来等待该订阅者完全排空。
+   * drain 结束后重置为 null。
+   */
+  drainPromise: Promise<void> | null
 }
 
 const DEFAULT_QUEUE_SIZE = 1024
@@ -44,8 +50,14 @@ export interface EventBusOptions {
 export function createEventBus(options: EventBusOptions): EventBus {
   const subscribers = new Map<number, Subscriber>()
   let nextId = 1
+  let closed = false
+  /** close() 调用后存储唯一的 drain-all Promise，实现幂等 */
+  let closePromise: Promise<void> | null = null
 
   function publish(env: DomainEventEnvelope): void {
+    if (closed) {
+      throw new Error('EventBus is closed')
+    }
     for (const sub of subscribers.values()) {
       if (sub.cancelled) continue
       if (!matchFilter(sub.filter, env)) continue
@@ -67,8 +79,13 @@ export function createEventBus(options: EventBusOptions): EventBus {
   function schedule(sub: Subscriber): void {
     if (sub.running) return
     sub.running = true
+    // 用链式 Promise 串联：新的 drain 等前一个 drain 完再开始
+    // 这样 drainPromise 始终代表"该订阅者所有已排队 envelope 处理完毕"
+    const prev = sub.drainPromise ?? Promise.resolve()
+    const next = prev.then(() => drain(sub))
+    sub.drainPromise = next
     queueMicrotask(() => {
-      void drain(sub)
+      void next
     })
   }
 
@@ -116,6 +133,7 @@ export function createEventBus(options: EventBusOptions): EventBus {
       queue: [],
       running: false,
       cancelled: false,
+      drainPromise: null,
     }
     subscribers.set(id, sub)
     return {
@@ -126,5 +144,34 @@ export function createEventBus(options: EventBusOptions): EventBus {
     }
   }
 
-  return { publish, subscribe }
+  /**
+   * 优雅关闭 EventBus。
+   *
+   * 标记 closed，等待所有订阅者队列排空，然后取消所有订阅者。
+   * 幂等：多次调用返回同一个 Promise。
+   */
+  function close(): Promise<void> {
+    if (closePromise !== null) return closePromise
+
+    closed = true
+
+    closePromise = (async () => {
+      // snapshot 所有订阅者当前的 drainPromise
+      // drainPromise 是链式串联的，await 它等价于"该订阅者所有已入队 envelope 处理完"
+      const pending = [...subscribers.values()]
+        .map((sub) => sub.drainPromise)
+        .filter((p): p is Promise<void> => p !== null)
+      await Promise.all(pending)
+
+      // unsubscribe 所有订阅者
+      for (const sub of subscribers.values()) {
+        sub.cancelled = true
+      }
+      subscribers.clear()
+    })()
+
+    return closePromise
+  }
+
+  return { publish, subscribe, close }
 }

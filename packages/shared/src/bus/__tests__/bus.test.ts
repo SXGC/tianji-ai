@@ -163,3 +163,72 @@ describe('EventBus', () => {
     expect(errorSink).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('EventBus.close()', () => {
+  it('close() 等待在途 handler 完成后 resolve', async () => {
+    const bus = createEventBus({ lagSink: vi.fn() })
+    let callCount = 0
+
+    bus.subscribe(
+      {},
+      async () => {
+        await new Promise<void>((resolve) => setTimeout(resolve, 30))
+        callCount++
+      },
+      { name: 'slow-handler' }
+    )
+
+    // publish 3 条，handler 每条需要 30ms
+    bus.publish(mk({ eventId: 'e1' }))
+    bus.publish(mk({ eventId: 'e2' }))
+    bus.publish(mk({ eventId: 'e3' }))
+
+    // 立即 close，等待所有 handler 跑完
+    await bus.close()
+
+    expect(callCount).toBe(3)
+  })
+
+  it('close() 后再 publish 抛 Error', async () => {
+    const bus = createEventBus({ lagSink: vi.fn() })
+    await bus.close()
+
+    expect(() => bus.publish(mk({ eventId: 'e1' }))).toThrow('EventBus is closed')
+  })
+
+  it('close() 幂等：多次调用返回同一个 Promise，不报错', async () => {
+    const bus = createEventBus({ lagSink: vi.fn() })
+
+    const p1 = bus.close()
+    const p2 = bus.close()
+
+    expect(p1).toBe(p2)
+    await expect(p1).resolves.toBeUndefined()
+  })
+
+  it('close() 排空队列里已 enqueue 的事件，不丢消息', async () => {
+    const bus = createEventBus({ lagSink: vi.fn() })
+    const processed: string[] = []
+
+    bus.subscribe(
+      {},
+      async (env) => {
+        // 模拟少量延迟，确保 close 在 handler 运行中调用
+        await new Promise<void>((resolve) => setTimeout(resolve, 10))
+        processed.push(env.eventId)
+      },
+      { name: 'collector' }
+    )
+
+    bus.publish(mk({ eventId: 'e1' }))
+    bus.publish(mk({ eventId: 'e2' }))
+    bus.publish(mk({ eventId: 'e3' }))
+    bus.publish(mk({ eventId: 'e4' }))
+    bus.publish(mk({ eventId: 'e5' }))
+
+    await bus.close()
+
+    // 所有 5 条事件必须被处理，不能丢
+    expect(processed).toEqual(['e1', 'e2', 'e3', 'e4', 'e5'])
+  })
+})

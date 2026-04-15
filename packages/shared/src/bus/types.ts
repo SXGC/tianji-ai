@@ -30,6 +30,17 @@ export interface EventBus {
     handler: EventHandler,
     options: SubscribeOptions
   ): SubscriptionHandle
+  /**
+   * 优雅关闭 EventBus。
+   *
+   * 调用后：
+   * 1. 标记 bus 为 closed，后续 publish 调用抛出 Error。
+   * 2. 等待所有订阅者把队列里已有的 envelope 处理完毕。
+   * 3. 取消所有订阅者。
+   *
+   * 幂等：多次调用返回同一个 Promise。
+   */
+  close(): Promise<void>
 }
 
 export type LagSink = (info: {
