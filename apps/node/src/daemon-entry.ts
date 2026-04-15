@@ -10,7 +10,14 @@ import {
   createDeepagentsExecutorFactory,
   loadDefaultOrchestrationGraph,
 } from '@tianji/agent'
-import { resolveAgentModel } from '@tianji/runtime'
+import {
+  CausalContext,
+  NoopSequenceRecoverer,
+  SequenceCounter,
+  createRuntimeEventPipeline,
+  resolveAgentModel,
+} from '@tianji/runtime'
+import { createEventBus } from '@tianji/shared'
 
 import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
@@ -44,8 +51,27 @@ export async function runDaemonEntry(): Promise<void> {
   const context = await loadUserConfigContext()
   const i18n = createI18n(detectLocale(context.config))
   const logger = getCliLogger(context.paths)
+
+  // ---- EventBus + Pipeline 装配（node 侧不直连 event_log，阶段 07 后 forwarder 订阅 bus）----
+  const bus = createEventBus({
+    lagSink: (info) => {
+      void logger.observerLogger.warn(['daemon', 'bus'], 'node subscriber lag', { info })
+    },
+  })
+  const counter = new SequenceCounter()
+  const contextRef = { current: CausalContext.root(crypto.randomUUID()) }
+  const pipeline = createRuntimeEventPipeline({
+    publish: (env) => bus.publish(env),
+    counter,
+    contextRef,
+    source: { processKind: 'daemon', processId: process.pid.toString() },
+    recoverer: NoopSequenceRecoverer,
+  })
+  // -----------------------------------------------------------------------------
+
   const session = await createAgentSession(context, {
     logger: logger.observerLogger,
+    emitEvent: (ev) => pipeline.emitEvent(ev),
   })
   const defaultGraph = await loadDefaultOrchestrationGraph({
     configDir: context.paths.configDir,
