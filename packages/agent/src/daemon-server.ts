@@ -24,6 +24,15 @@ export interface DaemonServerOptions {
   readonly executorFactory: AgentExecutorFactory
   readonly paths?: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'>
   readonly getControlPlaneStatus?: () => ControlPlaneStatusSnapshot
+  /**
+   * 可选：在每次 /chat 请求前建立独立的因果链上下文。
+   * 由装配层注入（例如 AsyncLocalStorage.run 包裹），确保并发请求间因果链不互相污染。
+   * 若未提供，/chat handler 直接执行（不建立独立上下文）。
+   *
+   * @param correlationId - 本次请求的关联 ID
+   * @param fn - 在独立上下文内执行的 handler 体
+   */
+  readonly enterCorrelation?: (correlationId: string, fn: () => Promise<void>) => Promise<void>
 }
 
 async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
@@ -41,6 +50,9 @@ export class DaemonServer {
   readonly #paths: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'> | undefined
   readonly #server: Server
   readonly #getControlPlaneStatus: (() => ControlPlaneStatusSnapshot) | undefined
+  readonly #enterCorrelation:
+    | ((correlationId: string, fn: () => Promise<void>) => Promise<void>)
+    | undefined
   #startedAt: number
   #chatInProgress: boolean
   #shutdownPromise: Promise<void> | undefined
@@ -51,6 +63,7 @@ export class DaemonServer {
     this.#executorFactory = options.executorFactory
     this.#paths = options.paths
     this.#getControlPlaneStatus = options.getControlPlaneStatus
+    this.#enterCorrelation = options.enterCorrelation
     this.#server = createServer((req, res) => {
       void this.#handleRequest(req, res)
     })
@@ -189,26 +202,37 @@ export class DaemonServer {
       connection: 'keep-alive',
     })
 
-    try {
-      const graphOptions: ChatWithGraphOptions = {
-        initialState: { input: parsed.prompt },
-        compileOptions: { agentExecutorFactory: this.#executorFactory },
+    // 每次 /chat 请求生成独立 correlationId，用 enterCorrelation（若注入）建立隔离的因果链上下文。
+    const correlationId = crypto.randomUUID()
+
+    const runChat = async (): Promise<void> => {
+      try {
+        const graphOptions: ChatWithGraphOptions = {
+          initialState: { input: parsed.prompt },
+          compileOptions: { agentExecutorFactory: this.#executorFactory },
+        }
+        for await (const event of this.#session.queryWithGraph(this.#defaultGraph, graphOptions)) {
+          const message: ChatSseMessage = { type: 'chat.event', event }
+          this.#sendSse(res, DAEMON_SSE_EVENT_NAME, message)
+        }
+        this.#sendSse(res, DAEMON_SSE_DONE_NAME, { type: 'chat.done' } satisfies ChatSseMessage)
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : 'Unknown error'
+        this.#sendSse(res, DAEMON_SSE_ERROR_NAME, {
+          type: 'chat.error',
+          code: 'INTERNAL',
+          message,
+        } satisfies ChatErrorSseMessage)
+      } finally {
+        this.#chatInProgress = false
+        res.end()
       }
-      for await (const event of this.#session.queryWithGraph(this.#defaultGraph, graphOptions)) {
-        const message: ChatSseMessage = { type: 'chat.event', event }
-        this.#sendSse(res, DAEMON_SSE_EVENT_NAME, message)
-      }
-      this.#sendSse(res, DAEMON_SSE_DONE_NAME, { type: 'chat.done' } satisfies ChatSseMessage)
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      this.#sendSse(res, DAEMON_SSE_ERROR_NAME, {
-        type: 'chat.error',
-        code: 'INTERNAL',
-        message,
-      } satisfies ChatErrorSseMessage)
-    } finally {
-      this.#chatInProgress = false
-      res.end()
+    }
+
+    if (this.#enterCorrelation !== undefined) {
+      void this.#enterCorrelation(correlationId, runChat)
+    } else {
+      void runChat()
     }
   }
 

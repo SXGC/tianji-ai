@@ -1,10 +1,16 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { serve } from '@hono/node-server'
 import { createJsonlFileSink, createObserverLogger, createStdoutSink } from '@tianji/observer'
-import { CausalContext, SequenceCounter, createRuntimeEventPipeline } from '@tianji/runtime'
+import {
+  CausalContext,
+  SequenceCounter,
+  createAlsCausalContextProvider,
+  createRuntimeEventPipeline,
+} from '@tianji/runtime'
 import { createEventBus } from '@tianji/shared'
 
 import { createApp } from './app.js'
@@ -49,13 +55,26 @@ const bus = createEventBus({
   },
 })
 const counter = new SequenceCounter()
-// TODO(Stage 06, Task 0)：contextRef 是进程级共享单例，并发 run 会互相污染 causation 链。
-// 必须在 Stage 06 用 AsyncLocalStorage 替换，使每次请求持有独立的 CausalContext。
-const contextRef = { current: CausalContext.root(crypto.randomUUID()) }
+
+// 每个并发 run 在 als.run() 内持有独立的 { current: CausalContext }，
+// 避免进程级单例在并发请求间互相污染 causation 链。
+const als = new AsyncLocalStorage<{ current: CausalContext }>()
+const contextProvider = createAlsCausalContextProvider(als)
+
+/**
+ * 在 AsyncLocalStorage 上下文中执行 fn，每次调用建立独立的 CausalContext。
+ *
+ * @param correlationId - 本次请求的关联 ID，贯穿整条因果链
+ * @param fn - 在隔离上下文内执行的异步操作
+ */
+export function enterCorrelation<T>(correlationId: string, fn: () => Promise<T>): Promise<T> {
+  return als.run({ current: CausalContext.root(correlationId) }, fn)
+}
+
 const pipeline = createRuntimeEventPipeline({
   publish: (env) => bus.publish(env),
   counter,
-  contextRef,
+  contextProvider,
   source: { processKind: 'cp', processId: process.pid.toString() },
   recoverer,
 })
@@ -76,6 +95,7 @@ const eventLogHandle = subscribeEventLog(bus, store, {
 
 const { app, monitor } = createApp(db, logger, {
   emitEvent: (ev) => pipeline.emitEvent(ev),
+  enterCorrelation,
 })
 monitor.start()
 

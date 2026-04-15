@@ -20,6 +20,15 @@ export interface ControlPlaneApp {
 export interface CreateAppOptions {
   /** 可选：DomainEvent 发射回调，由装配层注入，用于把 Node/Task 生命周期事件发到 EventBus。 */
   readonly emitEvent?: (ev: DomainEvent) => void | Promise<void>
+  /**
+   * 可选：在每个请求前建立独立的因果链上下文。
+   * 由装配层注入（例如 AsyncLocalStorage.run 包裹），确保并发请求间因果链不互相污染。
+   * 若未提供，路由 handler 直接执行（不建立独立上下文）。
+   *
+   * @param correlationId - 本次请求的关联 ID（由 x-correlation-id header 或 UUID 生成）
+   * @param fn - 在独立上下文内执行的 handler 体
+   */
+  readonly enterCorrelation?: <T>(correlationId: string, fn: () => Promise<T>) => Promise<T>
 }
 
 /**
@@ -27,17 +36,26 @@ export interface CreateAppOptions {
  *
  * @param db - controlplane 数据库实例
  * @param logger - 结构化日志实例，传递给需要日志的子模块
- * @param options - 可选装配选项（emitEvent 回调）
+ * @param options - 可选装配选项（emitEvent 回调、enterCorrelation 包裹器）
  */
 export function createApp(
   db: ControlPlaneDb,
   logger: ObserverLogger,
   options: CreateAppOptions = {}
 ): ControlPlaneApp {
-  const { emitEvent } = options
+  const { emitEvent, enterCorrelation } = options
   const app = new Hono()
 
   app.get('/health', (c) => c.json({ status: 'ok' }))
+
+  // 为每个 API 请求建立独立的因果链上下文（若 enterCorrelation 已注入）。
+  // 从 x-correlation-id header 读取，或生成新 UUID 作为 correlationId。
+  if (enterCorrelation !== undefined) {
+    app.use('/api/*', async (c, next) => {
+      const correlationId = c.req.header('x-correlation-id') ?? crypto.randomUUID()
+      await enterCorrelation(correlationId, next)
+    })
+  }
 
   app.route('/', createNodeRegisterRoute(db, logger, emitEvent))
   app.route('/', createNodeHeartbeatRoute(db, logger))
@@ -50,6 +68,6 @@ export function createApp(
 
   return {
     app,
-    monitor: new ObservationMonitor(db, logger, emitEvent),
+    monitor: new ObservationMonitor(db, logger, emitEvent, enterCorrelation),
   }
 }

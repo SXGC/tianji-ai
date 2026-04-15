@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -14,6 +15,7 @@ import {
   CausalContext,
   NoopSequenceRecoverer,
   SequenceCounter,
+  createAlsCausalContextProvider,
   createRuntimeEventPipeline,
   resolveAgentModel,
 } from '@tianji/runtime'
@@ -69,13 +71,26 @@ export async function runDaemonEntry(): Promise<void> {
     },
   })
   const counter = new SequenceCounter()
-  // TODO(Stage 06, Task 0)：contextRef 是进程级共享单例，并发 run 会互相污染 causation 链。
-  // 必须在 Stage 06 用 AsyncLocalStorage 替换，使每次请求持有独立的 CausalContext。
-  const contextRef = { current: CausalContext.root(crypto.randomUUID()) }
+
+  // 每个并发 run 在 als.run() 内持有独立的 { current: CausalContext }，
+  // 避免进程级单例在并发请求间互相污染 causation 链。
+  const als = new AsyncLocalStorage<{ current: CausalContext }>()
+  const contextProvider = createAlsCausalContextProvider(als)
+
+  /**
+   * 在 AsyncLocalStorage 上下文中执行 fn，每次调用建立独立的 CausalContext。
+   *
+   * @param correlationId - 本次请求的关联 ID，贯穿整条因果链
+   * @param fn - 在隔离上下文内执行的异步操作
+   */
+  function enterCorrelation<T>(correlationId: string, fn: () => Promise<T>): Promise<T> {
+    return als.run({ current: CausalContext.root(correlationId) }, fn)
+  }
+
   const pipeline = createRuntimeEventPipeline({
     publish: (env) => bus.publish(env),
     counter,
-    contextRef,
+    contextProvider,
     source: { processKind: 'daemon', processId: process.pid.toString() },
     recoverer: NoopSequenceRecoverer,
   })
@@ -128,6 +143,7 @@ export async function runDaemonEntry(): Promise<void> {
       daemonPortPath: context.paths.daemonPortPath,
       daemonPidPath: context.paths.daemonPidPath,
     },
+    enterCorrelation,
   })
   await server.listen(0)
   await logInfo(context.paths, ['daemon'], 'Daemon server listening', {
