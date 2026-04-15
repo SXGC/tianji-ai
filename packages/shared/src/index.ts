@@ -101,6 +101,7 @@ export type {
   GraphEventType,
 } from './events.js'
 export * from './events/index.js'
+export * from './bus/index.js'
 export * from './identifiers.js'
 export * from './message.js'
 export * from './policy.js'
