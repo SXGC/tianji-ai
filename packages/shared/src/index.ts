@@ -76,30 +76,6 @@ export * from './artifact.js'
 export * from './delta-aggregator.js'
 export * from './delta.js'
 export * from './errors.js'
-export type {
-  RuntimeEvent,
-  RuntimeEventType,
-  RunStartedEvent as LegacyRunStartedEvent,
-  RunCompletedEvent as LegacyRunCompletedEvent,
-  RunFailedEvent as LegacyRunFailedEvent,
-  RunCancelledEvent as LegacyRunCancelledEvent,
-  MessageStartedEvent as LegacyMessageStartedEvent,
-  MessageDeltaEvent as LegacyMessageDeltaEvent,
-  MessageCompletedEvent as LegacyMessageCompletedEvent,
-  MessageDeltaChannel as LegacyMessageDeltaChannel,
-  MessageDeltaPayload as LegacyMessageDeltaPayload,
-  ToolStartedEvent as LegacyToolStartedEvent,
-  ToolCompletedEvent as LegacyToolCompletedEvent,
-  ToolFailedEvent as LegacyToolFailedEvent,
-  GraphStartedEvent,
-  GraphNodeKind as LegacyGraphNodeKind,
-  GraphNodeStartedEvent as LegacyGraphNodeStartedEvent,
-  GraphNodeCompletedEvent as LegacyGraphNodeCompletedEvent,
-  GraphNodeFailedEvent as LegacyGraphNodeFailedEvent,
-  GraphCompletedEvent,
-  GraphEvent,
-  GraphEventType,
-} from './events.js'
 export * from './events/index.js'
 export * from './bus/index.js'
 export * from './identifiers.js'
