@@ -15,3 +15,4 @@ export {
   startSessionSpan,
   startToolSpan,
 } from './spans.js'
+export { handleSpanEvent, subscribeOtelAdapter } from './otel-adapter.js'
