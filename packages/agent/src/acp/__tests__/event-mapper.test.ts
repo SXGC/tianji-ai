@@ -1,9 +1,9 @@
 import type { SessionNotification } from '@agentclientprotocol/sdk'
 import type {
-  MessageDeltaEvent,
-  RunCompletedEvent,
-  ToolCompletedEvent,
-  ToolStartedEvent,
+  LegacyMessageDeltaEvent as MessageDeltaEvent,
+  LegacyRunCompletedEvent as RunCompletedEvent,
+  LegacyToolCompletedEvent as ToolCompletedEvent,
+  LegacyToolStartedEvent as ToolStartedEvent,
 } from '@tianji/shared'
 import { createRunId, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'

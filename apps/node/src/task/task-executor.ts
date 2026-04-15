@@ -11,12 +11,12 @@ import type { RuntimeLogger } from '../logger.js'
 import type { ObserverLogScope } from '@tianji/observer'
 import type {
   Command,
-  MessageCompletedEvent,
+  LegacyMessageCompletedEvent as MessageCompletedEvent,
   NodeExecutionState,
   NodeId,
   RuntimeEvent,
-  ToolCompletedEvent,
-  ToolFailedEvent,
+  LegacyToolCompletedEvent as ToolCompletedEvent,
+  LegacyToolFailedEvent as ToolFailedEvent,
 } from '@tianji/shared'
 
 interface TurnSummary {
