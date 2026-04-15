@@ -31,6 +31,8 @@ export interface TaskExecutorConfig {
   readonly nodeId: NodeId
   readonly onExecutionStateChange: (state: NodeExecutionState) => void
   readonly createRunner: (command: Command) => Promise<IAgentRunner>
+  /** 在任务级入口建立独立因果链上下文。 */
+  readonly enterCorrelation: <T>(correlationId: string, fn: () => Promise<T>) => Promise<T>
   /**
    * 发射 Task 生命周期领域事件（TaskStarted / TaskCompleted / TaskFailed 等）。
    * 事件经 pipeline 包装后进入 bus，由 forwarder 批量转发至 cp。
@@ -68,98 +70,100 @@ export class TaskExecutor {
     }
 
     const taskId = String(command.payload.taskId)
-    this.#executionState = 'busy'
-    this.#currentTaskId = taskId
-    this.#config.onExecutionStateChange(this.#executionState)
+    return this.#config.enterCorrelation(taskId, async () => {
+      this.#executionState = 'busy'
+      this.#currentTaskId = taskId
+      this.#config.onExecutionStateChange(this.#executionState)
 
-    await this.#config.logger?.logInfo(this.#scope, 'Daemon started processing task', {
-      nodeId: this.#config.nodeId,
-      commandId: command.commandId,
-      taskId,
-      agentId: command.payload.agentId,
-    })
-    await this.#config.logger?.logDebug(this.#scope, 'Preparing task execution', {
-      command,
-    })
-
-    const runner = await this.#config.createRunner(command)
-    await this.#config.logger?.logDebug(this.#scope, 'Created task runner', {
-      taskId,
-      agentId: command.payload.agentId,
-    })
-
-    const now = (): number => Date.now()
-
-    try {
-      await this.#config.logger?.logDebug(this.#scope, 'Emitting TaskStarted lifecycle event', {
+      await this.#config.logger?.logInfo(this.#scope, 'Daemon started processing task', {
+        nodeId: this.#config.nodeId,
+        commandId: command.commandId,
         taskId,
+        agentId: command.payload.agentId,
       })
-      this.#config.emitEvent({ type: 'TaskStarted', taskId, timestamp: now() })
-
-      await runner.connect()
-      await this.#config.logger?.logDebug(this.#scope, 'Connected task runner', {
-        taskId,
+      await this.#config.logger?.logDebug(this.#scope, 'Preparing task execution', {
+        command,
       })
 
-      let turn: TurnSummary | null = null
-      let sawTerminalRunEvent = false
+      const runner = await this.#config.createRunner(command)
+      await this.#config.logger?.logDebug(this.#scope, 'Created task runner', {
+        taskId,
+        agentId: command.payload.agentId,
+      })
 
-      for await (const envelope of runner.query(command.payload.goal)) {
-        if (envelope != null) {
-          const event = envelope.payload
-          turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
-          if (
-            event.type === 'RunCompleted' ||
-            event.type === 'RunFailed' ||
-            event.type === 'RunCancelled'
-          ) {
-            sawTerminalRunEvent = true
+      const now = (): number => Date.now()
+
+      try {
+        await this.#config.logger?.logDebug(this.#scope, 'Emitting TaskStarted lifecycle event', {
+          taskId,
+        })
+        this.#config.emitEvent({ type: 'TaskStarted', taskId, timestamp: now() })
+
+        await runner.connect()
+        await this.#config.logger?.logDebug(this.#scope, 'Connected task runner', {
+          taskId,
+        })
+
+        let turn: TurnSummary | null = null
+        let sawTerminalRunEvent = false
+
+        for await (const envelope of runner.query(command.payload.goal)) {
+          if (envelope != null) {
+            const event = envelope.payload
+            turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
+            if (
+              event.type === 'RunCompleted' ||
+              event.type === 'RunFailed' ||
+              event.type === 'RunCancelled'
+            ) {
+              sawTerminalRunEvent = true
+            }
           }
+
+          // agent envelope 直接 publish 到 bus，由 forwarder 批量转发至 cp
+          this.#config.publishEnvelope(envelope)
         }
 
-        // agent envelope 直接 publish 到 bus，由 forwarder 批量转发至 cp
-        this.#config.publishEnvelope(envelope)
+        if (!sawTerminalRunEvent) {
+          throw new Error('Agent run ended without a terminal event')
+        }
+
+        await this.#config.logger?.logDebug(this.#scope, 'Emitting TaskCompleted lifecycle event', {
+          taskId,
+        })
+        this.#config.emitEvent({ type: 'TaskCompleted', taskId, timestamp: now() })
+        await this.#config.logger?.logDebug(this.#scope, 'Task execution finished successfully', {
+          taskId,
+        })
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        await this.#config.logger?.logError(this.#scope, 'Task execution failed', {
+          taskId,
+          error: errorMessage,
+        })
+
+        this.#config.emitEvent({
+          type: 'TaskFailed',
+          taskId,
+          timestamp: now(),
+          error: new TianjiError('internal', 'TASK_EXECUTION_FAILED', errorMessage),
+        })
+
+        throw error
+      } finally {
+        await this.#config.logger?.logDebug(this.#scope, 'Cleaning up task execution resources', {
+          taskId,
+        })
+        await runner.disconnect()
+        this.#executionState = 'idle'
+        this.#currentTaskId = null
+        this.#config.onExecutionStateChange(this.#executionState)
+        await this.#config.logger?.logDebug(this.#scope, 'Task executor returned to idle', {
+          taskId,
+          nodeId: this.#config.nodeId,
+        })
       }
-
-      if (!sawTerminalRunEvent) {
-        throw new Error('Agent run ended without a terminal event')
-      }
-
-      await this.#config.logger?.logDebug(this.#scope, 'Emitting TaskCompleted lifecycle event', {
-        taskId,
-      })
-      this.#config.emitEvent({ type: 'TaskCompleted', taskId, timestamp: now() })
-      await this.#config.logger?.logDebug(this.#scope, 'Task execution finished successfully', {
-        taskId,
-      })
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      await this.#config.logger?.logError(this.#scope, 'Task execution failed', {
-        taskId,
-        error: errorMessage,
-      })
-
-      this.#config.emitEvent({
-        type: 'TaskFailed',
-        taskId,
-        timestamp: now(),
-        error: new TianjiError('internal', 'TASK_EXECUTION_FAILED', errorMessage),
-      })
-
-      throw error
-    } finally {
-      await this.#config.logger?.logDebug(this.#scope, 'Cleaning up task execution resources', {
-        taskId,
-      })
-      await runner.disconnect()
-      this.#executionState = 'idle'
-      this.#currentTaskId = null
-      this.#config.onExecutionStateChange(this.#executionState)
-      await this.#config.logger?.logDebug(this.#scope, 'Task executor returned to idle', {
-        taskId,
-        nodeId: this.#config.nodeId,
-      })
-    }
+    })
   }
 }
 

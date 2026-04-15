@@ -14,8 +14,8 @@ import {
 import { subscribeEventBusLogger, subscribeOtelAdapter } from '@tianji/observer'
 import {
   CausalContext,
-  NoopSequenceRecoverer,
   SequenceCounter,
+  type SequenceRecoverer,
   createAlsCausalContextProvider,
   createRuntimeEventPipeline,
   resolveAgentModel,
@@ -72,7 +72,7 @@ export async function runDaemonEntry(): Promise<void> {
       })
     },
   })
-  const counter = new SequenceCounter()
+  const daemonCounter = new SequenceCounter()
 
   // 每个并发 run 在 als.run() 内持有独立的 { current: CausalContext }，
   // 避免进程级单例在并发请求间互相污染 causation 链。
@@ -91,10 +91,14 @@ export async function runDaemonEntry(): Promise<void> {
 
   const pipeline = createRuntimeEventPipeline({
     publish: (env) => bus.publish(env),
-    counter,
+    counter: daemonCounter,
     contextProvider,
     source: { processKind: 'daemon', processId: process.pid.toString() },
-    recoverer: NoopSequenceRecoverer,
+    recoverer: {
+      async maxSequence() {
+        return null
+      },
+    } satisfies SequenceRecoverer,
   })
 
   // ---- 装配 Bus 订阅者 ----
@@ -107,10 +111,12 @@ export async function runDaemonEntry(): Promise<void> {
   // Stage 07 的 forwarder 将订阅此 bus 并把 envelope 转发到 controlplane。
   // -------------------------
 
-  const session = await createAgentSession(context, {
-    logger: logger.observerLogger,
-    emitEvent: (ev) => pipeline.emitEvent(ev),
-  })
+  const session = await enterCorrelation(`daemon-startup-${Date.now()}`, async () =>
+    createAgentSession(context, {
+      logger: logger.observerLogger,
+      emitEvent: (ev) => pipeline.emitEvent(ev),
+    })
+  )
   const defaultGraph = await loadDefaultOrchestrationGraph({
     configDir: context.paths.configDir,
     agentConfigs: context.config.agents?.items ?? {},
@@ -179,6 +185,7 @@ export async function runDaemonEntry(): Promise<void> {
       baseUrl: controlPlaneConfig.baseUrl,
       nodeId: controlPlaneConfig.nodeId,
     })
+    let nodePipeline: ReturnType<typeof createRuntimeEventPipeline> | null = null
     const runtime = createControlPlaneRuntime({
       ...controlPlaneConfig,
       agentConfigs: context.config.agents?.items ?? {},
@@ -188,7 +195,13 @@ export async function runDaemonEntry(): Promise<void> {
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
       logger,
       observerLogger: logger.observerLogger,
-      emitEvent: (ev) => pipeline.emitEvent(ev),
+      enterCorrelation,
+      emitTaskEvent: (ev) => {
+        if (nodePipeline === null) {
+          throw new Error('Node task event pipeline not initialized')
+        }
+        return nodePipeline.emitEvent(ev)
+      },
       publishEnvelope: (env) => bus.publish(env),
       onConnectionStateChange: (event) => {
         if (event.status === 'connecting') {
@@ -221,6 +234,26 @@ export async function runDaemonEntry(): Promise<void> {
       },
     })
     try {
+      const nodeCounter = new SequenceCounter()
+      nodePipeline = createRuntimeEventPipeline({
+        publish: (env) => bus.publish(env),
+        counter: nodeCounter,
+        contextProvider,
+        source: {
+          processKind: 'node',
+          processId: process.pid.toString(),
+          nodeId: controlPlaneConfig.nodeId,
+        },
+        recoverer: {
+          async maxSequence(aggregateType, aggregateId) {
+            const client = runtime.connection.client
+            if (client === undefined) {
+              throw new Error('Control plane client unavailable for max sequence recovery')
+            }
+            return client.maxSequence(aggregateType, aggregateId)
+          },
+        },
+      })
       await runtime.connection.start()
       controlPlaneHandle = runtime
       updateControlPlaneStatus({

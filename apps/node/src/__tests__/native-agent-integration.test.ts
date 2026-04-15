@@ -67,6 +67,7 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
       publishEnvelope: (env) => publishedEnvelopes.push(env),
       createRunner: async (cmd) => {
@@ -120,6 +121,7 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: () => undefined,
+      enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: vi.fn(),
       publishEnvelope: (env) => publishedEnvelopes.push(env),
       createRunner: async (cmd) => {
@@ -160,6 +162,7 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: () => undefined,
+      enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: vi.fn(),
       publishEnvelope: (env) => publishedEnvelopes.push(env),
       createRunner: async (cmd) => {

@@ -76,6 +76,7 @@ function makeConfig(overrides: Partial<TaskExecutorConfig> = {}): TaskExecutorCo
     onExecutionStateChange: () => undefined,
     emitEvent: vi.fn(),
     publishEnvelope: vi.fn(),
+    enterCorrelation: async (_correlationId, fn) => fn(),
     createRunner: async () => {
       throw new Error('not implemented')
     },
@@ -164,6 +165,26 @@ describe('TaskExecutorConfig', () => {
     expect(emittedTypes).toContain('TaskStarted')
     expect(emittedTypes).toContain('TaskCompleted')
     expect(emittedTypes).not.toContain('TaskFailed')
+  })
+
+  it('wraps task execution in a task correlation context', async () => {
+    const module = await import('../task-executor.js')
+    const enterCorrelation = vi.fn(async (_correlationId: string, fn: () => Promise<void>) => fn())
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        enterCorrelation,
+        createRunner: async () => createRunnerStub(),
+      })
+    )
+
+    const taskId = createTaskId('task-ctx')
+    const command = createCommand(taskId, 'success')
+
+    await executor.execute(command)
+
+    expect(enterCorrelation).toHaveBeenCalledTimes(1)
+    expect(enterCorrelation).toHaveBeenCalledWith(String(taskId), expect.any(Function))
   })
 
   it('emits TaskStarted then TaskFailed when runner query throws', async () => {

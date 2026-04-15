@@ -42,11 +42,12 @@ export interface ControlPlaneRuntimeConfig {
   readonly logger?: RuntimeLogger
   /** 传给 SessionRuntime 的 observer logger，用于 runtime 层日志（如 token usage）。 */
   readonly observerLogger?: ObserverLogger
+  /** 在任务执行入口建立独立因果链上下文。 */
+  readonly enterCorrelation: <T>(correlationId: string, fn: () => Promise<T>) => Promise<T>
   /**
-   * 发射 Task 生命周期领域事件，由 daemon-entry 注入（连接 pipeline → bus）。
-   * 仅在有 controlplane 配置时使用。
+   * 发射 Task 生命周期领域事件，由 daemon-entry 注入 node 身份的 pipeline。
    */
-  readonly emitEvent: (event: DomainEvent) => void
+  readonly emitTaskEvent: (event: DomainEvent) => void
   /**
    * 将 agent runner 产生的 DomainEventEnvelope publish 到 bus，由 daemon-entry 注入。
    */
@@ -66,6 +67,10 @@ export interface ControlPlaneConnectionLike {
   /** 暴露给 daemon-entry 的 HTTP client，用于 forwarder 的 postDomainEvents。 */
   readonly client?: {
     postDomainEvents(ndjson: string): Promise<void>
+    maxSequence(
+      aggregateType: 'Session' | 'GraphRun' | 'Run' | 'Task' | 'Node',
+      aggregateId: string
+    ): Promise<number | null>
   }
   start(): Promise<void>
   stop(): void
@@ -158,6 +163,7 @@ export function createControlPlaneRuntime(
       nodeId: config.nodeId,
       onExecutionStateChange: updateExecutionState,
       logger: config.logger,
+      enterCorrelation: config.enterCorrelation,
       createRunner: async (command) => {
         const agentConfig = config.agentConfigs[command.payload.agentId]
         if (agentConfig === undefined) {
@@ -199,7 +205,7 @@ export function createControlPlaneRuntime(
           logger: config.logger,
         })
       },
-      emitEvent: config.emitEvent,
+      emitEvent: config.emitTaskEvent,
       publishEnvelope: config.publishEnvelope,
     } satisfies TaskExecutorConfig)
 

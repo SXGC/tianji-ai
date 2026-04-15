@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import type { AgentRuntimeOptions, AgentSession, LoadedAgentContext } from '@tianji/agent'
 import type { TianjiConfig } from '@tianji/shared'
 
 import type { UserConfigPaths } from '../config.js'
@@ -229,6 +230,32 @@ describe('runDaemonEntry', () => {
       expect.objectContaining({ id: 'test', name: 'test', nodes: [], edges: [] })
     )
     expect(runtimeConfig?.executorFactory).toBeTypeOf('function')
+
+    stdoutSpy.mockRestore()
+  })
+
+  it('creates agent session inside correlation context so startup emitEvent does not crash', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    const startupSessionFactory = async (
+      _context: LoadedAgentContext,
+      options?: AgentRuntimeOptions
+    ): Promise<AgentSession> => {
+      await options?.emitEvent?.({
+        type: 'SessionCreated',
+        sessionId: 'session-startup' as never,
+        timestamp: 0,
+      })
+      return { sessionId: 'session-startup' } as AgentSession
+    }
+
+    vi.mocked(createAgentSessionMock).mockImplementationOnce(
+      startupSessionFactory as unknown as () => { sessionId: string }
+    )
+
+    const { runDaemonEntry } = await import('../daemon-entry.js')
+
+    await expect(runDaemonEntry()).resolves.toBeUndefined()
 
     stdoutSpy.mockRestore()
   })

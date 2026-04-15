@@ -59,6 +59,7 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
       publishEnvelope: vi.fn(),
       createRunner: async (cmd) => {
@@ -118,6 +119,7 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
       publishEnvelope: (env) => publishedEnvelopes.push(env),
       createRunner: async (cmd) => {
@@ -180,6 +182,7 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
       publishEnvelope: (env) => publishedEnvelopes.push(env),
       createRunner: async (cmd) => {

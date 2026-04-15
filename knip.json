@@ -11,6 +11,9 @@
     }
   },
   "ignoreIssues": {
+    ".agents/skills/**/assets/**": ["files"],
+    ".claude/skills/**/assets/**": ["files"],
+    ".factory/skills/**/assets/**": ["files"],
     "apps/node/src/__tests__/helpers/**": ["exports", "types"],
     "packages/agent/src/__tests__/helpers/**": ["exports", "types"],
     "packages/runtime/src/__tests__/helpers/**": ["exports", "types"],

@@ -47,7 +47,7 @@ beforeEach(async () => {
   agentMock = await import('@tianji/agent')
 })
 
-/** 创建 ControlPlaneConnectionLike double，client 提供 postDomainEvents stub。 */
+/** 创建 ControlPlaneConnectionLike double，client 提供 postDomainEvents/maxSequence stub。 */
 function createConnectionDouble(): ControlPlaneConnectionLike {
   return {
     start: vi.fn(async () => undefined),
@@ -55,11 +55,12 @@ function createConnectionDouble(): ControlPlaneConnectionLike {
     setExecutionState: vi.fn(),
     client: {
       postDomainEvents: vi.fn(async () => undefined),
+      maxSequence: vi.fn(async () => null),
     },
   }
 }
 
-/** 构造最小合法的 runtime config，包含 emitEvent/publishEnvelope 收集器。 */
+/** 构造最小合法的 runtime config，包含 emitTaskEvent/publishEnvelope 收集器。 */
 function createRuntimeConfig(
   emittedEvents: DomainEvent[],
   publishedEnvelopes: DomainEventEnvelope[]
@@ -78,7 +79,8 @@ function createRuntimeConfig(
     nativeAgentContext: createFakeContext(),
     defaultGraph: stubDefaultGraph,
     executorFactory: stubExecutorFactory,
-    emitEvent: (ev: DomainEvent) => emittedEvents.push(ev),
+    enterCorrelation: async <T>(_correlationId: string, fn: () => Promise<T>) => fn(),
+    emitTaskEvent: (ev: DomainEvent) => emittedEvents.push(ev),
     publishEnvelope: (env: DomainEventEnvelope) => publishedEnvelopes.push(env),
   }
 }

@@ -74,6 +74,7 @@ function createConnectionDouble(): ControlPlaneConnectionLike {
     setExecutionState: vi.fn(),
     client: {
       postDomainEvents: vi.fn(async () => undefined),
+      maxSequence: vi.fn(async () => null),
     },
   }
 }
@@ -90,7 +91,8 @@ function createTestConfig(
     version: '1.0.0',
     agentList: [],
     agentConfigs: {},
-    emitEvent: vi.fn(),
+    enterCorrelation: async (_correlationId, fn) => fn(),
+    emitTaskEvent: vi.fn(),
     publishEnvelope: vi.fn(),
     ...overrides,
   }
