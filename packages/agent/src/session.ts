@@ -18,6 +18,8 @@ import { createFetchUrlTool } from './tools/fetch-url-tool.js'
 
 export interface AgentRuntimeOptions {
   readonly logger?: ObserverLogger
+  /** 可选：注入 DomainEvent 发射回调，用于发射 Session 生命周期事件。 */
+  readonly emitEvent?: (ev: DomainEvent) => void | Promise<void>
 }
 
 /**
@@ -44,6 +46,8 @@ export interface AgentSession {
     options: ChatWithGraphOptions
   ) => AsyncIterable<DomainEvent>
   readonly abort: () => void
+  /** 关闭 session，发射 SessionClosed 事件，中止所有进行中的图运行。 */
+  readonly close: () => void
 }
 
 /**
@@ -108,6 +112,12 @@ export async function createAgentSession(
   // 必须只在 AgentSession 工厂里调用一次,否则后续每轮 query 都会清掉前一轮 runTurn 累加的多轮历史。
   await runtime.createSession({ sessionId })
 
+  void options?.emitEvent?.({
+    type: 'SessionCreated',
+    sessionId,
+    timestamp: Date.now(),
+  })
+
   return {
     sessionId,
     abort(): void {
@@ -116,6 +126,16 @@ export async function createAgentSession(
       for (const controller of activeGraphControllers) {
         controller.abort()
       }
+    },
+    close(): void {
+      for (const controller of activeGraphControllers) {
+        controller.abort()
+      }
+      void options?.emitEvent?.({
+        type: 'SessionClosed',
+        sessionId,
+        timestamp: Date.now(),
+      })
     },
     async *queryWithGraph(
       graph: OrchestrationGraph,

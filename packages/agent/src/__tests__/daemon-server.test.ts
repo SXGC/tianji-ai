@@ -37,6 +37,7 @@ function createStubSession(events: DomainEvent[] = []): AgentSession {
   return {
     sessionId: 'session_test' as unknown as AgentSession['sessionId'],
     abort: () => undefined,
+    close: () => undefined,
     async *queryWithGraph(_graph, _options) {
       for (const event of events) {
         yield event
@@ -54,6 +55,7 @@ function createBlockingSession(): AgentSession & { resolve: () => void } {
     sessionId: 'session_blocking' as unknown as AgentSession['sessionId'],
     resolve,
     abort: () => undefined,
+    close: () => undefined,
     async *queryWithGraph(_graph, _options) {
       yield await barrier.then((): DomainEvent => ({ type: 'RunCompleted' }) as DomainEvent)
     },

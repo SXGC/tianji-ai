@@ -49,6 +49,7 @@ function createMockSessionFactory() {
   return vi.fn().mockReturnValue({
     sessionId: createSessionId('session-test'),
     abort: vi.fn(),
+    close: vi.fn(),
     async *queryWithGraph(_graph: OrchestrationGraph) {
       for (const event of events) {
         yield event
