@@ -2,8 +2,19 @@ import type { MessageStartedEvent, RunStartedEvent, TaskStartedEvent } from '@ti
 import { describe, expect, it } from 'vitest'
 import { CausalContext } from '../causal-context.js'
 import { createEnvelopeWrapper } from '../envelope-wrapper.js'
+import type { CausalContextProvider } from '../pipeline.js'
 import { SequenceCounter } from '../sequence-counter.js'
 import { NoopSequenceRecoverer } from '../sequence-recoverer.js'
+
+/** 把可变 ref 包装成 CausalContextProvider，便于测试。 */
+function makeRefProvider(ref: { current: CausalContext }): CausalContextProvider {
+  return {
+    getCurrent: () => ref.current,
+    update: (next: CausalContext) => {
+      ref.current = next
+    },
+  }
+}
 
 describe('createEnvelopeWrapper', () => {
   it('根事件：correlationId 注入、causationId=null、sequence=1', async () => {
@@ -11,7 +22,7 @@ describe('createEnvelopeWrapper', () => {
     const ctx = { current: CausalContext.root('corr_1') }
     const wrap = createEnvelopeWrapper({
       counter,
-      context: ctx,
+      contextProvider: makeRefProvider(ctx),
       source: { processKind: 'daemon', processId: 'p1' },
       recoverer: NoopSequenceRecoverer,
       now: () => '2026-04-14T00:00:00Z',
@@ -45,7 +56,7 @@ describe('createEnvelopeWrapper', () => {
     const ctx = { current: CausalContext.root('c1') }
     const wrap = createEnvelopeWrapper({
       counter,
-      context: ctx,
+      contextProvider: makeRefProvider(ctx),
       source: { processKind: 'node', processId: 'p1', nodeId: 'n1' },
       recoverer: NoopSequenceRecoverer,
       now: () => 'T',
@@ -77,7 +88,7 @@ describe('createEnvelopeWrapper', () => {
     const ctx = { current: CausalContext.root('c1') }
     const wrap = createEnvelopeWrapper({
       counter,
-      context: ctx,
+      contextProvider: makeRefProvider(ctx),
       source: { processKind: 'node', processId: 'p1' },
       recoverer: {
         async maxSequence() {
@@ -103,7 +114,7 @@ describe('createEnvelopeWrapper', () => {
     let callCount = 0
     const wrap = createEnvelopeWrapper({
       counter,
-      context: ctx,
+      contextProvider: makeRefProvider(ctx),
       source: { processKind: 'node', processId: 'p1' },
       recoverer: {
         async maxSequence() {
@@ -136,7 +147,7 @@ describe('createEnvelopeWrapper', () => {
     const ctx = { current: CausalContext.root('corr_x') }
     const wrap = createEnvelopeWrapper({
       counter,
-      context: ctx,
+      contextProvider: makeRefProvider(ctx),
       source: { processKind: 'daemon', processId: 'p1' },
       recoverer: NoopSequenceRecoverer,
       now: () => 'T',
@@ -174,7 +185,7 @@ describe('createEnvelopeWrapper', () => {
     const ctx = { current: child }
     const wrap = createEnvelopeWrapper({
       counter,
-      context: ctx,
+      contextProvider: makeRefProvider(ctx),
       source: { processKind: 'daemon', processId: 'p1' },
       recoverer: NoopSequenceRecoverer,
       now: () => 'T',
@@ -199,7 +210,7 @@ describe('createEnvelopeWrapper', () => {
 
     const wrap = createEnvelopeWrapper({
       counter,
-      context: ctx,
+      contextProvider: makeRefProvider(ctx),
       source: { processKind: 'daemon', processId: 'p1' },
       recoverer: {
         maxSequence(): Promise<number | null> {

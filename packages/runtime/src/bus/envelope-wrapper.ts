@@ -11,19 +11,14 @@ import type {
   EnvelopeSource,
 } from '@tianji/shared'
 import { ulid } from 'ulid'
-import type { CausalContext } from './causal-context.js'
+import type { CausalContextProvider } from './causal-context-provider.js'
 import { resolveTarget } from './event-target.js'
 import type { SequenceCounter } from './sequence-counter.js'
 import type { SequenceRecoverer } from './sequence-recoverer.js'
 
-/** 可变引用持有当前 CausalContext 快照，用于在 turn 内传播因果链。 */
-export interface CausalContextRef {
-  current: CausalContext
-}
-
 export interface EnvelopeWrapperDeps {
   readonly counter: SequenceCounter
-  readonly context: CausalContextRef
+  readonly contextProvider: CausalContextProvider
   readonly source: EnvelopeSource
   readonly recoverer: SequenceRecoverer
   /** 返回 ISO 时间字符串；默认 `new Date().toISOString()`，测试时注入固定值。 */
@@ -83,7 +78,7 @@ export function createEnvelopeWrapper(
     await ensureInitialized(key, aggregateType, aggregateId)
 
     const sequence = deps.counter.next(key)
-    const ctx = deps.context.current
+    const ctx = deps.contextProvider.getCurrent()
 
     return {
       eventId: ulid(),
