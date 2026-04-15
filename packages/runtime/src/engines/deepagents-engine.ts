@@ -1,63 +1,26 @@
 /**
- * deepagents 执行引擎适配层。
+ * deepagents 执行引擎主入口（薄入口文件）。
  *
- * 业务职责：
- * - 将 SessionRuntime 的消息、工具、取消与事件协议转换为 deepagents 所需格式。
- * - 统一处理流式文本、工具调用观测、checkpoint 状态回读与超时控制。
- * - 保持 @tianji/shared 定义的 DomainEvent / ToolResult / 错误语义稳定。
+ * 本文件仅包含 executeDeepagentsRun 主函数，其余实现均已按职责拆分至以下子模块：
+ * - engines/deepagents/types.ts          — 内部类型定义
+ * - engines/deepagents/helpers.ts        — 通用工具函数
+ * - engines/deepagents/message-serialization.ts — 消息序列化
+ * - engines/deepagents/stream-handlers.ts       — 流事件处理
+ * - engines/deepagents/state-readers.ts         — 状态读取
+ * - engines/deepagents/config-resolvers.ts      — 配置解析
+ * - engines/deepagents/tool-adapter.ts          — 工具适配
  *
  * 对外触点：
  * - 由 ../runtime.ts 在每次 runTurn/resumeRun 时调用 executeDeepagentsRun。
- * - 对接 deepagents createDeepAgent、@langchain/langgraph StateSnapshot、ToolCatalog。
  */
 import { randomUUID } from 'node:crypto'
 
-import { DynamicStructuredTool } from '@langchain/core/tools'
-import { Command, type StateSnapshot } from '@langchain/langgraph'
-import {
-  type AppMessage,
-  CancelledError,
-  type DomainEvent,
-  type ExecutionPolicy,
-  type MessagePart,
-  type MessageRole,
-  type RunId,
-  type RunSnapshot,
-  type SessionId,
-  TianjiError,
-  TimeoutError,
-  type TokenUsage,
-  ToolError,
-  type ToolInvocation,
-  addTokenUsage,
-} from '@tianji/shared'
+import { type AppMessage, TianjiError, type ToolInvocation } from '@tianji/shared'
 import { createDeepAgent } from 'deepagents'
 
-import type { ObserverLogger } from '@tianji/observer'
-import type { LlmGenerationConfig } from '../llm/index.js'
-import type { ToolCatalog } from '../tool-catalog.js'
-import { ensureToolAllowed } from '../tool-catalog.js'
-
 import { LlmCallRecorder, createRecordingMiddleware } from '../llm-call-recorder.js'
-import { LlmRawStore } from '../llm-raw-store.js'
-import type { SessionRuntimeDeepagentsConfig } from '../types.js'
-import type {
-  AbortSignalScope,
-  DeepAgentFactory,
-  DeepagentsAgentEvent,
-  DeepagentsAgentInstance,
-  DeepagentsInterruptRecord,
-  DeepagentsPendingToolCall,
-  DeepagentsRunResult,
-  ExecuteDeepagentsRunOptions,
-  StreamLoopState,
-} from './deepagents/types.js'
-
-export type { DeepagentsRunResult } from './deepagents/types.js'
-
 import {
   buildMiddlewareList,
-  hasConfiguredDeepagentsCheckpointer,
   hasDeepagentsModel,
   persistLlmRaw,
   resolveDeepagentsBackend,
@@ -66,24 +29,7 @@ import {
   resolveDeepagentsStore,
   resolveDeepagentsSubagents,
 } from './deepagents/config-resolvers.js'
-import {
-  createAbortSignalScope,
-  executeWithTimeout,
-  isCancellationError,
-  isRecord,
-  nextSequence,
-  resolveToolError,
-  stableSerialize,
-  toError,
-} from './deepagents/helpers.js'
-import {
-  buildAssistantMessage,
-  buildAssistantMessageFromDeepagentsOutput,
-  convertAppMessageToDeepagentsMessage,
-  parseToolArgs,
-  readObservedToolCalls,
-  registerObservedToolCalls,
-} from './deepagents/message-serialization.js'
+import { buildAssistantMessage } from './deepagents/message-serialization.js'
 import {
   maybeReadDeepagentsStateSnapshot,
   readDeepagentsInput,
@@ -91,6 +37,15 @@ import {
 } from './deepagents/state-readers.js'
 import { dispatchStreamEvent } from './deepagents/stream-handlers.js'
 import { createDeepagentsTools } from './deepagents/tool-adapter.js'
+import type {
+  DeepAgentFactory,
+  DeepagentsPendingToolCall,
+  DeepagentsRunResult,
+  ExecuteDeepagentsRunOptions,
+  StreamLoopState,
+} from './deepagents/types.js'
+
+export type { DeepagentsRunResult } from './deepagents/types.js'
 
 /**
  * 执行一次 deepagents 运行并将其完整映射为 DomainEvent / RunResult。
