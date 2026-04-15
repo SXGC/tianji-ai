@@ -41,6 +41,14 @@ import { type DeepagentsRunResult, executeDeepagentsRun } from './engines/deepag
 import { ReplayableEventStream } from './event-stream.js'
 import type { LlmGenerationConfig } from './llm/index.js'
 import {
+  createAbortSignalScope,
+  createRunLineageFields,
+  hasSideEffect,
+  isCancellationError,
+  normalizeToolCatalog,
+  toTianjiError,
+} from './runtime/helpers.js'
+import {
   cloneMetadata,
   ensureRunEngineMatches,
   ensureSessionEngineMatches,
@@ -873,132 +881,4 @@ class SessionRuntimeImpl implements SessionRuntime {
       textPreview: textParts.join('').slice(0, 200),
     })
   }
-}
-
-function createRunLineageFields(fields: RunLineageFields): RunLineageFields {
-  return {
-    sessionId: fields.sessionId,
-    runId: fields.runId,
-    triggerType: fields.triggerType,
-    parentRunId: fields.parentRunId,
-  }
-}
-
-function normalizeToolCatalog(toolCatalog: SessionRuntimeOptions['toolCatalog']): ToolCatalog {
-  if (toolCatalog === undefined) {
-    return new ToolRegistry()
-  }
-
-  if (toolCatalog instanceof ToolRegistry) {
-    return toolCatalog.createCatalog()
-  }
-
-  if (Array.isArray(toolCatalog)) {
-    return new ToolRegistry(toolCatalog).createCatalog()
-  }
-
-  if (isToolCatalog(toolCatalog)) {
-    return toolCatalog
-  }
-
-  return new ToolRegistry()
-}
-
-function isToolCatalog(value: SessionRuntimeOptions['toolCatalog']): value is ToolCatalog {
-  return value !== undefined && !Array.isArray(value) && !(value instanceof ToolRegistry)
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-function isDeepagentsInterruptRecord(value: unknown): value is DeepagentsInterruptRecord {
-  if (!isRecord(value)) {
-    return false
-  }
-
-  return (
-    (value.id === undefined || typeof value.id === 'string') &&
-    ('value' in value || value.value === undefined)
-  )
-}
-
-function createAbortSignalScope(...signals: Array<AbortSignal | undefined>): AbortSignalScope {
-  const activeSignals = signals.filter((signal): signal is AbortSignal => signal !== undefined)
-
-  if (activeSignals.length === 0) {
-    return {
-      signal: undefined,
-      cleanup: () => {},
-    }
-  }
-
-  if (activeSignals.length === 1) {
-    return {
-      signal: activeSignals[0],
-      cleanup: () => {},
-    }
-  }
-
-  const controller = new AbortController()
-
-  if (activeSignals.some((signal) => signal.aborted)) {
-    controller.abort()
-    return {
-      signal: controller.signal,
-      cleanup: () => {},
-    }
-  }
-
-  const listeners = activeSignals.map((signal) => {
-    const abort = (): void => controller.abort()
-    signal.addEventListener('abort', abort, { once: true })
-    return { signal, abort }
-  })
-
-  return {
-    signal: controller.signal,
-    cleanup: () => {
-      for (const listener of listeners) {
-        listener.signal.removeEventListener('abort', listener.abort)
-      }
-    },
-  }
-}
-
-function toError(error: unknown): Error {
-  if (error instanceof Error) {
-    return error
-  }
-
-  return new Error(String(error))
-}
-
-function toTianjiError(error: unknown): TianjiError {
-  if (error instanceof TianjiError) {
-    return error
-  }
-
-  return new ProviderError('RUNTIME_EXECUTION_FAILED', toError(error).message, {
-    cause: toError(error),
-  })
-}
-
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError'
-}
-
-function isCancellationError(error: unknown, signal?: AbortSignal): boolean {
-  return error instanceof CancelledError || isAbortError(error) || Boolean(signal?.aborted)
-}
-
-function hasSideEffect(
-  pendingOperations: Map<string, RunSnapshot['pendingOperations'][number]>,
-  destructiveOperationIds: ReadonlySet<string>
-): boolean {
-  return [...pendingOperations.values()].some(
-    (operation) =>
-      operation.status === 'aborted-with-side-effect' ||
-      (operation.status === 'completed' && destructiveOperationIds.has(operation.id))
-  )
 }
