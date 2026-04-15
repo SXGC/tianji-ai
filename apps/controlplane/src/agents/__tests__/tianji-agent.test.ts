@@ -1,3 +1,4 @@
+import { createEventBus } from '@tianji/shared'
 import { firstValueFrom, toArray } from 'rxjs'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -26,6 +27,18 @@ describe('TianjiAgent', () => {
          VALUES (?, 'host', 'linux', '1.0.0', 'online', 'hash', ${Date.now() + 3600000}, 'test-token', ${Date.now()}, ${Date.now()})`
       )
       .run(nodeId)
+  }
+
+  /**
+   * 创建一个带 lagSink 的测试用 EventBus。
+   * lagSink 仅记录日志，不影响测试流程。
+   */
+  function createTestBus() {
+    return createEventBus({
+      lagSink: (info) => {
+        console.warn('[test-bus] subscriber lag', info)
+      },
+    })
   }
 
   it('clone 后仍保留运行所需的节点和代理信息', async () => {
@@ -69,11 +82,12 @@ describe('TianjiAgent', () => {
     expect(firstEvent).toMatchObject({ type: 'RUN_STARTED' })
   })
 
-  it('收到 task.started 后，运行流中只会出现一个 RUN_STARTED', async () => {
+  it('任务终态后运行流中只出现一个 RUN_STARTED', async () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
 
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+    const bus = createTestBus()
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus)
 
     const completion = firstValueFrom(
       agent
@@ -87,6 +101,7 @@ describe('TianjiAgent', () => {
         .pipe(toArray())
     )
 
+    // 等待 task 记录写入
     await new Promise((resolve) => setTimeout(resolve, 50))
 
     const taskRow = db.raw
@@ -94,49 +109,21 @@ describe('TianjiAgent', () => {
       .get() as { task_id: string } | undefined
 
     expect(taskRow).toBeDefined()
-
     const taskId = taskRow!.task_id
-    const now = Date.now()
 
-    db.raw
-      .prepare(
-        'INSERT INTO task_events (task_id, sequence, kind, payload, received_at) VALUES (?, ?, ?, ?, ?)'
-      )
-      .run(
-        taskId,
-        1,
-        'lifecycle',
-        JSON.stringify({
-          kind: 'lifecycle',
-          taskId,
-          type: 'task.started',
-          sequence: 1,
-          timestamp: now,
-        }),
-        now
-      )
-
-    db.raw
-      .prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE task_id = ?')
-      .run('completed', now + 1, taskId)
-
-    db.raw
-      .prepare(
-        'INSERT INTO task_events (task_id, sequence, kind, payload, received_at) VALUES (?, ?, ?, ?, ?)'
-      )
-      .run(
-        taskId,
-        2,
-        'lifecycle',
-        JSON.stringify({
-          kind: 'lifecycle',
-          taskId,
-          type: 'task.completed',
-          sequence: 2,
-          timestamp: now + 1,
-        }),
-        now + 1
-      )
+    // 通过 bus 发布 TaskCompleted 终态事件
+    bus.publish({
+      eventId: 'evt-1',
+      type: 'TaskCompleted',
+      occurredAt: new Date().toISOString(),
+      correlationId: 'corr-1',
+      causationId: null,
+      sequence: 1,
+      aggregateType: 'Task',
+      aggregateId: taskId,
+      source: { processKind: 'node', processId: 'node-proc-1', nodeId: 'node-1' },
+      payload: { type: 'TaskCompleted', taskId, timestamp: Date.now() },
+    })
 
     const events = await completion
     const startedEvents = events.filter((event) => event.type === 'RUN_STARTED')

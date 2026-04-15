@@ -1,5 +1,5 @@
 import type { ObserverLogger } from '@tianji/observer'
-import type { DomainEvent } from '@tianji/shared'
+import type { DomainEvent, EventBus } from '@tianji/shared'
 import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from './db/index.js'
@@ -20,6 +20,8 @@ export interface ControlPlaneApp {
 export interface CreateAppOptions {
   /** 可选：DomainEvent 发射回调，由装配层注入，用于把 Node/Task 生命周期事件发到 EventBus。 */
   readonly emitEvent?: (ev: DomainEvent) => void | Promise<void>
+  /** 可选：进程内 EventBus 实例，用于 AG-UI 适配器订阅领域事件。 */
+  readonly bus?: EventBus
   /**
    * 可选：在每个请求前建立独立的因果链上下文。
    * 由装配层注入（例如 AsyncLocalStorage.run 包裹），确保并发请求间因果链不互相污染。
@@ -43,7 +45,7 @@ export function createApp(
   logger: ObserverLogger,
   options: CreateAppOptions = {}
 ): ControlPlaneApp {
-  const { emitEvent, enterCorrelation } = options
+  const { emitEvent, enterCorrelation, bus } = options
   const app = new Hono()
 
   app.get('/health', (c) => c.json({ status: 'ok' }))
@@ -63,7 +65,7 @@ export function createApp(
   app.route('/', createTaskEventsRoute(db, logger))
 
   app.route('/', createUiNodesRoute(db))
-  app.route('/', createCopilotRoute(db))
+  app.route('/', createCopilotRoute(db, bus))
   app.route('/', createWebUiRoute())
 
   return {
