@@ -41,99 +41,22 @@ import { ensureToolAllowed } from '../tool-catalog.js'
 import { LlmCallRecorder, createRecordingMiddleware } from '../llm-call-recorder.js'
 import { LlmRawStore } from '../llm-raw-store.js'
 import type { SessionRuntimeDeepagentsConfig } from '../types.js'
+import type {
+  AbortSignalScope,
+  DeepAgentFactory,
+  DeepagentsAgentEvent,
+  DeepagentsAgentInstance,
+  DeepagentsInterruptRecord,
+  DeepagentsPendingToolCall,
+  DeepagentsRunResult,
+  ExecuteDeepagentsRunOptions,
+  StreamLoopState,
+} from './deepagents/types.js'
 
-interface DeepagentsPendingToolCall {
-  readonly toolCallId: string
-  readonly toolName: string
-  readonly argsText: string
-  readonly args: unknown
-  consumed: boolean
-}
-
-interface ExecuteDeepagentsRunOptions {
-  readonly sessionId: SessionId
-  readonly runId: RunId
-  readonly messages: readonly AppMessage[]
-  readonly signal: AbortSignal
-  readonly policy: ExecutionPolicy
-  readonly config?: LlmGenerationConfig
-  readonly systemPrompt?: string
-  readonly threadId?: string
-  readonly checkpointId?: string
-  readonly resumeValue?: unknown
-  readonly deepagents: SessionRuntimeDeepagentsConfig
-  readonly toolCatalog: ToolCatalog
-  readonly pendingOperations: Map<string, RunSnapshot['pendingOperations'][number]>
-  readonly destructiveOperationIds: Set<string>
-  readonly sequence: {
-    current: number
-  }
-  readonly llmRawDir?: string
-  readonly logger?: ObserverLogger
-  readonly emitEvent: (event: DomainEvent) => void
-}
-
-type DeepAgentFactory = (params?: Record<string, unknown>) => DeepagentsAgentInstance
-
-interface DeepagentsAgentEvent {
-  readonly event: string
-  readonly name: string
-  readonly run_id: string
-  readonly data?: Record<string, unknown>
-}
-
-interface DeepagentsAgentInstance {
-  readonly streamEvents: (
-    input: unknown,
-    options: {
-      readonly version: 'v2'
-      readonly configurable: {
-        readonly thread_id: string
-        readonly checkpoint_id?: string
-      }
-      readonly signal: AbortSignal
-    }
-  ) => Promise<AsyncIterable<DeepagentsAgentEvent>>
-  readonly getState: (options: {
-    readonly configurable: {
-      readonly thread_id: string
-      readonly checkpoint_id?: string
-    }
-  }) => Promise<StateSnapshot>
-}
-
-interface DeepagentsInterruptRecord {
-  readonly id?: string
-  readonly value?: unknown
-}
-
-export interface DeepagentsRunResult {
-  readonly turnMessages: AppMessage[]
-  readonly threadId: string
-  readonly checkpointId?: string
-  readonly interrupts?: readonly DeepagentsInterruptRecord[]
-  readonly usage?: TokenUsage
-}
-
-interface AbortSignalScope {
-  readonly signal: AbortSignal | undefined
-  readonly cleanup: () => void
-}
+export type { DeepagentsRunResult } from './deepagents/types.js'
 
 function isLangGraphChainEnd(event: { event: string; name?: string }): boolean {
   return event.event === 'on_chain_end' && event.name === 'LangGraph'
-}
-
-/** 事件循环中共享的可变状态。 */
-interface StreamLoopState {
-  readonly messageId: string
-  readonly messageStartedAt: number
-  readonly observedToolCalls: DeepagentsPendingToolCall[]
-  readonly turnMessages: AppMessage[]
-  readonly builtinToolInvocations: Map<string, ToolInvocation>
-  currentThinking: string
-  currentText: string
-  usage: TokenUsage | undefined
 }
 
 /** 处理 on_chat_model_stream：累积文本和 thinking 增量并发射 delta 事件。 */
