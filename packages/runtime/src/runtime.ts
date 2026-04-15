@@ -40,6 +40,26 @@ import { resolveConfigPaths } from './config.js'
 import { type DeepagentsRunResult, executeDeepagentsRun } from './engines/deepagents-engine.js'
 import { ReplayableEventStream } from './event-stream.js'
 import type { LlmGenerationConfig } from './llm/index.js'
+import {
+  cloneMetadata,
+  ensureRunEngineMatches,
+  ensureSessionEngineMatches,
+  ensureSessionOpen,
+  hasConfiguredDeepagentsCheckpointer,
+  hasConfiguredDeepagentsModel,
+  hasInterruptConfiguration,
+  mergeMetadata,
+  readDeepagentsRunWorkflowState,
+  readRequestedEngine,
+  readRunRuntimeMetadata,
+  readSessionRuntimeMetadata,
+  readStoredGenerationConfig,
+  readStoredSystemPrompt,
+  readTokenUsage,
+  writeDeepagentsRunWorkflowState,
+  writeRunRuntimeMetadata,
+  writeSessionRuntimeMetadata,
+} from './runtime/metadata.js'
 import type {
   AbortSignalScope,
   ActiveRun,
@@ -82,6 +102,11 @@ export type {
   SessionRuntimeMetadata,
   SessionRuntimeOptions,
 } from './runtime/types.js'
+export {
+  readDeepagentsRunWorkflowState,
+  readRunRuntimeMetadata,
+  readSessionRuntimeMetadata,
+} from './runtime/metadata.js'
 
 export function createSessionRuntime(options: SessionRuntimeOptions): SessionRuntime {
   const normalizedOptions = normalizeSessionRuntimeOptions(options)
@@ -126,65 +151,6 @@ function resolveDeepagentsModel(
       defaultHeaders: config.providerConfig.headers,
     },
   })
-}
-
-export function readSessionRuntimeMetadata(
-  metadata: Record<string, unknown> | undefined
-): SessionRuntimeMetadata | undefined {
-  const engine = readRuntimeEngine(metadata)
-
-  if (engine === undefined) {
-    return undefined
-  }
-
-  return { engine }
-}
-
-export function readRunRuntimeMetadata(
-  metadata: Record<string, unknown> | undefined
-): RunRuntimeMetadata | undefined {
-  const engine = readRuntimeEngine(metadata)
-
-  if (engine === undefined) {
-    return undefined
-  }
-
-  const runtime = readRuntimeMetadataRecord(metadata)
-
-  return {
-    engine,
-    threadId: typeof runtime?.threadId === 'string' ? runtime.threadId : undefined,
-    checkpointId: typeof runtime?.checkpointId === 'string' ? runtime.checkpointId : undefined,
-  }
-}
-
-export function readDeepagentsRunWorkflowState(
-  workflowState: unknown
-): DeepagentsRunWorkflowState | undefined {
-  // 仅识别当前 runtime 约定的 interrupt 快照结构，避免历史脏数据污染恢复流程。
-  if (!isRecord(workflowState) || workflowState.kind !== 'deepagents-interrupt') {
-    return undefined
-  }
-
-  if (typeof workflowState.threadId !== 'string') {
-    return undefined
-  }
-
-  const interrupts = Array.isArray(workflowState.interrupts)
-    ? workflowState.interrupts.filter(isDeepagentsInterruptRecord)
-    : undefined
-
-  if (interrupts === undefined) {
-    return undefined
-  }
-
-  return {
-    kind: 'deepagents-interrupt',
-    threadId: workflowState.threadId,
-    checkpointId:
-      typeof workflowState.checkpointId === 'string' ? workflowState.checkpointId : undefined,
-    interrupts,
-  }
 }
 
 class SessionRuntimeImpl implements SessionRuntime {
@@ -1035,217 +1001,4 @@ function hasSideEffect(
       operation.status === 'aborted-with-side-effect' ||
       (operation.status === 'completed' && destructiveOperationIds.has(operation.id))
   )
-}
-
-function mergeMetadata(
-  base: Record<string, unknown> | undefined,
-  extra: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (base === undefined && extra === undefined) {
-    return undefined
-  }
-
-  return {
-    ...base,
-    ...extra,
-  }
-}
-
-function cloneMetadata(
-  metadata: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  return metadata === undefined ? undefined : { ...metadata }
-}
-
-function ensureSessionOpen(snapshot: SessionSnapshot): void {
-  if (snapshot.metadata?.closedAt !== undefined) {
-    throw new TianjiError(
-      'state',
-      'SESSION_CLOSED',
-      `Session "${snapshot.sessionId}" has been closed`
-    )
-  }
-}
-
-function ensureSessionEngineMatches(
-  snapshot: SessionSnapshot,
-  expectedEngine: SessionRuntimeEngine
-): void {
-  const storedEngine = readSessionRuntimeMetadata(snapshot.metadata)?.engine ?? 'legacy'
-
-  if (storedEngine !== expectedEngine) {
-    throw new TianjiError(
-      'state',
-      'SESSION_ENGINE_MISMATCH',
-      `Session "${snapshot.sessionId}" is bound to runtime engine "${storedEngine}", but the current runtime is using "${expectedEngine}"`
-    )
-  }
-}
-
-function ensureRunEngineMatches(snapshot: RunSnapshot, expectedEngine: SessionRuntimeEngine): void {
-  const storedEngine = readRunRuntimeMetadata(snapshot.metadata)?.engine ?? 'legacy'
-
-  if (storedEngine === expectedEngine) {
-    return
-  }
-
-  throw new TianjiError(
-    'state',
-    'SESSION_ENGINE_MISMATCH',
-    `Run "${snapshot.runId}" is bound to runtime engine "${storedEngine}", but the current runtime is using "${expectedEngine}"`
-  )
-}
-
-function readRuntimeMetadataRecord(
-  metadata: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  const runtime = metadata?.runtime
-
-  if (typeof runtime !== 'object' || runtime === null || Array.isArray(runtime)) {
-    return undefined
-  }
-
-  return runtime as Record<string, unknown>
-}
-
-function readRuntimeEngine(
-  metadata: Record<string, unknown> | undefined
-): SessionRuntimeEngine | undefined {
-  const engine = readRuntimeMetadataRecord(metadata)?.engine
-
-  return engine === 'legacy' || engine === 'deepagents' ? engine : undefined
-}
-
-function readRequestedEngine(options: SessionRuntimeOptions): SessionRuntimeEngine | undefined {
-  const engine = (options as Record<string, unknown>).engine
-
-  return engine === 'legacy' || engine === 'deepagents' ? engine : undefined
-}
-
-function writeSessionRuntimeMetadata(
-  metadata: Record<string, unknown> | undefined,
-  runtimeMetadata: SessionRuntimeMetadata
-): Record<string, unknown> {
-  return {
-    ...metadata,
-    runtime: {
-      ...readRuntimeMetadataRecord(metadata),
-      engine: runtimeMetadata.engine,
-    },
-  }
-}
-
-function writeRunRuntimeMetadata(
-  metadata: Record<string, unknown> | undefined,
-  runtimeMetadata: RunRuntimeMetadata
-): Record<string, unknown> {
-  const nextRuntimeMetadata: Record<string, unknown> = {
-    ...readRuntimeMetadataRecord(metadata),
-    engine: runtimeMetadata.engine,
-  }
-
-  if (runtimeMetadata.threadId !== undefined) {
-    nextRuntimeMetadata.threadId = runtimeMetadata.threadId
-  }
-
-  if (runtimeMetadata.checkpointId !== undefined) {
-    nextRuntimeMetadata.checkpointId = runtimeMetadata.checkpointId
-  }
-
-  return {
-    ...metadata,
-    runtime: nextRuntimeMetadata,
-  }
-}
-
-function writeDeepagentsRunWorkflowState(
-  state: Omit<DeepagentsRunWorkflowState, 'kind'>
-): DeepagentsRunWorkflowState {
-  return {
-    kind: 'deepagents-interrupt',
-    threadId: state.threadId,
-    checkpointId: state.checkpointId,
-    interrupts: state.interrupts.map((interrupt) => ({
-      id: interrupt.id,
-      value: interrupt.value,
-    })),
-  }
-}
-
-function readStoredSystemPrompt(metadata: Record<string, unknown> | undefined): string | undefined {
-  const systemPrompt = metadata?.systemPrompt
-  return typeof systemPrompt === 'string' ? systemPrompt : undefined
-}
-
-function readStoredGenerationConfig(
-  metadata: Record<string, unknown> | undefined
-): LlmGenerationConfig | undefined {
-  const config = metadata?.generationConfig
-  return typeof config === 'object' && config !== null ? (config as LlmGenerationConfig) : undefined
-}
-
-function hasConfiguredDeepagentsModel(
-  deepagents: SessionRuntimeOptions['deepagents']
-): deepagents is SessionRuntimeDeepagentsConfig {
-  if (deepagents === undefined) {
-    return false
-  }
-
-  if (typeof deepagents.model === 'string') {
-    return deepagents.model.length > 0
-  }
-
-  return deepagents.model !== undefined
-}
-
-function hasInterruptConfiguration(
-  deepagents: SessionRuntimeDeepagentsConfig | undefined
-): boolean {
-  return deepagents?.interruptOn !== undefined && Object.keys(deepagents.interruptOn).length > 0
-}
-
-function hasConfiguredDeepagentsCheckpointer(
-  deepagents: SessionRuntimeDeepagentsConfig | undefined
-): boolean {
-  return deepagents?.checkpointer !== undefined && deepagents.checkpointer !== false
-}
-
-/**
- * 从 metadata 中安全读取 TokenUsage，类型不匹配时返回 undefined。
- */
-function readTokenUsage(metadata: Record<string, unknown> | undefined): TokenUsage | undefined {
-  const usage = metadata?.usage
-
-  if (typeof usage !== 'object' || usage === null) {
-    return undefined
-  }
-
-  const candidate = usage as {
-    inputTokens?: unknown
-    outputTokens?: unknown
-    totalTokens?: unknown
-    cacheReadTokens?: unknown
-    cacheCreationTokens?: unknown
-  }
-
-  if (
-    typeof candidate.inputTokens !== 'number' ||
-    typeof candidate.outputTokens !== 'number' ||
-    typeof candidate.totalTokens !== 'number'
-  ) {
-    return undefined
-  }
-
-  const cacheRead =
-    typeof candidate.cacheReadTokens === 'number' ? candidate.cacheReadTokens : undefined
-  const cacheCreation =
-    typeof candidate.cacheCreationTokens === 'number' ? candidate.cacheCreationTokens : undefined
-
-  return {
-    inputTokens: candidate.inputTokens,
-    outputTokens: candidate.outputTokens,
-    totalTokens: candidate.totalTokens,
-    ...(cacheRead !== undefined && { cacheReadTokens: cacheRead }),
-    ...(cacheCreation !== undefined && { cacheCreationTokens: cacheCreation }),
-  }
 }
