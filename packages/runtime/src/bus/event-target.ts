@@ -58,5 +58,10 @@ export function resolveTarget(event: DomainEvent): EventTarget {
     case 'NodeReRegistered':
     case 'NodeMarkedOffline':
       return { aggregateType: 'Node', aggregateId: event.nodeId }
+
+    default: {
+      const _exhaustive: never = event
+      throw new Error(`unknown event: ${(_exhaustive as DomainEvent).type}`)
+    }
   }
 }
