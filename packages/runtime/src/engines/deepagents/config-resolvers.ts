@@ -163,12 +163,3 @@ export function hasDeepagentsModel(value: SessionRuntimeDeepagentsConfig['model'
 
   return value !== undefined
 }
-
-/**
- * 判断当前运行是否启用了可读取状态的 checkpointer。
- */
-export function hasConfiguredDeepagentsCheckpointer(
-  value: SessionRuntimeDeepagentsConfig['checkpointer']
-): boolean {
-  return value !== undefined && value !== false
-}
