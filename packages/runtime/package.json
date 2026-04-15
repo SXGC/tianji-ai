@@ -27,7 +27,8 @@
     "@tianji/observer": "workspace:*",
     "@tianji/shared": "workspace:*",
     "deepagents": "^1.8.4",
-    "langchain": "^1.2.34"
+    "langchain": "^1.2.34",
+    "ulid": "^3.0.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0"
