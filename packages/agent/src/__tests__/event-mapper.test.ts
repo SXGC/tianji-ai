@@ -1,4 +1,6 @@
 import type {
+  DomainEvent,
+  DomainEventEnvelope,
   MessageCompletedEvent,
   MessageDeltaEvent,
   MessageStartedEvent,
@@ -18,6 +20,22 @@ const SESSION_ID = 'test-session-1'
 const runId = createRunId('run-1')
 const sessionId = createSessionId('sid')
 
+/** 为测试创建最小化的 DomainEventEnvelope，aggregateType 固定为 Run。 */
+function makeEnvelope(event: DomainEvent): DomainEventEnvelope {
+  return {
+    eventId: `test_${event.type}`,
+    type: event.type,
+    occurredAt: new Date().toISOString(),
+    correlationId: 'runId' in event ? String(event.runId) : 'test',
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: 'runId' in event ? String(event.runId) : 'test',
+    source: { processKind: 'node', processId: 'test' },
+    payload: event,
+  }
+}
+
 describe('mapRuntimeEventToSessionUpdate', () => {
   it('maps MessageDelta with text channel to agent_message_chunk', () => {
     const event: MessageDeltaEvent = {
@@ -30,7 +48,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toEqual({
       sessionId: SESSION_ID,
@@ -52,7 +70,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toEqual({
       sessionId: SESSION_ID,
@@ -72,7 +90,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toMatchObject({
       sessionId: SESSION_ID,
@@ -94,7 +112,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toMatchObject({
       update: { kind: 'edit' },
@@ -110,7 +128,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toMatchObject({
       update: { kind: 'edit' },
@@ -126,7 +144,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toMatchObject({
       update: { kind: 'execute' },
@@ -142,7 +160,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toMatchObject({
       update: { kind: 'execute' },
@@ -158,7 +176,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toMatchObject({
       update: { kind: 'search' },
@@ -174,7 +192,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toMatchObject({
       update: { kind: 'search' },
@@ -190,7 +208,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toMatchObject({
       update: { kind: 'other' },
@@ -207,7 +225,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toEqual({
       sessionId: SESSION_ID,
@@ -229,7 +247,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, event)
+    const result = mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))
 
     expect(result).toEqual({
       sessionId: SESSION_ID,
@@ -249,7 +267,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       message: {} as never,
       timestamp: Date.now(),
     }
-    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, event)).toBeNull()
+    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))).toBeNull()
   })
 
   it('returns null for MessageCompleted', () => {
@@ -260,7 +278,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       message: {} as never,
       timestamp: Date.now(),
     }
-    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, event)).toBeNull()
+    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))).toBeNull()
   })
 
   it('returns null for RunCompleted', () => {
@@ -271,7 +289,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       triggerType: 'new',
       timestamp: Date.now(),
     }
-    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, event)).toBeNull()
+    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))).toBeNull()
   })
 
   it('returns null for RunFailed', () => {
@@ -283,7 +301,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       error: { code: 'ERR', message: 'fail' } as never,
       timestamp: Date.now(),
     }
-    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, event)).toBeNull()
+    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))).toBeNull()
   })
 
   it('returns null for RunCancelled', () => {
@@ -295,6 +313,6 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       reason: 'abort',
       timestamp: Date.now(),
     }
-    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, event)).toBeNull()
+    expect(mapRuntimeEventToSessionUpdate(SESSION_ID, makeEnvelope(event))).toBeNull()
   })
 })

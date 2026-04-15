@@ -104,8 +104,9 @@ export class TaskExecutor {
       let turn: TurnSummary | null = null
       let sawTerminalRunEvent = false
 
-      for await (const event of runner.query(command.payload.goal)) {
-        if (event != null) {
+      for await (const envelope of runner.query(command.payload.goal)) {
+        if (envelope != null) {
+          const event = envelope.payload
           turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
           if (
             event.type === 'RunCompleted' ||
@@ -120,7 +121,7 @@ export class TaskExecutor {
           JSON.stringify({
             kind: 'agent',
             sequence,
-            event,
+            event: envelope?.payload,
           })
         )
         sequence += 1

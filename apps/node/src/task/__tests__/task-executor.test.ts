@@ -1,9 +1,33 @@
-import { type Command, ToolError, createNodeId, createTaskId } from '@tianji/shared'
+import {
+  type Command,
+  type DomainEvent,
+  type DomainEventEnvelope,
+  ToolError,
+  createNodeId,
+  createTaskId,
+} from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import type { IAgentRunner } from '../../acp/index.js'
 import { createCliLogger } from '../../logger.js'
 import type { TaskExecutorConfig } from '../task-executor.js'
+
+/** 将裸 DomainEvent 包装为最小化 DomainEventEnvelope，专用于测试。 */
+function wrap(event: DomainEvent): DomainEventEnvelope {
+  const runId = 'runId' in event ? String(event.runId) : 'test'
+  return {
+    eventId: `test_${event.type}`,
+    type: event.type,
+    occurredAt: new Date().toISOString(),
+    correlationId: runId,
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: runId,
+    source: { processKind: 'node', processId: 'test' },
+    payload: event,
+  }
+}
 
 function createCommand(taskId: ReturnType<typeof createTaskId>, goal: string): Command {
   return {
@@ -26,20 +50,20 @@ function createRunnerStub(): IAgentRunner {
     connect: async () => undefined,
     disconnect: async () => undefined,
     async *query() {
-      yield {
+      yield wrap({
         type: 'RunStarted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
-      }
-      yield {
+      })
+      yield wrap({
         type: 'RunCompleted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
-      }
+      })
     },
   }
 }
@@ -214,13 +238,13 @@ describe('TaskExecutorConfig', () => {
         connect: async () => undefined,
         disconnect: async () => undefined,
         async *query() {
-          yield {
+          yield wrap({
             type: 'RunStarted',
             runId: 'run-test' as never,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: Date.now(),
-          }
+          })
         },
       }),
       openEventStream: async () => ({
@@ -285,14 +309,14 @@ describe('TaskExecutorConfig', () => {
         connect: async () => undefined,
         disconnect: async () => undefined,
         async *query() {
-          yield {
+          yield wrap({
             type: 'RunStarted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
-          }
-          yield {
+          })
+          yield wrap({
             type: 'MessageCompleted',
             runId,
             messageId: 'msg-1',
@@ -303,30 +327,30 @@ describe('TaskExecutorConfig', () => {
               createdAt: now,
             },
             timestamp: now,
-          }
-          yield {
+          })
+          yield wrap({
             type: 'ToolCompleted',
             runId,
             toolCallId: 'tc-1',
             invocation: { toolCallId: 'tc-1', toolName: 'read_file', args: { path: '/a.ts' } },
             result: { toolCallId: 'tc-1', result: 'file content' },
             timestamp: now,
-          }
-          yield {
+          })
+          yield wrap({
             type: 'ToolFailed',
             runId,
             toolCallId: 'tc-2',
             invocation: { toolCallId: 'tc-2', toolName: 'write_file', args: { path: '/b.ts' } },
             error: new ToolError('WRITE_DENIED', 'permission denied'),
             timestamp: now,
-          }
-          yield {
+          })
+          yield wrap({
             type: 'RunCompleted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
-          }
+          })
         },
       }),
       openEventStream: async () => ({
@@ -371,7 +395,7 @@ describe('TaskExecutorConfig', () => {
         disconnect: async () => undefined,
         async *query() {
           // 先发 message.completed，此时 turn 为 null，应被忽略
-          yield {
+          yield wrap({
             type: 'MessageCompleted',
             runId,
             messageId: 'msg-orphan',
@@ -382,21 +406,21 @@ describe('TaskExecutorConfig', () => {
               createdAt: now,
             },
             timestamp: now,
-          }
-          yield {
+          })
+          yield wrap({
             type: 'RunStarted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
-          }
-          yield {
+          })
+          yield wrap({
             type: 'RunCompleted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
-          }
+          })
         },
       }),
       openEventStream: async () => ({
@@ -437,21 +461,21 @@ describe('TaskExecutorConfig', () => {
         connect: async () => undefined,
         disconnect: async () => undefined,
         async *query() {
-          yield {
+          yield wrap({
             type: 'RunStarted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
-          }
-          yield {
+          })
+          yield wrap({
             type: 'RunFailed',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             error: { category: 'internal', code: 'FAIL', message: 'failed' },
             timestamp: now,
-          }
+          })
         },
       }),
       openEventStream: async () => ({
@@ -482,20 +506,20 @@ describe('TaskExecutorConfig', () => {
         connect: async () => undefined,
         disconnect: async () => undefined,
         async *query() {
-          yield {
+          yield wrap({
             type: 'RunStarted',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
-          }
-          yield {
+          })
+          yield wrap({
             type: 'RunCancelled',
             runId,
             sessionId: 'session-test' as never,
             triggerType: 'new',
             timestamp: now,
-          }
+          })
         },
       }),
       openEventStream: async () => ({

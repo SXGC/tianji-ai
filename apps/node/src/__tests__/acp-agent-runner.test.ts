@@ -157,26 +157,51 @@ describe('AgentRunner', () => {
 
       mapFn.mockImplementation(
         (notification: { update: { sessionUpdate: string } }, runId: string) => {
+          const now = Date.now()
           if (notification.update.sessionUpdate === 'agent_message_chunk') {
-            return {
+            const event = {
               type: 'MessageDelta',
               runId,
               messageId: 'msg1',
               sequence: 0,
               channel: 'text',
               payload: { content: 'hi' },
-              timestamp: Date.now(),
+              timestamp: now,
+            }
+            return {
+              eventId: `test_msg_${now}`,
+              type: 'MessageDelta',
+              occurredAt: new Date(now).toISOString(),
+              correlationId: String(runId),
+              causationId: null,
+              sequence: 0,
+              aggregateType: 'Run',
+              aggregateId: String(runId),
+              source: { processKind: 'node', processId: 'test' },
+              payload: event,
             }
           }
           if (notification.update.sessionUpdate === 'agent_thought_chunk') {
-            return {
+            const event = {
               type: 'MessageDelta',
               runId,
               messageId: 'msg2',
               sequence: 1,
               channel: 'thinking',
               payload: { content: 'thinking' },
-              timestamp: Date.now(),
+              timestamp: now,
+            }
+            return {
+              eventId: `test_thought_${now}`,
+              type: 'MessageDelta',
+              occurredAt: new Date(now).toISOString(),
+              correlationId: String(runId),
+              causationId: null,
+              sequence: 0,
+              aggregateType: 'Run',
+              aggregateId: String(runId),
+              source: { processKind: 'node', processId: 'test' },
+              payload: event,
             }
           }
           return null

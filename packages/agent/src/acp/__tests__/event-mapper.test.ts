@@ -1,5 +1,7 @@
 import type { SessionNotification } from '@agentclientprotocol/sdk'
 import type {
+  DomainEvent,
+  DomainEventEnvelope,
   MessageDeltaEvent,
   RunCompletedEvent,
   ToolCompletedEvent,
@@ -9,6 +11,22 @@ import { createRunId, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { mapRuntimeEventToSessionUpdate } from '../event-mapper.js'
+
+/** 为测试创建最小化的 DomainEventEnvelope，aggregateType 固定为 Run。 */
+function makeEnvelope(event: DomainEvent): DomainEventEnvelope {
+  return {
+    eventId: `test_${event.type}`,
+    type: event.type,
+    occurredAt: new Date().toISOString(),
+    correlationId: 'runId' in event ? String(event.runId) : 'test',
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: 'runId' in event ? String(event.runId) : 'test',
+    source: { processKind: 'node', processId: 'test' },
+    payload: event,
+  }
+}
 
 describe('mapRuntimeEventToSessionUpdate', () => {
   const sessionId = 'session-001'
@@ -25,7 +43,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(sessionId, event)
+    const result = mapRuntimeEventToSessionUpdate(sessionId, makeEnvelope(event))
     expect(result).not.toBeNull()
     expect(result!.sessionId).toBe(sessionId)
     expect(result!.update.sessionUpdate).toBe('agent_message_chunk')
@@ -42,7 +60,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(sessionId, event)
+    const result = mapRuntimeEventToSessionUpdate(sessionId, makeEnvelope(event))
     expect(result).not.toBeNull()
     expect(result!.update.sessionUpdate).toBe('agent_thought_chunk')
   })
@@ -56,7 +74,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(sessionId, event)
+    const result = mapRuntimeEventToSessionUpdate(sessionId, makeEnvelope(event))
     expect(result).not.toBeNull()
     expect(result!.update.sessionUpdate).toBe('tool_call')
     if (result!.update.sessionUpdate === 'tool_call') {
@@ -75,7 +93,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(sessionId, event)
+    const result = mapRuntimeEventToSessionUpdate(sessionId, makeEnvelope(event))
     expect(result).not.toBeNull()
     expect(result!.update.sessionUpdate).toBe('tool_call_update')
   })
@@ -89,7 +107,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(sessionId, event)
+    const result = mapRuntimeEventToSessionUpdate(sessionId, makeEnvelope(event))
     expect(result).toBeNull()
   })
 
@@ -104,7 +122,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
       timestamp: Date.now(),
     }
 
-    const result = mapRuntimeEventToSessionUpdate(sessionId, event)
+    const result = mapRuntimeEventToSessionUpdate(sessionId, makeEnvelope(event))
     const notification: SessionNotification | null = result
 
     expect(notification?.sessionId).toBe(sessionId)

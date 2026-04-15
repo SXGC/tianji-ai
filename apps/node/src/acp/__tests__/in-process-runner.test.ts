@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { LoadedAgentContext } from '@tianji/agent'
-import type { DomainEvent } from '@tianji/shared'
+import type { DomainEvent, DomainEventEnvelope } from '@tianji/shared'
 
 const createAgentSessionMock = vi.fn()
 const loadAgentContextForNameMock = vi.fn()
@@ -38,12 +38,14 @@ function createContext(): LoadedAgentContext {
   }
 }
 
-async function collectEvents(iterable: AsyncIterable<DomainEvent>): Promise<DomainEvent[]> {
-  const events: DomainEvent[] = []
-  for await (const event of iterable) {
-    events.push(event)
+async function collectEvents(
+  iterable: AsyncIterable<DomainEventEnvelope>
+): Promise<DomainEventEnvelope[]> {
+  const envelopes: DomainEventEnvelope[] = []
+  for await (const envelope of iterable) {
+    envelopes.push(envelope)
   }
-  return events
+  return envelopes
 }
 
 describe('InProcessAgentRunner', () => {
@@ -87,13 +89,14 @@ describe('InProcessAgentRunner', () => {
     })
 
     await runner.connect()
-    const events = await collectEvents(runner.query('hello'))
+    const envelopes = await collectEvents(runner.query('hello'))
 
     expect(loadAgentContextForNameMock).toHaveBeenCalledWith('reviewer', expect.any(Object))
     expect(createAgentSessionMock).toHaveBeenCalled()
-    expect(events).toHaveLength(2)
-    expect(events[0]?.type).toBe('MessageDelta')
-    expect(events[1]).toEqual(completedEvent)
+    expect(envelopes).toHaveLength(2)
+    expect(envelopes[0]?.type).toBe('MessageDelta')
+    expect(envelopes[1]?.type).toBe('RunCompleted')
+    expect(envelopes[1]?.payload).toEqual(completedEvent)
   })
 
   it('stops yielding events after disconnect', async () => {
@@ -187,8 +190,8 @@ describe('InProcessAgentRunner', () => {
     })
 
     await runner.connect()
-    const events = await collectEvents(runner.query('hello'))
+    const envelopes = await collectEvents(runner.query('hello'))
 
-    expect(events.map((event) => event.type)).toEqual(['RunFailed', 'RunCompleted'])
+    expect(envelopes.map((env) => env.type)).toEqual(['RunFailed', 'RunCompleted'])
   })
 })

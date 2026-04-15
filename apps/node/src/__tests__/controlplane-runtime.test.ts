@@ -1,4 +1,10 @@
-import { type Command, createNodeId, createTaskId } from '@tianji/shared'
+import {
+  type Command,
+  type DomainEvent,
+  type DomainEventEnvelope,
+  createNodeId,
+  createTaskId,
+} from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -9,6 +15,23 @@ import type {
   TaskExecutorLike,
 } from '../node-runtime/controlplane-runtime.js'
 import { createControlPlaneRuntime } from '../node-runtime/controlplane-runtime.js'
+
+/** 将裸 DomainEvent 包装为最小化 DomainEventEnvelope，专用于测试。 */
+function wrap(event: DomainEvent): DomainEventEnvelope {
+  const runId = 'runId' in event ? String(event.runId) : 'test'
+  return {
+    eventId: `test_${event.type}`,
+    type: event.type,
+    occurredAt: new Date().toISOString(),
+    correlationId: runId,
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: runId,
+    source: { processKind: 'node', processId: 'test' },
+    payload: event,
+  }
+}
 
 const { agentRunnerMock, inProcessRunnerMock } = vi.hoisted(() => ({
   agentRunnerMock: vi.fn(),
@@ -26,13 +49,13 @@ function createRunnerDouble() {
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     async *query() {
-      yield {
+      yield wrap({
         type: 'RunCompleted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
-      }
+      })
     },
   }
 }

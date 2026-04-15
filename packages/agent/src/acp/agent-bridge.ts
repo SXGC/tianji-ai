@@ -20,6 +20,8 @@ import type {
   PromptResponse,
 } from '@agentclientprotocol/sdk'
 
+import type { DomainEvent, DomainEventEnvelope } from '@tianji/shared'
+
 import type { AgentExecutorFactory, OrchestrationGraph } from '../orchestration/index.js'
 import type { AgentSession } from '../session.js'
 import { mapRuntimeEventToSessionUpdate } from './event-mapper.js'
@@ -105,7 +107,8 @@ export class TianjiAcpAgent {
           return { stopReason: 'cancelled' }
         }
 
-        const update = mapRuntimeEventToSessionUpdate(params.sessionId, event)
+        const envelope = wrapAgentDomainEvent(event)
+        const update = mapRuntimeEventToSessionUpdate(params.sessionId, envelope)
         if (update) {
           await this.#connection.sessionUpdate(update)
         }
@@ -121,5 +124,24 @@ export class TianjiAcpAgent {
   async cancel(_params: CancelNotification): Promise<void> {
     console.error('[acp-agent] Received cancel request')
     this.#abortController?.abort()
+  }
+}
+
+/**
+ * 将 DomainEvent 包装为最小化 DomainEventEnvelope，供 ACP 映射层消费。
+ * source.processKind 固定为 'node'，表示原生 agent 进程侧。
+ */
+function wrapAgentDomainEvent(event: DomainEvent): DomainEventEnvelope {
+  return {
+    eventId: `acp_${event.type}_${Date.now()}`,
+    type: event.type,
+    occurredAt: new Date().toISOString(),
+    correlationId: 'runId' in event ? String(event.runId) : '',
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: 'runId' in event ? String(event.runId) : '',
+    source: { processKind: 'node', processId: String(process.pid) },
+    payload: event,
   }
 }
