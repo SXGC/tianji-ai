@@ -74,7 +74,7 @@ export function createNodeRegisterRoute(
         pid: body.pid ?? null,
         agentCount: body.agentList.length,
       })
-      void emitEvent?.({
+      await emitEvent?.({
         type: 'NodeRegistered',
         nodeId: body.nodeId,
         version: body.version,
@@ -113,7 +113,7 @@ export function createNodeRegisterRoute(
         pid: body.pid ?? null,
         agentCount: body.agentList.length,
       })
-      void emitEvent?.({
+      await emitEvent?.({
         type: 'NodeReRegistered',
         nodeId: body.nodeId,
         version: body.version,

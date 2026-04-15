@@ -6,6 +6,23 @@ import { HEARTBEAT_TIMEOUT_MS } from '../routes/node-heartbeat.js'
 
 const SCOPE_MONITOR = ['controlplane', 'monitor'] as const
 
+/** 同步上下文中发射事件并捕获错误，防止 fire-and-forget 丢失异常。 */
+function emitSafe(
+  emitEvent: ((ev: DomainEvent) => void | Promise<void>) | undefined,
+  event: DomainEvent,
+  logger: ObserverLogger
+): void {
+  const result = emitEvent?.(event)
+  if (result instanceof Promise) {
+    result.catch((err: unknown) => {
+      void logger.error(SCOPE_MONITOR, 'emitEvent failed', {
+        eventType: event.type,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+  }
+}
+
 /**
  * 监控离线 node，并把活动任务转为 observation_lost。
  */
@@ -63,12 +80,16 @@ export class ObservationMonitor {
 
       if (statusChange.changes > 0) {
         void this.#logger.warn(SCOPE_MONITOR, 'Node marked offline', { nodeId })
-        void this.#emitEvent?.({
-          type: 'NodeMarkedOffline',
-          nodeId,
-          reason: 'heartbeat-timeout',
-          timestamp: now,
-        })
+        emitSafe(
+          this.#emitEvent,
+          {
+            type: 'NodeMarkedOffline',
+            nodeId,
+            reason: 'heartbeat-timeout',
+            timestamp: now,
+          },
+          this.#logger
+        )
       }
 
       // 先查出受影响的 task_id，再批量更新状态，以便逐一发射 TaskObservationLost 事件。
@@ -93,12 +114,16 @@ export class ObservationMonitor {
         })
 
         for (const { task_id: taskId, updated_at: lastUpdatedAt } of affectedTasks) {
-          void this.#emitEvent?.({
-            type: 'TaskObservationLost',
-            taskId,
-            lastObservedAt: new Date(lastUpdatedAt).toISOString(),
-            timestamp: now,
-          })
+          emitSafe(
+            this.#emitEvent,
+            {
+              type: 'TaskObservationLost',
+              taskId,
+              lastObservedAt: new Date(lastUpdatedAt).toISOString(),
+              timestamp: now,
+            },
+            this.#logger
+          )
         }
       }
 
