@@ -89,7 +89,7 @@ describe('suite/checkpoint-resume', () => {
     const events = await collectRuntimeEvents(runId, runtime)
     const runSnapshot = await waitForRunStatus(runtime, runId, 'cancelled')
 
-    expect(events.map((e) => e.type)).toContain('run.cancelled')
+    expect(events.map((e) => e.type)).toContain('RunCancelled')
     expect(runSnapshot.status).toBe('cancelled')
     expect(runSnapshot.cancelPoint).toBe('human-in-the-loop')
     expect(runSnapshot.resumeHint).toBe('require-user-confirmation')
@@ -184,7 +184,7 @@ describe('suite/checkpoint-resume', () => {
 
     expect(resumedRun.triggerType).toBe('resume')
     expect(resumedRun.parentRunId).toBe(interruptedRunId)
-    expect(resumedEvents.map((e) => e.type)).toContain('run.completed')
+    expect(resumedEvents.map((e) => e.type)).toContain('RunCompleted')
     expect(getExecutions()).toBe(1)
 
     const sessionSnapshot = await resumeRuntime.getSessionSnapshot(session.sessionId)

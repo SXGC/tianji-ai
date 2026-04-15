@@ -112,8 +112,8 @@ describe('suite/tool-policy', () => {
     // ensureToolAllowed 在 tool.started 之前抛出，错误通过 LangGraph 传播导致 run 失败
     const hasFailed =
       outcome.error !== undefined ||
-      outcome.events.some((e) => e.type === 'tool.failed') ||
-      outcome.events.some((e) => e.type === 'run.failed')
+      outcome.events.some((e) => e.type === 'ToolFailed') ||
+      outcome.events.some((e) => e.type === 'RunFailed')
     expect(hasFailed).toBe(true)
   })
 

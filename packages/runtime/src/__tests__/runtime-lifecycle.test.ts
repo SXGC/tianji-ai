@@ -77,10 +77,10 @@ describe('SessionRuntime lifecycle', () => {
     expect(closedSession.metadata?.closedAt).toEqual(expect.any(Number))
     expect(activeToolSignal?.aborted).toBe(true)
     expect(events.map((event) => event.type)).toEqual([
-      'run.started',
-      'message.started',
-      'tool.started',
-      'run.cancelled',
+      'RunStarted',
+      'MessageStarted',
+      'ToolStarted',
+      'RunCancelled',
     ])
     expect(cancelledRun.status).toBe('cancelled')
     await expect(

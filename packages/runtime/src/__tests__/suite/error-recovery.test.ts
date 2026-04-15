@@ -148,7 +148,7 @@ describe('suite/error-recovery', () => {
 
     const outcome = await eventsPromise
     const eventTypes = outcome.events.map((e) => e.type)
-    expect(eventTypes).toContain('run.cancelled')
+    expect(eventTypes).toContain('RunCancelled')
   })
 
   it('取消时 destructive 工具 → aborted-with-side-effect + require-user-confirmation', async () => {

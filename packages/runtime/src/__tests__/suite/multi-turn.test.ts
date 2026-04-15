@@ -14,7 +14,7 @@
  */
 import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
-import { type RuntimeEvent, createSessionId } from '@tianji/shared'
+import { type DomainEvent, createSessionId } from '@tianji/shared'
 
 import { InMemorySnapshotStore } from '../../snapshot-store.js'
 import { ToolRegistry } from '../../tool-catalog.js'
@@ -169,10 +169,10 @@ describe('suite/multi-turn', () => {
       { id: 'msg-id-2', text: 'second' },
     ])
 
-    // 从 run.started 事件提取 sessionId 和 runId
+    // 从 RunStarted 事件提取 sessionId 和 runId
     const startedEvents = results.map((r) =>
       r.events.find(
-        (e): e is Extract<RuntimeEvent, { type: 'run.started' }> => e.type === 'run.started'
+        (e): e is Extract<DomainEvent, { type: 'RunStarted' }> => e.type === 'RunStarted'
       )
     )
 
