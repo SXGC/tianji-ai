@@ -117,16 +117,18 @@ const server = serve({ fetch: app.fetch, port, hostname: host })
 
 void logger.info(SCOPE_SERVER, 'Control plane started', { port, host, dbPath })
 
-const shutdown = () => {
+const shutdown = async (): Promise<void> => {
   monitor.stop()
-  // TODO(Stage 06)：bus 当前无 close/drain 方法。Stage 06 引入 AsyncLocalStorage 时一并添加
-  // bus.close()，确保所有在途 handler 完成后再关闭 eventLogHandle。
-  void eventLogHandle.close().then(() => {
-    db.close()
-    server.close()
-    process.exit(0)
-  })
+  await bus.close()
+  await eventLogHandle.close()
+  db.close()
+  server.close()
+  process.exit(0)
 }
 
-process.on('SIGTERM', shutdown)
-process.on('SIGINT', shutdown)
+process.on('SIGTERM', () => {
+  void shutdown()
+})
+process.on('SIGINT', () => {
+  void shutdown()
+})

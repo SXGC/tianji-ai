@@ -304,8 +304,7 @@ export async function runDaemonEntry(): Promise<void> {
       if (forwarderDispose !== null) {
         await forwarderDispose()
       }
-      // TODO(Stage 06)：bus 当前无 close/drain 方法。Stage 06 引入 AsyncLocalStorage 时一并添加
-      // bus.close()，确保所有在途 handler 完成后再退出。
+      await bus.close()
       await server.shutdown()
 
       await logInfo(context.paths, ['daemon'], 'Daemon exiting', {
