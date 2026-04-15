@@ -1,13 +1,14 @@
 /**
  * 进程内薄 pub/sub EventBus。
  * publish 同步返回；每订阅者独立有界队列；队列满丢事件并发 lagSink。
- * replay 留给调用方注入 store-backed 实现（阶段 05）。
+ * handler 抛出异常时通过 errorSink 记录，不中断订阅者队列。
  * @module bus/bus
  */
 
 import type { DomainEventEnvelope } from '../events/envelope.js'
 import { matchFilter } from './filter.js'
 import type {
+  ErrorSink,
   EventBus,
   EventFilter,
   EventHandler,
@@ -31,10 +32,12 @@ const DEFAULT_QUEUE_SIZE = 1024
 
 export interface EventBusOptions {
   readonly lagSink: LagSink
-  readonly replaySource?: (
-    filter: EventFilter,
-    fromSequence?: number
-  ) => AsyncIterable<DomainEventEnvelope>
+  /**
+   * 订阅者 handler 抛出异常时调用，用于记录可观测日志。
+   * 不提供时默认使用 console.error 输出结构化信息。
+   * 不得 rethrow，异常隔离是 bus 的核心不变量。
+   */
+  readonly errorSink?: ErrorSink
 }
 
 /** 创建一个进程内 EventBus 实例。 */
@@ -69,13 +72,30 @@ export function createEventBus(options: EventBusOptions): EventBus {
     })
   }
 
+  const defaultErrorSink: ErrorSink = ({ subscriberName, subscriptionId, envelope, error }) => {
+    console.error('[EventBus] handler 抛出异常', {
+      subscriberName,
+      subscriptionId,
+      eventId: envelope.eventId,
+      eventType: envelope.type,
+      error,
+    })
+  }
+
+  const errorSink = options.errorSink ?? defaultErrorSink
+
   async function drain(sub: Subscriber): Promise<void> {
     while (!sub.cancelled && sub.queue.length > 0) {
       const env = sub.queue.shift() as DomainEventEnvelope
       try {
         await sub.handler(env)
-      } catch {
-        // handler 异常吞掉，不中断订阅者；由 handler 自身负责 error 日志
+      } catch (error) {
+        errorSink({
+          subscriberName: sub.name,
+          subscriptionId: String(sub.id),
+          envelope: env,
+          error,
+        })
       }
     }
     sub.running = false
@@ -106,17 +126,5 @@ export function createEventBus(options: EventBusOptions): EventBus {
     }
   }
 
-  async function* replay(
-    filter: EventFilter,
-    fromSequence?: number
-  ): AsyncIterable<DomainEventEnvelope> {
-    if (!options.replaySource) {
-      throw new Error('EventBus.replay: 未配置 replaySource')
-    }
-    for await (const env of options.replaySource(filter, fromSequence)) {
-      yield env
-    }
-  }
-
-  return { publish, subscribe, replay }
+  return { publish, subscribe }
 }
