@@ -11,6 +11,7 @@ import {
   createDeepagentsExecutorFactory,
   loadDefaultOrchestrationGraph,
 } from '@tianji/agent'
+import { subscribeEventBusLogger, subscribeOtelAdapter } from '@tianji/observer'
 import {
   CausalContext,
   NoopSequenceRecoverer,
@@ -94,9 +95,16 @@ export async function runDaemonEntry(): Promise<void> {
     source: { processKind: 'daemon', processId: process.pid.toString() },
     recoverer: NoopSequenceRecoverer,
   })
-  // I5：当前 bus 无订阅者（node 侧不直连 event_log）。
+
+  // ---- 装配 Bus 订阅者 ----
+  // Observer Logger：全聚合 trace 级别记录每条 envelope（含 correlationId/causationId/sequence）
+  subscribeEventBusLogger(bus, logger.observerLogger)
+  // OTel：订阅 Run*/Tool* 事件生成 span（tracing 未初始化时静默跳过）
+  subscribeOtelAdapter(bus)
+  // Daemon SSE：在 DaemonServer#handleChat 内按请求动态订阅，无需此处装配
+  // ACP 内→外：由 DaemonServer 内部通过 session.queryWithGraph 驱动，无需此处装配
   // Stage 07 的 forwarder 将订阅此 bus 并把 envelope 转发到 controlplane。
-  // -----------------------------------------------------------------------------
+  // -------------------------
 
   const session = await createAgentSession(context, {
     logger: logger.observerLogger,

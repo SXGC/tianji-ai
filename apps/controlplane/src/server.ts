@@ -4,7 +4,13 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { serve } from '@hono/node-server'
-import { createJsonlFileSink, createObserverLogger, createStdoutSink } from '@tianji/observer'
+import {
+  createJsonlFileSink,
+  createObserverLogger,
+  createStdoutSink,
+  subscribeEventBusLogger,
+  subscribeOtelAdapter,
+} from '@tianji/observer'
 import {
   CausalContext,
   SequenceCounter,
@@ -91,6 +97,14 @@ const eventLogHandle = subscribeEventLog(bus, store, {
     })
   },
 })
+
+// ---- 装配 Bus 订阅者 ----
+// Observer Logger：全聚合 trace 级别记录每条 envelope（含 correlationId/causationId/sequence）
+subscribeEventBusLogger(bus, logger)
+// OTel：订阅 Run*/Tool* 事件生成 span（tracing 未初始化时静默跳过）
+subscribeOtelAdapter(bus)
+// AG-UI：由 TianjiAgent 在每次 copilot 请求中通过 bus 参数动态订阅，无需此处装配
+// -------------------------
 // ------------------------------------------------
 
 const { app, monitor } = createApp(db, logger, {

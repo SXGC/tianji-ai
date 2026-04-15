@@ -33,6 +33,7 @@ export type {
 
 export {
   getTracer,
+  handleSpanEvent,
   initTracing,
   isTracingEnabled,
   shutdownTracing,
@@ -40,4 +41,5 @@ export {
   startRunSpan,
   startSessionSpan,
   startToolSpan,
+  subscribeOtelAdapter,
 } from './tracing/index.js'
