@@ -1,9 +1,9 @@
 import type { SessionNotification } from '@agentclientprotocol/sdk'
 import type {
-  LegacyMessageDeltaEvent as MessageDeltaEvent,
-  LegacyRunCompletedEvent as RunCompletedEvent,
-  LegacyToolCompletedEvent as ToolCompletedEvent,
-  LegacyToolStartedEvent as ToolStartedEvent,
+  MessageDeltaEvent,
+  RunCompletedEvent,
+  ToolCompletedEvent,
+  ToolStartedEvent,
 } from '@tianji/shared'
 import { createRunId, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
@@ -14,9 +14,9 @@ describe('mapRuntimeEventToSessionUpdate', () => {
   const sessionId = 'session-001'
   const runId = createRunId('run-001')
 
-  it('should map message.delta (text channel) to agent_message_chunk', () => {
+  it('should map MessageDelta (text channel) to agent_message_chunk', () => {
     const event: MessageDeltaEvent = {
-      type: 'message.delta',
+      type: 'MessageDelta',
       runId,
       messageId: 'msg-1',
       sequence: 0,
@@ -31,9 +31,9 @@ describe('mapRuntimeEventToSessionUpdate', () => {
     expect(result!.update.sessionUpdate).toBe('agent_message_chunk')
   })
 
-  it('should map message.delta (thinking channel) to agent_thought_chunk', () => {
+  it('should map MessageDelta (thinking channel) to agent_thought_chunk', () => {
     const event: MessageDeltaEvent = {
-      type: 'message.delta',
+      type: 'MessageDelta',
       runId,
       messageId: 'msg-1',
       sequence: 0,
@@ -47,9 +47,9 @@ describe('mapRuntimeEventToSessionUpdate', () => {
     expect(result!.update.sessionUpdate).toBe('agent_thought_chunk')
   })
 
-  it('should map tool.started to tool_call with pending status', () => {
+  it('should map ToolStarted to tool_call with pending status', () => {
     const event: ToolStartedEvent = {
-      type: 'tool.started',
+      type: 'ToolStarted',
       runId,
       toolCallId: 'tc-1',
       invocation: { toolCallId: 'tc-1', toolName: 'read_file', args: { path: '/a.ts' } },
@@ -65,9 +65,9 @@ describe('mapRuntimeEventToSessionUpdate', () => {
     }
   })
 
-  it('should map tool.completed to tool_call_update with completed status', () => {
+  it('should map ToolCompleted to tool_call_update with completed status', () => {
     const event: ToolCompletedEvent = {
-      type: 'tool.completed',
+      type: 'ToolCompleted',
       runId,
       toolCallId: 'tc-1',
       invocation: { toolCallId: 'tc-1', toolName: 'readFile', args: {} },
@@ -82,7 +82,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
 
   it('should return null for run lifecycle events (not mapped to session update)', () => {
     const event: RunCompletedEvent = {
-      type: 'run.completed',
+      type: 'RunCompleted',
       runId,
       sessionId: createSessionId('s'),
       triggerType: 'new',
@@ -95,7 +95,7 @@ describe('mapRuntimeEventToSessionUpdate', () => {
 
   it('should return a valid SessionNotification shape', () => {
     const event: MessageDeltaEvent = {
-      type: 'message.delta',
+      type: 'MessageDelta',
       runId,
       messageId: 'msg-2',
       sequence: 1,

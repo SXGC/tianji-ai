@@ -2,7 +2,7 @@ import type { SessionRuntime } from '@tianji/runtime'
 import * as runtimeModule from '@tianji/runtime'
 import { FileSnapshotStore } from '@tianji/runtime'
 import type { ObserverLogger } from '@tianji/runtime'
-import type { GraphEvent } from '@tianji/shared'
+import type { GraphRunDomainEvent } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { LoadedAgentContext } from '../context.js'
@@ -196,7 +196,7 @@ describe('agent session queryWithGraph', () => {
       (node, ctx: NodeExecutorContext): NodeAction =>
       async () => {
         ctx.emitGraphEvent({
-          type: 'graph.node.started',
+          type: 'GraphNodeStarted',
           runId: ctx.runId,
           graphId: ctx.graphId,
           nodeId: node.id,
@@ -205,33 +205,34 @@ describe('agent session queryWithGraph', () => {
         })
         const output = { result: `ran-${node.id}` }
         ctx.emitGraphEvent({
-          type: 'graph.node.completed',
+          type: 'GraphNodeCompleted',
           runId: ctx.runId,
           graphId: ctx.graphId,
           nodeId: node.id,
+          nodeKind: 'agent',
           output,
           timestamp: Date.now(),
         })
         return output
       }
 
-    const events: GraphEvent[] = []
+    const events: GraphRunDomainEvent[] = []
     for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
       compileOptions: { agentExecutorFactory: happyPathFactory },
     })) {
-      events.push(event as GraphEvent)
+      events.push(event as GraphRunDomainEvent)
     }
 
     const eventTypes = events.map((event) => event.type)
-    // graph.started 来自 graph-runner；node.* 来自 stub 工厂；graph.completed 来自 graph-runner
+    // GraphRunStarted 来自 graph-runner；GraphNode* 来自 stub 工厂；GraphRunCompleted 来自 graph-runner
     expect(eventTypes).toEqual([
-      'graph.started',
-      'graph.node.started',
-      'graph.node.completed',
-      'graph.completed',
+      'GraphRunStarted',
+      'GraphNodeStarted',
+      'GraphNodeCompleted',
+      'GraphRunCompleted',
     ])
 
-    const completed = events.find((event) => event.type === 'graph.completed')
+    const completed = events.find((event) => event.type === 'GraphRunCompleted')
     expect(completed).toBeDefined()
     // 最终状态里 stub 工厂写入的 result 字段应该被保留
     expect((completed as { finalState: Record<string, unknown> }).finalState.result).toBe(
@@ -279,12 +280,12 @@ describe('agent session queryWithGraph', () => {
       throw new Error('intentional test failure')
     }
 
-    const collectAll = async (): Promise<GraphEvent[]> => {
-      const events: GraphEvent[] = []
+    const collectAll = async (): Promise<GraphRunDomainEvent[]> => {
+      const events: GraphRunDomainEvent[] = []
       for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
         compileOptions: { agentExecutorFactory: throwingFactory },
       })) {
-        events.push(event as GraphEvent)
+        events.push(event as GraphRunDomainEvent)
       }
       return events
     }
@@ -305,7 +306,7 @@ describe('agent session queryWithGraph', () => {
       (node, ctx: NodeExecutorContext): NodeAction =>
       async () => {
         ctx.emitGraphEvent({
-          type: 'graph.node.started',
+          type: 'GraphNodeStarted',
           runId: ctx.runId,
           graphId: ctx.graphId,
           nodeId: node.id,
@@ -316,20 +317,20 @@ describe('agent session queryWithGraph', () => {
         return new Promise(() => undefined)
       }
 
-    const events: GraphEvent[] = []
+    const events: GraphRunDomainEvent[] = []
     for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
       compileOptions: { agentExecutorFactory: slowFactory },
     })) {
-      events.push(event as GraphEvent)
-      // 收到 graph.started 后立刻 break，模拟消费者提前退出
-      if (event.type === 'graph.started') {
+      events.push(event as GraphRunDomainEvent)
+      // 收到 GraphRunStarted 后立刻 break，模拟消费者提前退出
+      if (event.type === 'GraphRunStarted') {
         break
       }
     }
 
-    // 至少收到 graph.started；break 后 session 内的 finally 应当清理 controller
+    // 至少收到 GraphRunStarted；break 后 session 内的 finally 应当清理 controller
     expect(events.length).toBeGreaterThan(0)
-    expect(events[0]?.type).toBe('graph.started')
+    expect(events[0]?.type).toBe('GraphRunStarted')
     // 再次调用 abort 不应抛错（此时已没有活跃 controller，但代码路径必须静默）
     expect(() => session.abort()).not.toThrow()
 
@@ -345,7 +346,7 @@ describe('agent session queryWithGraph', () => {
       (node, ctx: NodeExecutorContext): NodeAction =>
       async () => {
         ctx.emitGraphEvent({
-          type: 'graph.node.started',
+          type: 'GraphNodeStarted',
           runId: ctx.runId,
           graphId: ctx.graphId,
           nodeId: node.id,
@@ -363,14 +364,14 @@ describe('agent session queryWithGraph', () => {
         })
       }
 
-    const collectUntilFinish = async (): Promise<GraphEvent[]> => {
-      const events: GraphEvent[] = []
+    const collectUntilFinish = async (): Promise<GraphRunDomainEvent[]> => {
+      const events: GraphRunDomainEvent[] = []
       for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
         compileOptions: { agentExecutorFactory: abortableFactory },
       })) {
-        events.push(event as GraphEvent)
-        // 收到 graph.node.started 之后调用 abort()，确保执行器进入等待 signal 状态
-        if (event.type === 'graph.node.started') {
+        events.push(event as GraphRunDomainEvent)
+        // 收到 GraphNodeStarted 之后调用 abort()，确保执行器进入等待 signal 状态
+        if (event.type === 'GraphNodeStarted') {
           session.abort()
         }
       }

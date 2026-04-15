@@ -1,25 +1,25 @@
 /**
- * Maps RuntimeEvent to ACP SessionUpdate notifications.
+ * Maps DomainEvent to ACP SessionUpdate notifications.
  *
- * 将 tianji runtime 事件流转换为 ACP 协议的 session/update 通知。
+ * 将 tianji 领域事件流转换为 ACP 协议的 session/update 通知。
  * Run lifecycle 事件不映射为 SessionUpdate，因为 ACP 的 prompt() 返回值已隐含结束语义。
  *
  * @module acp/event-mapper
  */
 
 import type { SessionNotification } from '@agentclientprotocol/sdk'
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent } from '@tianji/shared'
 
 /**
- * 将单个 RuntimeEvent 映射为 ACP SessionUpdate 通知。
+ * 将单个 DomainEvent 映射为 ACP SessionUpdate 通知。
  * 不可映射的事件返回 null。
  */
 export function mapRuntimeEventToSessionUpdate(
   sessionId: string,
-  event: RuntimeEvent
+  event: DomainEvent
 ): SessionNotification | null {
   switch (event.type) {
-    case 'message.delta':
+    case 'MessageDelta':
       return {
         sessionId,
         update: {
@@ -32,7 +32,7 @@ export function mapRuntimeEventToSessionUpdate(
         },
       }
 
-    case 'tool.started':
+    case 'ToolStarted':
       return {
         sessionId,
         update: {
@@ -45,7 +45,7 @@ export function mapRuntimeEventToSessionUpdate(
         },
       }
 
-    case 'tool.completed':
+    case 'ToolCompleted':
       return {
         sessionId,
         update: {
@@ -55,7 +55,7 @@ export function mapRuntimeEventToSessionUpdate(
         },
       }
 
-    case 'tool.failed':
+    case 'ToolFailed':
       return {
         sessionId,
         update: {
@@ -65,18 +65,33 @@ export function mapRuntimeEventToSessionUpdate(
         },
       }
 
-    case 'message.started':
-    case 'message.completed':
-    case 'run.started':
-    case 'run.completed':
-    case 'run.failed':
-    case 'run.cancelled':
-    // Graph 编排事件属于顶层观测层，不映射为 ACP session update。
-    case 'graph.started':
-    case 'graph.node.started':
-    case 'graph.node.completed':
-    case 'graph.node.failed':
-    case 'graph.completed':
+    case 'MessageStarted':
+    case 'MessageCompleted':
+    case 'RunStarted':
+    case 'RunCompleted':
+    case 'RunFailed':
+    case 'RunCancelled':
+    // Graph 編排事件属于顶层观测层，不映射为 ACP session update。
+    case 'GraphRunStarted':
+    case 'GraphNodeStarted':
+    case 'GraphNodeCompleted':
+    case 'GraphNodeFailed':
+    case 'GraphRunCompleted':
+    case 'GraphRunFailed':
+    // Session / Node / Task 事件不映射为 ACP session update。
+    case 'SessionCreated':
+    case 'SessionResumed':
+    case 'SessionClosed':
+    case 'NodeRegistered':
+    case 'NodeReRegistered':
+    case 'NodeMarkedOffline':
+    case 'TaskStarted':
+    case 'TaskWaiting':
+    case 'TaskSessionAttached':
+    case 'TaskCompleted':
+    case 'TaskFailed':
+    case 'TaskCancelled':
+    case 'TaskObservationLost':
       return null
   }
 }

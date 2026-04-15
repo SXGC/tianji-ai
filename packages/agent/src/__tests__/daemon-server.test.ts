@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent } from '@tianji/shared'
 
 import {
   type ControlPlaneStatusSnapshot,
@@ -33,7 +33,7 @@ const STUB_EXECUTOR_FACTORY: AgentExecutorFactory = () => {
   throw new Error('stub executor factory should not be called')
 }
 
-function createStubSession(events: RuntimeEvent[] = []): AgentSession {
+function createStubSession(events: DomainEvent[] = []): AgentSession {
   return {
     sessionId: 'session_test' as unknown as AgentSession['sessionId'],
     abort: () => undefined,
@@ -55,7 +55,7 @@ function createBlockingSession(): AgentSession & { resolve: () => void } {
     resolve,
     abort: () => undefined,
     async *queryWithGraph(_graph, _options) {
-      yield await barrier.then((): RuntimeEvent => ({ type: 'run.completed' }) as RuntimeEvent)
+      yield await barrier.then((): DomainEvent => ({ type: 'RunCompleted' }) as DomainEvent)
     },
   }
 }
@@ -143,8 +143,8 @@ describe('DaemonServer', () => {
 
   it('POST /chat streams chat events and terminates with chat.done', async () => {
     const events = [
-      { type: 'message.delta', content: 'hello' } as unknown as RuntimeEvent,
-      { type: 'message.delta', content: ' world' } as unknown as RuntimeEvent,
+      { type: 'MessageDelta', content: 'hello' } as unknown as DomainEvent,
+      { type: 'MessageDelta', content: ' world' } as unknown as DomainEvent,
     ]
     const session = createStubSession(events)
     server = new DaemonServer({

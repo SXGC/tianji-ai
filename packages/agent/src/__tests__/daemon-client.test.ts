@@ -2,7 +2,7 @@ import { type IncomingMessage, type ServerResponse, createServer } from 'node:ht
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent } from '@tianji/shared'
 
 import { DaemonClient, type DaemonClientOptions } from '../daemon-client.js'
 import {
@@ -26,7 +26,7 @@ function writeSseHeaders(res: ServerResponse): void {
   })
 }
 
-function sseEvent(event: RuntimeEvent): string {
+function sseEvent(event: DomainEvent): string {
   const msg: ChatSseMessage = { type: 'chat.event', event }
   return encodeSseMessage({ event: DAEMON_SSE_EVENT_NAME, data: msg })
 }
@@ -100,8 +100,8 @@ describe('DaemonClient', () => {
   })
 
   it('sendChat yields runtime events from SSE stream', async () => {
-    const event1 = { type: 'message.delta', content: 'hello' } as unknown as RuntimeEvent
-    const event2 = { type: 'message.delta', content: ' world' } as unknown as RuntimeEvent
+    const event1 = { type: 'MessageDelta', content: 'hello' } as unknown as DomainEvent
+    const event2 = { type: 'MessageDelta', content: ' world' } as unknown as DomainEvent
 
     const { client, close } = await setupServer((req, res) => {
       if (req.method === 'POST' && req.url === '/chat') {
@@ -117,7 +117,7 @@ describe('DaemonClient', () => {
     })
     closeServer = close
 
-    const collected: RuntimeEvent[] = []
+    const collected: DomainEvent[] = []
     for await (const event of client.sendChat('hi')) {
       collected.push(event)
     }

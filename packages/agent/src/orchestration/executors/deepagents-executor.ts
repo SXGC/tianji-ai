@@ -4,7 +4,7 @@
  * 业务职责：
  * - 把编排图中的 AgentNode 编译为一个可供 LangGraph 调用的节点 action。
  * - 每次节点被调度都创建一个独立的 SessionRuntime（线程级隔离），执行单轮对话后销毁。
- * - 通过 emitGraphEvent 广播 graph.node.started / graph.node.completed 给上层 runner。
+ * - 通过 emitGraphEvent 广播 GraphNodeStarted / GraphNodeCompleted 给上层 runner。
  *
  * 对外触点：
  * - 被 packages/agent 的 orchestration 入口当作默认 AgentExecutorFactory 使用。
@@ -22,7 +22,7 @@ import {
   createSessionRuntime,
 } from '@tianji/runtime'
 import { TianjiError } from '@tianji/shared'
-import type { AppMessage, RunId, RuntimeEvent } from '@tianji/shared'
+import type { AppMessage, DomainEvent, RunId } from '@tianji/shared'
 
 import type { AgentNode } from '../graph-schema.js'
 import {
@@ -79,7 +79,7 @@ export function createDeepagentsExecutorFactory(
 
       const startTimestamp = Date.now()
       ctx.emitGraphEvent({
-        type: 'graph.node.started',
+        type: 'GraphNodeStarted',
         runId: ctx.runId,
         graphId: ctx.graphId,
         nodeId: node.id,
@@ -116,10 +116,11 @@ export function createDeepagentsExecutorFactory(
         const stateUpdate = buildStateUpdateFromText(finalAssistantText, node.output)
 
         ctx.emitGraphEvent({
-          type: 'graph.node.completed',
+          type: 'GraphNodeCompleted',
           runId: ctx.runId,
           graphId: ctx.graphId,
           nodeId: node.id,
+          nodeKind: 'agent',
           output: stateUpdate,
           timestamp: Date.now(),
         })
@@ -131,10 +132,11 @@ export function createDeepagentsExecutorFactory(
         // 让 LangGraph 正常结束 run 并让上层 runner 走 finished reject 路径。
         const tianjiError = toTianjiError(error_)
         ctx.emitGraphEvent({
-          type: 'graph.node.failed',
+          type: 'GraphNodeFailed',
           runId: ctx.runId,
           graphId: ctx.graphId,
           nodeId: node.id,
+          nodeKind: 'agent',
           error: tianjiError,
           timestamp: Date.now(),
         })
@@ -199,18 +201,18 @@ function buildRuntimeForNode(
  *
  * @param runtime - 当前节点的 SessionRuntime 实例
  * @param runId - 本轮 run 的唯一标识
- * @param onEvent - 可选的事件透传回调，每个 RuntimeEvent 都会调用一次
+ * @param onEvent - 可选的事件透传回调，每个 DomainEvent 都会调用一次
  */
 async function collectFinalAssistantText(
   runtime: SessionRuntime,
   runId: RunId,
-  onEvent?: (event: RuntimeEvent) => void
+  onEvent?: (event: DomainEvent) => void
 ): Promise<string> {
   let finalText = ''
-  const events: AsyncIterable<RuntimeEvent> = runtime.streamEvents(runId)
+  const events: AsyncIterable<DomainEvent> = runtime.streamEvents(runId)
   for await (const event of events) {
     onEvent?.(event)
-    if (event.type === 'message.completed' && event.message.role === 'assistant') {
+    if (event.type === 'MessageCompleted' && event.message.role === 'assistant') {
       finalText = extractTextFromMessage(event.message)
     }
   }

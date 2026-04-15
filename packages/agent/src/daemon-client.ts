@@ -1,6 +1,6 @@
 import { type IncomingMessage, request } from 'node:http'
 
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent } from '@tianji/shared'
 
 import type {
   ChatErrorSseMessage,
@@ -86,13 +86,13 @@ function parseSseLine(line: string, state: { event: string; data: string }): Raw
 }
 
 /**
- * Processes a list of SSE lines, yielding RuntimeEvents.
+ * Processes a list of SSE lines, yielding DomainEvents.
  * Returns true if the stream is done and the caller should stop.
  */
 function* drainSseLines(
   lines: string[],
   sseState: { event: string; data: string }
-): Generator<RuntimeEvent, boolean> {
+): Generator<DomainEvent, boolean> {
   for (const line of lines) {
     const message = parseSseLine(line, sseState)
     if (!message) continue
@@ -104,7 +104,7 @@ function* drainSseLines(
 }
 
 /** Handles a parsed SSE message: yields events, throws on errors, returns on done. */
-function handleSseMessage(msg: RawSseMessage): IteratorResult<RuntimeEvent> {
+function handleSseMessage(msg: RawSseMessage): IteratorResult<DomainEvent> {
   const parsed = JSON.parse(msg.data) as ChatSseMessage
 
   if (parsed.type === 'chat.error') {
@@ -168,10 +168,10 @@ export class DaemonClient {
   }
 
   /**
-   * Sends a POST /chat request and yields {@link RuntimeEvent} objects
+   * Sends a POST /chat request and yields {@link DomainEvent} objects
    * from the SSE stream. Stops on `chat.done`, throws on `chat.error`.
    */
-  async *sendChat(prompt: string): AsyncIterable<RuntimeEvent> {
+  async *sendChat(prompt: string): AsyncIterable<DomainEvent> {
     const body = JSON.stringify({ prompt })
     const res = await httpRequest(
       { host: this.#host, port: this.#port, method: 'POST', path: '/chat' },

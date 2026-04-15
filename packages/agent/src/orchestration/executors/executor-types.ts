@@ -1,6 +1,6 @@
 import type { LangGraphRunnableConfig } from '@langchain/langgraph'
 import type { ObserverLogger } from '@tianji/observer'
-import type { GraphEvent, RunId, RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent, GraphRunDomainEvent, RunId } from '@tianji/shared'
 import type { AcpAgentNode, AgentNode } from '../graph-schema.js'
 
 /**
@@ -15,8 +15,8 @@ export interface NodeExecutorContext {
   readonly runId: RunId
   readonly graphId: string
   readonly observer?: ObserverLogger
-  readonly emitGraphEvent: (event: GraphEvent) => void
-  readonly emitRuntimeEvent?: (event: RuntimeEvent) => void
+  readonly emitGraphEvent: (event: GraphRunDomainEvent) => void
+  readonly emitRuntimeEvent?: (event: DomainEvent) => void
   readonly abortSignal?: AbortSignal
 }
 

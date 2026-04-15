@@ -6,7 +6,7 @@ import {
   ToolRegistry,
   createSessionRuntime,
 } from '@tianji/runtime'
-import type { RunId, RuntimeEvent, SessionId } from '@tianji/shared'
+import type { DomainEvent, RunId, SessionId } from '@tianji/shared'
 
 import { type LoadedAgentContext, injectProviderEnv } from './context.js'
 import {
@@ -42,7 +42,7 @@ export interface AgentSession {
   readonly queryWithGraph: (
     graph: OrchestrationGraph,
     options: ChatWithGraphOptions
-  ) => AsyncIterable<RuntimeEvent>
+  ) => AsyncIterable<DomainEvent>
   readonly abort: () => void
 }
 
@@ -120,7 +120,7 @@ export async function createAgentSession(
     async *queryWithGraph(
       graph: OrchestrationGraph,
       graphOptions: ChatWithGraphOptions
-    ): AsyncIterable<RuntimeEvent> {
+    ): AsyncIterable<DomainEvent> {
       // runId 是 @tianji/shared 的分支类型，这里用 session 级时间戳生成唯一值即可。
       const runId = `run_graph_${Date.now()}` as RunId
       const controller = new AbortController()
@@ -145,8 +145,7 @@ export async function createAgentSession(
           },
         })
 
-        // GraphEvent 是 RuntimeEvent 的一个成员（详见 @tianji/shared events.ts），
-        // 直接按 RuntimeEvent 产出即可让 CLI 等上层消费者统一处理。
+        // DomainEvent 是图级与运行时事件的统一类型，直接产出给上层消费者。
         for await (const event of result.events) {
           yield event
         }

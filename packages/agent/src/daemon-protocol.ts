@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent } from '@tianji/shared'
 
 export const DAEMON_SSE_EVENT_NAME = 'chat.event' as const
 export const DAEMON_SSE_DONE_NAME = 'chat.done' as const
@@ -39,7 +39,7 @@ export interface ShutdownResponse {
 
 export interface ChatEventSseMessage {
   readonly type: 'chat.event'
-  readonly event: RuntimeEvent
+  readonly event: DomainEvent
 }
 
 export interface ChatDoneSseMessage {
