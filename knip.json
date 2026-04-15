@@ -7,6 +7,7 @@
       "entry": ["scripts/*.ts"]
     }
   },
+  "ignoreDependencies": ["@tianji/runtime"],
   "ignoreIssues": {
     "apps/node/src/__tests__/helpers/**": ["exports", "types"],
     "packages/agent/src/__tests__/helpers/**": ["exports", "types"],

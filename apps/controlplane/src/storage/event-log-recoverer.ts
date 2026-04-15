@@ -1,16 +1,12 @@
 /**
  * 从 EventLogStore 适配 SequenceRecoverer。
- * 此处内联 SequenceRecoverer 结构类型以避免 controlplane 引入 @tianji/runtime 重量级依赖。
- * 装配层注入时 TypeScript 结构检查保证与 @tianji/runtime 侧 SequenceRecoverer 接口兼容。
+ * 使用 `satisfies` 在编译时验证返回对象符合 @tianji/runtime 的 SequenceRecoverer 接口，
+ * 防止接口漂移被静默掩盖。
  * @module storage/event-log-recoverer
  */
 
+import type { SequenceRecoverer } from '@tianji/runtime'
 import type { AggregateType, EventLogStore } from '@tianji/shared'
-
-/** 与 @tianji/runtime SequenceRecoverer 结构兼容的本地接口定义。 */
-interface SequenceRecoverer {
-  maxSequence(aggregateType: AggregateType, aggregateId: string): Promise<number | null>
-}
 
 /**
  * 从 EventLogStore 创建 SequenceRecoverer。
@@ -23,5 +19,5 @@ export function createEventLogRecoverer(store: EventLogStore): SequenceRecoverer
     async maxSequence(aggregateType: AggregateType, aggregateId: string) {
       return store.maxSequence(aggregateType, aggregateId)
     },
-  }
+  } satisfies SequenceRecoverer
 }
