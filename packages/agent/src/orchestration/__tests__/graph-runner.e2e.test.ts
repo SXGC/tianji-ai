@@ -7,7 +7,7 @@
  * - 不使用任何 mock：走完整的 graph-runner / graph-compiler / deepagents-executor 路径。
  */
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import type { RunId, RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent, RunId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { createDeepagentsExecutorFactory } from '../executors/deepagents-executor.js'
@@ -74,7 +74,7 @@ describe('orchestration e2e', () => {
       },
     })
 
-    const collectedEvents: RuntimeEvent[] = []
+    const collectedEvents: DomainEvent[] = []
     const collectionPromise = (async () => {
       for await (const event of result.events) {
         collectedEvents.push(event)
@@ -93,10 +93,10 @@ describe('orchestration e2e', () => {
     expect(finalState.code).toContain('console.log')
 
     const eventTypes = collectedEvents.map((event) => event.type)
-    expect(eventTypes).toContain('graph.started')
-    expect(eventTypes).toContain('graph.node.started')
-    expect(eventTypes).toContain('graph.node.completed')
-    expect(eventTypes).toContain('graph.completed')
+    expect(eventTypes).toContain('GraphRunStarted')
+    expect(eventTypes).toContain('GraphNodeStarted')
+    expect(eventTypes).toContain('GraphNodeCompleted')
+    expect(eventTypes).toContain('GraphRunCompleted')
   })
 
   it('router 形成循环：reviewer 不通过则回到 coder', async () => {
@@ -165,7 +165,7 @@ describe('orchestration e2e', () => {
       compileOptions: { agentExecutorFactory: factory },
     })
 
-    const events: RuntimeEvent[] = []
+    const events: DomainEvent[] = []
     const collect = (async () => {
       for await (const event of result.events) {
         events.push(event)
@@ -180,7 +180,7 @@ describe('orchestration e2e', () => {
 
     const coderStarts = events.filter(
       (event) =>
-        event.type === 'graph.node.started' && (event as { nodeId: string }).nodeId === 'coder'
+        event.type === 'GraphNodeStarted' && (event as { nodeId: string }).nodeId === 'coder'
     )
     expect(coderStarts.length).toBe(2) // 因为循环了一次
   })

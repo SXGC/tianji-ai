@@ -7,7 +7,9 @@
 import { ClientSideConnection, ndJsonStream } from '@agentclientprotocol/sdk'
 import {
   DEFAULT_AGENT_COMMAND,
-  type RuntimeEvent,
+  type DomainEvent,
+  type DomainEventEnvelope,
+  type RunId,
   createRunId,
   createSessionId,
 } from '@tianji/shared'
@@ -80,7 +82,7 @@ export class AgentRunner {
     })
   }
 
-  async *query(prompt: string): AsyncIterable<RuntimeEvent> {
+  async *query(prompt: string): AsyncIterable<DomainEventEnvelope> {
     if (this.#connection === null || this.#client === null || this.#acpSessionId === null) {
       throw new Error('Not connected. Call connect() first.')
     }
@@ -92,12 +94,12 @@ export class AgentRunner {
 
     const runId = createRunId(`run_${Date.now()}`)
     const sessionId = createSessionId(this.#acpSessionId)
-    const eventBuffer: RuntimeEvent[] = []
+    const eventBuffer: DomainEventEnvelope[] = []
 
     const unsubscribe = this.#client.onSessionUpdate((update) => {
-      const event = mapSessionUpdateToRuntimeEvent(update, runId)
-      if (event !== null) {
-        eventBuffer.push(event)
+      const envelope = mapSessionUpdateToRuntimeEvent(update, runId)
+      if (envelope !== null) {
+        eventBuffer.push(envelope)
       }
     })
 
@@ -146,13 +148,14 @@ export class AgentRunner {
         agentId: this.#config.agentId,
       })
 
-      yield {
-        type: 'run.completed',
+      const completedEvent: DomainEvent = {
+        type: 'RunCompleted',
         runId,
         sessionId,
         triggerType: 'new',
         timestamp: Date.now(),
       }
+      yield wrapRunCompletedEnvelope(completedEvent, runId)
     } finally {
       unsubscribe()
     }
@@ -167,5 +170,25 @@ export class AgentRunner {
     this.#connection = null
     this.#client = null
     this.#acpSessionId = null
+  }
+}
+
+/**
+ * 将 DomainEvent 包装为 Run 聚合的 DomainEventEnvelope。
+ * source.processKind 固定为 'node'，表示 node runner 进程侧。
+ */
+function wrapRunCompletedEnvelope(event: DomainEvent, runId: RunId): DomainEventEnvelope {
+  const now = Date.now()
+  return {
+    eventId: `runner_${event.type}_${now}`,
+    type: event.type,
+    occurredAt: new Date(now).toISOString(),
+    correlationId: String(runId),
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: String(runId),
+    source: { processKind: 'node', processId: String(process.pid) },
+    payload: event,
   }
 }

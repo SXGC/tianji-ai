@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -10,8 +11,18 @@ import {
   createDeepagentsExecutorFactory,
   loadDefaultOrchestrationGraph,
 } from '@tianji/agent'
-import { resolveAgentModel } from '@tianji/runtime'
+import { subscribeEventBusLogger, subscribeOtelAdapter } from '@tianji/observer'
+import {
+  CausalContext,
+  NoopSequenceRecoverer,
+  SequenceCounter,
+  createAlsCausalContextProvider,
+  createRuntimeEventPipeline,
+  resolveAgentModel,
+} from '@tianji/runtime'
+import { createEventBus } from '@tianji/shared'
 
+import { createForwarder } from './bus/forwarder.js'
 import { loadUserConfigContext } from './config.js'
 import { createI18n, detectLocale } from './i18n/index.js'
 import { getCliLogger, logDebug, logError, logInfo } from './logger.js'
@@ -44,8 +55,61 @@ export async function runDaemonEntry(): Promise<void> {
   const context = await loadUserConfigContext()
   const i18n = createI18n(detectLocale(context.config))
   const logger = getCliLogger(context.paths)
+
+  // ---- EventBus + Pipeline 装配（node 侧不直连 event_log，阶段 07 后 forwarder 订阅 bus）----
+  const bus = createEventBus({
+    lagSink: (info) => {
+      void logger.observerLogger.warn(['daemon', 'bus'], 'node subscriber lag', { info })
+    },
+    // I1：把订阅者异常路由到结构化日志，保证错误可观测性
+    errorSink: (err) => {
+      void logger.observerLogger.error(['daemon', 'bus'], 'daemon bus subscriber error', {
+        subscriberName: err.subscriberName,
+        subscriptionId: err.subscriptionId,
+        eventId: err.envelope.eventId,
+        eventType: err.envelope.type,
+        error: err.error instanceof Error ? err.error.message : String(err.error),
+      })
+    },
+  })
+  const counter = new SequenceCounter()
+
+  // 每个并发 run 在 als.run() 内持有独立的 { current: CausalContext }，
+  // 避免进程级单例在并发请求间互相污染 causation 链。
+  const als = new AsyncLocalStorage<{ current: CausalContext }>()
+  const contextProvider = createAlsCausalContextProvider(als)
+
+  /**
+   * 在 AsyncLocalStorage 上下文中执行 fn，每次调用建立独立的 CausalContext。
+   *
+   * @param correlationId - 本次请求的关联 ID，贯穿整条因果链
+   * @param fn - 在隔离上下文内执行的异步操作
+   */
+  function enterCorrelation<T>(correlationId: string, fn: () => Promise<T>): Promise<T> {
+    return als.run({ current: CausalContext.root(correlationId) }, fn)
+  }
+
+  const pipeline = createRuntimeEventPipeline({
+    publish: (env) => bus.publish(env),
+    counter,
+    contextProvider,
+    source: { processKind: 'daemon', processId: process.pid.toString() },
+    recoverer: NoopSequenceRecoverer,
+  })
+
+  // ---- 装配 Bus 订阅者 ----
+  // Observer Logger：全聚合 trace 级别记录每条 envelope（含 correlationId/causationId/sequence）
+  subscribeEventBusLogger(bus, logger.observerLogger)
+  // OTel：订阅 Run*/Tool* 事件生成 span（tracing 未初始化时静默跳过）
+  subscribeOtelAdapter(bus)
+  // Daemon SSE：在 DaemonServer#handleChat 内按请求动态订阅，无需此处装配
+  // ACP 内→外：由 DaemonServer 内部通过 session.queryWithGraph 驱动，无需此处装配
+  // Stage 07 的 forwarder 将订阅此 bus 并把 envelope 转发到 controlplane。
+  // -------------------------
+
   const session = await createAgentSession(context, {
     logger: logger.observerLogger,
+    emitEvent: (ev) => pipeline.emitEvent(ev),
   })
   const defaultGraph = await loadDefaultOrchestrationGraph({
     configDir: context.paths.configDir,
@@ -83,11 +147,13 @@ export async function runDaemonEntry(): Promise<void> {
     session,
     defaultGraph,
     executorFactory,
+    bus,
     getControlPlaneStatus: () => controlPlaneStatus,
     paths: {
       daemonPortPath: context.paths.daemonPortPath,
       daemonPidPath: context.paths.daemonPidPath,
     },
+    enterCorrelation,
   })
   await server.listen(0)
   await logInfo(context.paths, ['daemon'], 'Daemon server listening', {
@@ -99,6 +165,8 @@ export async function runDaemonEntry(): Promise<void> {
   // 如果用户配置中包含 controlplane 配置，则启动 controlplane 连接
   const controlPlaneConfig = readStoredControlPlaneConfig(context.config)
   let controlPlaneHandle: ControlPlaneRuntimeHandle | null = null
+  // forwarder 在有 cp 配置时装配，持有引用以便 shutdown 时 dispose
+  let forwarderDispose: (() => Promise<void>) | null = null
   if (controlPlaneConfig) {
     updateControlPlaneStatus({
       enabled: true,
@@ -120,6 +188,8 @@ export async function runDaemonEntry(): Promise<void> {
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
       logger,
       observerLogger: logger.observerLogger,
+      emitEvent: (ev) => pipeline.emitEvent(ev),
+      publishEnvelope: (env) => bus.publish(env),
       onConnectionStateChange: (event) => {
         if (event.status === 'connecting') {
           updateControlPlaneStatus({
@@ -169,6 +239,29 @@ export async function runDaemonEntry(): Promise<void> {
           nodeId: controlPlaneConfig.nodeId,
         }
       )
+
+      // ---- 装配 forwarder（订阅在 als.run() 外，符合 Stage 06 review 约束）----
+      // 从 connection.client 获取 postDomainEvents，当 client 不可用时直接抛出（let it crash）
+      const cpClient = runtime.connection.client
+      if (cpClient !== undefined) {
+        const forwarder = createForwarder({
+          bus,
+          post: async ({ events }) => {
+            const ndjson = events.map((e) => JSON.stringify(e)).join('\n')
+            await cpClient.postDomainEvents(ndjson)
+          },
+          maxItems: 500,
+          flushIntervalMs: 50,
+          // 动态获取当前执行任务的 taskId，null 时 flush 跳过
+          getCurrentTaskId: () => runtime.taskExecutor.currentTaskId,
+        })
+        forwarderDispose = () => forwarder.dispose()
+        await logDebug(context.paths, ['daemon', 'controlplane'], 'Forwarder subscribed to bus', {
+          maxItems: 500,
+          flushIntervalMs: 50,
+        })
+      }
+      // -------------------------------------------------------------------------
     } catch (error) {
       updateControlPlaneStatus({
         enabled: true,
@@ -207,6 +300,11 @@ export async function runDaemonEntry(): Promise<void> {
       }
 
       controlPlaneHandle?.connection.stop()
+      // forwarder final-flush：确保在途 envelope 在进程退出前发送到 cp
+      if (forwarderDispose !== null) {
+        await forwarderDispose()
+      }
+      await bus.close()
       await server.shutdown()
 
       await logInfo(context.paths, ['daemon'], 'Daemon exiting', {

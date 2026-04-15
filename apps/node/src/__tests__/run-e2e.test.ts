@@ -9,7 +9,7 @@ import { mkdir, readFile, truncate, writeFile } from 'node:fs/promises'
 import { FakeListChatModel } from '@langchain/core/utils/testing'
 import { createAgentRuntime } from '@tianji/agent'
 import { createSessionRuntime } from '@tianji/runtime'
-import { ProviderError, type RunId, type RuntimeEvent, type SessionId } from '@tianji/shared'
+import { type DomainEvent, ProviderError, type RunId, type SessionId } from '@tianji/shared'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createI18n } from '../i18n/index.js'
@@ -33,9 +33,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function* failedRunEvents(): AsyncGenerator<RuntimeEvent> {
+async function* failedRunEvents(): AsyncGenerator<DomainEvent> {
   yield {
-    type: 'run.failed' as const,
+    type: 'RunFailed' as const,
     runId: 'run_test' as RunId,
     sessionId: 'session_test' as SessionId,
     triggerType: 'new',
@@ -50,7 +50,7 @@ describe('CLI integration', () => {
       const fakeContext = createFakeContext()
       const runner = createFakeAgentRunner([
         {
-          type: 'message.delta',
+          type: 'MessageDelta',
           runId: 'run_test' as RunId,
           messageId: 'msg_1',
           sequence: 1,
@@ -59,7 +59,7 @@ describe('CLI integration', () => {
           timestamp: Date.now(),
         },
         {
-          type: 'run.completed',
+          type: 'RunCompleted',
           runId: 'run_test' as RunId,
           sessionId: 'session_test' as SessionId,
           triggerType: 'new',
@@ -94,7 +94,7 @@ describe('CLI integration', () => {
       const runner = createFakeAgentRunner(
         [
           {
-            type: 'run.completed',
+            type: 'RunCompleted',
             runId: 'run_test' as RunId,
             sessionId: 'session_test' as SessionId,
             triggerType: 'new',
@@ -123,7 +123,7 @@ describe('CLI integration', () => {
       const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
       const runner = createFakeAgentRunner([
         {
-          type: 'run.failed',
+          type: 'RunFailed',
           runId: 'run_test' as RunId,
           sessionId: 'session_test' as SessionId,
           triggerType: 'new',
@@ -146,7 +146,7 @@ describe('CLI integration', () => {
       const fakeContext = createFakeContext()
       const runner = createFakeAgentRunner([
         {
-          type: 'message.delta',
+          type: 'MessageDelta',
           runId: 'run_test' as RunId,
           messageId: 'msg_1',
           sequence: 1,
@@ -155,7 +155,7 @@ describe('CLI integration', () => {
           timestamp: Date.now(),
         },
         {
-          type: 'run.completed',
+          type: 'RunCompleted',
           runId: 'run_test' as RunId,
           sessionId: 'session_test' as SessionId,
           triggerType: 'new',
@@ -182,7 +182,7 @@ describe('CLI integration', () => {
       expect(captured).toContain('Received run command {"promptLength":20}')
       expect(captured).toContain('Loaded user config context')
       expect(captured).toContain(
-        'Received runtime event {"eventType":"message.delta","runId":"run_test","messageId":"msg_1","sequence":1,"channel":"text","delta":"observer delta text","deltaLength":19}'
+        'Received runtime event {"eventType":"MessageDelta","runId":"run_test","messageId":"msg_1","sequence":1,"channel":"text","delta":"observer delta text","deltaLength":19}'
       )
       expect(captured).toContain(
         'Run command completed {"runId":"run_test","sessionId":"session_test"}'

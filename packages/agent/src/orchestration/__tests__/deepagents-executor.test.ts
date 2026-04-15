@@ -7,7 +7,7 @@
  * - 验证 input 缺失快速失败、多 output 自动追加 JSON 指令等边界行为。
  */
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import type { GraphEvent, RunId, RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent, GraphRunDomainEvent, RunId } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import { createDeepagentsExecutorFactory } from '../executors/deepagents-executor.js'
@@ -51,7 +51,7 @@ describe('createDeepagentsExecutorFactory', () => {
   })
 
   it('emit graph.node.started 和 graph.node.completed', async () => {
-    const events: GraphEvent[] = []
+    const events: GraphRunDomainEvent[] = []
     const ctx = makeCtx({
       emitGraphEvent: (event) => events.push(event),
     })
@@ -63,8 +63,8 @@ describe('createDeepagentsExecutorFactory', () => {
     await action({ q: 'x' }, {} as never)
 
     const types = events.map((event) => event.type)
-    expect(types).toContain('graph.node.started')
-    expect(types).toContain('graph.node.completed')
+    expect(types).toContain('GraphNodeStarted')
+    expect(types).toContain('GraphNodeCompleted')
   })
 
   it('input 字段不存在时抛错', async () => {
@@ -78,7 +78,7 @@ describe('createDeepagentsExecutorFactory', () => {
   })
 
   it('runtime 抛错时发射 graph.node.failed 后再 re-throw', async () => {
-    const events: GraphEvent[] = []
+    const events: GraphRunDomainEvent[] = []
     const ctx = makeCtx({
       emitGraphEvent: (event) => events.push(event),
     })
@@ -93,15 +93,15 @@ describe('createDeepagentsExecutorFactory', () => {
 
     await expect(action({ q: 'x' }, {} as never)).rejects.toThrow(/boom/)
 
-    const failedEvents = events.filter((event) => event.type === 'graph.node.failed')
+    const failedEvents = events.filter((event) => event.type === 'GraphNodeFailed')
     expect(failedEvents).toHaveLength(1)
     const failed = failedEvents[0] as { readonly error: { readonly message: string } }
     expect(failed.error.message).toContain('boom')
 
     // started 必须先于 failed；completed 不应出现。
     const types = events.map((event) => event.type)
-    expect(types).toEqual(expect.arrayContaining(['graph.node.started', 'graph.node.failed']))
-    expect(types).not.toContain('graph.node.completed')
+    expect(types).toEqual(expect.arrayContaining(['GraphNodeStarted', 'GraphNodeFailed']))
+    expect(types).not.toContain('GraphNodeCompleted')
   })
 
   it('多 output 字段时 systemPrompt 自动追加 JSON 指令', async () => {
@@ -123,8 +123,8 @@ describe('createDeepagentsExecutorFactory', () => {
     expect(capturedSystemPrompt).toContain('JSON')
   })
 
-  it('透传内部 RuntimeEvent 到 emitRuntimeEvent 回调', async () => {
-    const runtimeEvents: RuntimeEvent[] = []
+  it('透传内部 DomainEvent 到 emitRuntimeEvent 回调', async () => {
+    const runtimeEvents: DomainEvent[] = []
     const ctx = makeCtx({
       emitRuntimeEvent: (event) => runtimeEvents.push(event),
     })
@@ -135,10 +135,10 @@ describe('createDeepagentsExecutorFactory', () => {
     const action = factory(node, ctx)
     await action({ q: 'x' }, {} as never)
 
-    // deepagents runtime 至少会发出 run.started 和 run.completed
+    // deepagents runtime 至少会发出 RunStarted 和 RunCompleted
     const types = runtimeEvents.map((e) => e.type)
-    expect(types).toContain('run.started')
-    expect(types).toContain('run.completed')
+    expect(types).toContain('RunStarted')
+    expect(types).toContain('RunCompleted')
   })
 
   it('emitRuntimeEvent 未提供时不报错（向后兼容）', async () => {

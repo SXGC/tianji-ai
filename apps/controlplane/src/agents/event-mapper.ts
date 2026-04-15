@@ -1,5 +1,5 @@
 /**
- * 事件映射器 - 将 StoredTaskEvent 转换为 AG-UI BaseEvent 序列
+ * 事件映射器 - 将 DomainEventEnvelope 转换为 AG-UI BaseEvent 序列
  *
  * 纯函数实现，无副作用（ctx 对象上的 inThinking 状态除外，
  * 由调用方在会话生命周期内持有）。
@@ -8,7 +8,7 @@
  */
 import { EventType } from '@ag-ui/client'
 import type { BaseEvent } from '@ag-ui/client'
-import type { StoredTaskEvent } from '../services/event-store.js'
+import type { DomainEventEnvelope } from '@tianji/shared'
 
 // ============================================================================
 // 公共接口
@@ -48,66 +48,16 @@ export function createInitialStateSnapshot(): BaseEvent {
 }
 
 /**
- * 将单个 StoredTaskEvent 翻译为一个或多个 AG-UI BaseEvent。
+ * 将单个 DomainEventEnvelope 翻译为一个或多个 AG-UI BaseEvent。
  *
- * @param event - 从数据库读取的任务事件
- * @param ctx   - 调用方持有的映射上下文（inThinking 会被此函数修改）
+ * @param env - 领域事件信封
+ * @param ctx - 调用方持有的映射上下文（inThinking 会被此函数修改）
  * @returns AG-UI 事件数组，顺序即推送顺序
  */
-export function mapTaskEventToAgUiEvents(
-  event: StoredTaskEvent,
-  ctx: EventMapperContext
-): BaseEvent[] {
-  const parsed: unknown = JSON.parse(event.payload)
-
-  if (event.kind === 'lifecycle') {
-    return mapLifecycleEvent(parsed as LifecyclePayload, ctx)
-  }
-
-  if (event.kind === 'agent') {
-    return mapAgentEvent(parsed as AgentPayload, ctx)
-  }
-
-  return []
-}
-
-// ============================================================================
-// 内部类型（仅供本模块使用）
-// ============================================================================
-
-interface LifecyclePayload {
-  kind: 'lifecycle'
-  taskId: string
-  type: string
-  sequence: number
-  timestamp: number
-  sessionId?: string
-  runId?: string
-  error?: string
-  summary?: string
-}
-
-interface AgentPayload {
-  kind: 'agent'
-  taskId: string
-  sequence: number
-  sessionId: string
-  runId: string
-  event: RuntimeEventPayload
-}
-
-interface RuntimeEventPayload {
-  type: string
-  [key: string]: unknown
-}
-
-// ============================================================================
-// lifecycle 事件映射
-// ============================================================================
-
-function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): BaseEvent[] {
-  switch (payload.type) {
-    case 'task.started':
+export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): BaseEvent[] {
+  switch (env.type) {
+    // ── Task 聚合 ────────────────────────────────────────────────────────────
+    case 'TaskStarted':
       return [
         ev({
           type: EventType.STATE_DELTA,
@@ -118,7 +68,7 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
         }),
       ]
 
-    case 'task.completed':
+    case 'TaskCompleted':
       return [
         ev({
           type: EventType.STATE_DELTA,
@@ -126,7 +76,8 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
         }),
       ]
 
-    case 'task.failed':
+    case 'TaskFailed': {
+      const failedPayload = env.payload as { error: { message: string } }
       return [
         ev({
           type: EventType.STATE_DELTA,
@@ -134,11 +85,12 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
         }),
         ev({
           type: EventType.RUN_ERROR,
-          message: payload.error ?? '',
+          message: failedPayload.error.message,
         }),
       ]
+    }
 
-    case 'task.cancelled':
+    case 'TaskCancelled':
       return [
         ev({
           type: EventType.STATE_DELTA,
@@ -150,15 +102,17 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
         }),
       ]
 
-    case 'task.session.attached':
+    case 'TaskSessionAttached': {
+      const attachedPayload = env.payload as { sessionId: string }
       return [
         ev({
           type: EventType.STATE_DELTA,
-          delta: [{ op: 'replace', path: '/sessionId', value: payload.sessionId }],
+          delta: [{ op: 'replace', path: '/sessionId', value: attachedPayload.sessionId }],
         }),
       ]
+    }
 
-    case 'task.waiting':
+    case 'TaskWaiting':
       return [
         ev({
           type: EventType.STATE_DELTA,
@@ -166,72 +120,217 @@ function mapLifecycleEvent(payload: LifecyclePayload, ctx: EventMapperContext): 
         }),
       ]
 
+    // ── Run 聚合：消息 ────────────────────────────────────────────────────────
+    case 'MessageStarted': {
+      const p = env.payload as { messageId: string }
+      return [
+        ev({
+          type: EventType.TEXT_MESSAGE_START,
+          messageId: p.messageId,
+          role: 'assistant',
+        }),
+      ]
+    }
+
+    case 'MessageDelta': {
+      const p = env.payload as { messageId: string; channel: string; payload: { content: string } }
+      return mapMessageDelta(p.messageId, p.channel, p.payload.content, ctx)
+    }
+
+    case 'MessageCompleted': {
+      const p = env.payload as { messageId: string }
+      return mapMessageCompleted(p.messageId, ctx)
+    }
+
+    // ── Run 聚合：工具 ────────────────────────────────────────────────────────
+    case 'ToolStarted': {
+      const p = env.payload as {
+        toolCallId: string
+        invocation: { toolName: string; args: unknown }
+      }
+      return [
+        ev({
+          type: EventType.TOOL_CALL_START,
+          toolCallId: p.toolCallId,
+          toolCallName: p.invocation.toolName,
+          args: JSON.stringify(p.invocation.args),
+        }),
+      ]
+    }
+
+    case 'ToolCompleted': {
+      const p = env.payload as { toolCallId: string; result: { result: unknown } }
+      return [
+        ev({
+          type: EventType.TOOL_CALL_END,
+          toolCallId: p.toolCallId,
+        }),
+        ev({
+          type: EventType.TOOL_CALL_RESULT,
+          toolCallId: p.toolCallId,
+          content: JSON.stringify(p.result.result),
+          role: 'tool',
+        }),
+      ]
+    }
+
+    case 'ToolFailed': {
+      const p = env.payload as { toolCallId: string; error: { message: string } }
+      return [
+        ev({
+          type: EventType.TOOL_CALL_END,
+          toolCallId: p.toolCallId,
+          error: p.error.message,
+        }),
+      ]
+    }
+
+    // ── Run 聚合：run 生命周期 ────────────────────────────────────────────────
+    case 'RunStarted': {
+      const p = env.payload as { runId: string; sessionId: string; triggerType: string }
+      return [
+        ev({
+          type: EventType.STEP_STARTED,
+          stepName: `run:${p.runId}`,
+          metadata: {
+            stepKind: 'run',
+            runId: p.runId,
+            sessionId: p.sessionId,
+            triggerType: p.triggerType,
+          },
+        }),
+      ]
+    }
+
+    case 'RunCompleted': {
+      const p = env.payload as { runId: string }
+      return [
+        ev({
+          type: EventType.STEP_FINISHED,
+          stepName: `run:${p.runId}`,
+          metadata: { stepKind: 'run', runId: p.runId },
+        }),
+      ]
+    }
+
+    case 'RunFailed': {
+      const p = env.payload as { runId: string; error: unknown }
+      return [
+        ev({
+          type: EventType.STEP_FINISHED,
+          stepName: `run:${p.runId}`,
+          metadata: { stepKind: 'run', runId: p.runId, error: p.error },
+        }),
+      ]
+    }
+
+    case 'RunCancelled': {
+      const p = env.payload as { runId: string }
+      return [
+        ev({
+          type: EventType.STEP_FINISHED,
+          stepName: `run:${p.runId}`,
+          metadata: { stepKind: 'run', runId: p.runId, cancelled: true },
+        }),
+      ]
+    }
+
+    // ── GraphRun 聚合 ─────────────────────────────────────────────────────────
+    case 'GraphRunStarted': {
+      const p = env.payload as { graphId: string; graphVersion: number }
+      return [
+        ev({
+          type: EventType.STEP_STARTED,
+          stepName: `graph:${p.graphId}`,
+          metadata: { stepKind: 'graph', graphId: p.graphId, graphVersion: p.graphVersion },
+        }),
+      ]
+    }
+
+    case 'GraphRunCompleted': {
+      const p = env.payload as { graphId: string; finalState: unknown }
+      return [
+        ev({
+          type: EventType.STEP_FINISHED,
+          stepName: `graph:${p.graphId}`,
+          metadata: { stepKind: 'graph', graphId: p.graphId, finalState: p.finalState },
+        }),
+      ]
+    }
+
+    case 'GraphNodeStarted': {
+      const p = env.payload as { graphId: string; nodeId: string; nodeKind: string }
+      return [
+        ev({
+          type: EventType.STEP_STARTED,
+          stepName: `graph-node:${p.graphId}:${p.nodeId}`,
+          metadata: {
+            stepKind: 'graph-node',
+            graphId: p.graphId,
+            nodeId: p.nodeId,
+            nodeKind: p.nodeKind,
+          },
+        }),
+      ]
+    }
+
+    case 'GraphNodeCompleted': {
+      const p = env.payload as { graphId: string; nodeId: string; output: unknown }
+      return [
+        ev({
+          type: EventType.STEP_FINISHED,
+          stepName: `graph-node:${p.graphId}:${p.nodeId}`,
+          metadata: {
+            stepKind: 'graph-node',
+            graphId: p.graphId,
+            nodeId: p.nodeId,
+            output: p.output,
+          },
+        }),
+      ]
+    }
+
+    case 'GraphNodeFailed': {
+      const p = env.payload as { graphId: string; nodeId: string; error: unknown }
+      return [
+        ev({
+          type: EventType.STEP_FINISHED,
+          stepName: `graph-node:${p.graphId}:${p.nodeId}`,
+          metadata: {
+            stepKind: 'graph-node',
+            graphId: p.graphId,
+            nodeId: p.nodeId,
+            error: p.error,
+          },
+        }),
+      ]
+    }
+
+    // ── 以下事件不映射到 AG-UI ────────────────────────────────────────────────
+    // GraphRunFailed、Session* 、Node*、TaskObservationLost 暂无 AG-UI 映射
     default:
       return []
   }
 }
 
 // ============================================================================
-// agent 事件映射
+// 内部映射辅助
 // ============================================================================
 
-function mapAgentEvent(payload: AgentPayload, ctx: EventMapperContext): BaseEvent[] {
-  const runtimeEvent = payload.event
-  switch (runtimeEvent.type) {
-    case 'message.started':
-      return mapMessageStarted(runtimeEvent)
-    case 'message.delta':
-      return mapMessageDelta(runtimeEvent, ctx)
-    case 'message.completed':
-      return mapMessageCompleted(runtimeEvent, ctx)
-    case 'tool.started':
-      return mapToolStarted(runtimeEvent)
-    case 'tool.completed':
-      return mapToolCompleted(runtimeEvent)
-    case 'tool.failed':
-      return mapToolFailed(runtimeEvent)
-    case 'run.started':
-      return mapRunStarted(runtimeEvent)
-    case 'run.completed':
-      return mapRunCompleted(runtimeEvent)
-    case 'run.failed':
-      return mapRunFailed(runtimeEvent)
-    case 'run.cancelled':
-      return mapRunCancelled(runtimeEvent)
-    case 'graph.started':
-      return mapGraphStarted(runtimeEvent)
-    case 'graph.completed':
-      return mapGraphCompleted(runtimeEvent)
-    case 'graph.node.started':
-      return mapGraphNodeStarted(runtimeEvent)
-    case 'graph.node.completed':
-      return mapGraphNodeCompleted(runtimeEvent)
-    case 'graph.node.failed':
-      return mapGraphNodeFailed(runtimeEvent)
-    default:
-      return []
-  }
-}
-
-// ============================================================================
-// 消息事件映射辅助
-// ============================================================================
-
-function mapMessageStarted(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.TEXT_MESSAGE_START,
-      messageId: e.messageId as string,
-      role: 'assistant',
-    }),
-  ]
-}
-
-function mapMessageDelta(e: RuntimeEventPayload, ctx: EventMapperContext): BaseEvent[] {
-  const messageId = e.messageId as string
-  const channel = e.channel as string
-  const content = (e.payload as { content: string }).content
-
+/**
+ * MessageDelta 映射：按 channel 区分 text / thinking 双通道。
+ *
+ * @param messageId - 消息 ID
+ * @param channel   - 'text' | 'thinking'
+ * @param content   - delta 文本
+ * @param ctx       - 调用方持有的映射上下文
+ */
+function mapMessageDelta(
+  messageId: string,
+  channel: string,
+  content: string,
+  ctx: EventMapperContext
+): BaseEvent[] {
   if (channel === 'thinking') {
     const result: BaseEvent[] = []
     if (!ctx.inThinking) {
@@ -253,8 +352,13 @@ function mapMessageDelta(e: RuntimeEventPayload, ctx: EventMapperContext): BaseE
   ]
 }
 
-function mapMessageCompleted(e: RuntimeEventPayload, ctx: EventMapperContext): BaseEvent[] {
-  const messageId = e.messageId as string
+/**
+ * MessageCompleted 映射：若处于 thinking 状态，先发结束事件再发 TEXT_MESSAGE_END。
+ *
+ * @param messageId - 消息 ID
+ * @param ctx       - 调用方持有的映射上下文
+ */
+function mapMessageCompleted(messageId: string, ctx: EventMapperContext): BaseEvent[] {
   const result: BaseEvent[] = []
 
   if (ctx.inThinking) {
@@ -265,163 +369,4 @@ function mapMessageCompleted(e: RuntimeEventPayload, ctx: EventMapperContext): B
 
   result.push(ev({ type: EventType.TEXT_MESSAGE_END, messageId }))
   return result
-}
-
-// ============================================================================
-// 工具调用事件映射辅助
-// ============================================================================
-
-function mapToolStarted(e: RuntimeEventPayload): BaseEvent[] {
-  const toolCallId = e.toolCallId as string
-  const invocation = e.invocation as { toolName: string; args: unknown }
-  return [
-    ev({
-      type: EventType.TOOL_CALL_START,
-      toolCallId,
-      toolCallName: invocation.toolName,
-      args: JSON.stringify(invocation.args),
-    }),
-  ]
-}
-
-function mapToolCompleted(e: RuntimeEventPayload): BaseEvent[] {
-  const toolCallId = e.toolCallId as string
-  const result = e.result as unknown
-  return [
-    ev({
-      type: EventType.TOOL_CALL_END,
-      toolCallId,
-    }),
-    ev({
-      type: EventType.TOOL_CALL_RESULT,
-      toolCallId,
-      content: JSON.stringify(result),
-      role: 'tool',
-    }),
-  ]
-}
-
-function mapToolFailed(e: RuntimeEventPayload): BaseEvent[] {
-  const error = e.error as { message: string }
-  return [
-    ev({
-      type: EventType.TOOL_CALL_END,
-      toolCallId: e.toolCallId as string,
-      error: error.message,
-    }),
-  ]
-}
-
-// ============================================================================
-// run / graph 事件映射辅助
-// ============================================================================
-
-function mapRunStarted(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.STEP_STARTED,
-      stepName: `run:${e.runId}`,
-      metadata: {
-        stepKind: 'run',
-        runId: e.runId,
-        sessionId: e.sessionId,
-        triggerType: e.triggerType,
-      },
-    }),
-  ]
-}
-
-function mapRunCompleted(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.STEP_FINISHED,
-      stepName: `run:${e.runId}`,
-      metadata: { stepKind: 'run', runId: e.runId },
-    }),
-  ]
-}
-
-function mapGraphStarted(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.STEP_STARTED,
-      stepName: `graph:${e.graphId}`,
-      metadata: { stepKind: 'graph', graphId: e.graphId, graphVersion: e.graphVersion },
-    }),
-  ]
-}
-
-function mapGraphNodeStarted(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.STEP_STARTED,
-      stepName: `graph-node:${e.graphId}:${e.nodeId}`,
-      metadata: {
-        stepKind: 'graph-node',
-        graphId: e.graphId,
-        nodeId: e.nodeId,
-        nodeKind: e.nodeKind,
-      },
-    }),
-  ]
-}
-
-function mapGraphNodeCompleted(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.STEP_FINISHED,
-      stepName: `graph-node:${e.graphId}:${e.nodeId}`,
-      metadata: {
-        stepKind: 'graph-node',
-        graphId: e.graphId,
-        nodeId: e.nodeId,
-        output: e.output,
-      },
-    }),
-  ]
-}
-
-function mapRunFailed(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.STEP_FINISHED,
-      stepName: `run:${e.runId}`,
-      metadata: { stepKind: 'run', runId: e.runId, error: e.error },
-    }),
-  ]
-}
-
-function mapRunCancelled(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.STEP_FINISHED,
-      stepName: `run:${e.runId}`,
-      metadata: { stepKind: 'run', runId: e.runId, cancelled: true },
-    }),
-  ]
-}
-
-function mapGraphCompleted(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.STEP_FINISHED,
-      stepName: `graph:${e.graphId}`,
-      metadata: { stepKind: 'graph', graphId: e.graphId, finalState: e.finalState },
-    }),
-  ]
-}
-
-function mapGraphNodeFailed(e: RuntimeEventPayload): BaseEvent[] {
-  return [
-    ev({
-      type: EventType.STEP_FINISHED,
-      stepName: `graph-node:${e.graphId}:${e.nodeId}`,
-      metadata: {
-        stepKind: 'graph-node',
-        graphId: e.graphId,
-        nodeId: e.nodeId,
-        error: e.error,
-      },
-    }),
-  ]
 }

@@ -12,7 +12,7 @@
 import { AIMessage, AIMessageChunk } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { FakeStreamingChatModel } from '@langchain/core/utils/testing'
-import { type RuntimeEvent, createSessionId } from '@tianji/shared'
+import { type DomainEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { InMemorySnapshotStore } from '../snapshot-store.js'
@@ -52,24 +52,24 @@ describe('SessionRuntime deepagents regressions', () => {
     const lateSubscriberEvents = await collectRuntimeEvents(runId, runtime)
     const secondLateSubscriberEvents = await collectRuntimeEvents(runId, runtime)
     const completedEvent = lateSubscriberEvents.find(
-      (event): event is Extract<RuntimeEvent, { type: 'message.completed' }> =>
-        event.type === 'message.completed'
+      (event): event is Extract<DomainEvent, { type: 'MessageCompleted' }> =>
+        event.type === 'MessageCompleted'
     )
 
     expect(lateSubscriberEvents.map((event) => event.type)).toEqual([
-      'run.started',
-      'message.started',
-      'message.delta',
-      'message.delta',
-      'message.completed',
-      'run.completed',
+      'RunStarted',
+      'MessageStarted',
+      'MessageDelta',
+      'MessageDelta',
+      'MessageCompleted',
+      'RunCompleted',
     ])
     expect(lateSubscriberEvents).toEqual(secondLateSubscriberEvents)
     expect(
       lateSubscriberEvents
         .filter(
-          (event): event is Extract<RuntimeEvent, { type: 'message.delta' }> =>
-            event.type === 'message.delta'
+          (event): event is Extract<DomainEvent, { type: 'MessageDelta' }> =>
+            event.type === 'MessageDelta'
         )
         .map((event) => event.payload.content)
     ).toEqual(['hello ', 'again'])
@@ -104,17 +104,16 @@ describe('SessionRuntime deepagents regressions', () => {
     })
     const outcome = await collectRuntimeOutcome(runId, runtime)
     const toolFailedEvent = outcome.events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'tool.failed' }> =>
-        event.type === 'tool.failed'
+      (event): event is Extract<DomainEvent, { type: 'ToolFailed' }> => event.type === 'ToolFailed'
     )
     const failedRun = await waitForRunStatus(runtime, runId, 'failed')
 
     expect(outcome.events.map((event) => event.type)).toEqual([
-      'run.started',
-      'message.started',
-      'tool.started',
-      'tool.failed',
-      'run.failed',
+      'RunStarted',
+      'MessageStarted',
+      'ToolStarted',
+      'ToolFailed',
+      'RunFailed',
     ])
     expect(toolFailedEvent).toMatchObject({
       runId,
@@ -192,21 +191,21 @@ describe('SessionRuntime deepagents regressions', () => {
     })
     const events = await collectRuntimeEvents(runId, runtime)
     const toolStartedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'tool.started' }> =>
-        event.type === 'tool.started'
+      (event): event is Extract<DomainEvent, { type: 'ToolStarted' }> =>
+        event.type === 'ToolStarted'
     )
     const toolCompletedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'tool.completed' }> =>
-        event.type === 'tool.completed'
+      (event): event is Extract<DomainEvent, { type: 'ToolCompleted' }> =>
+        event.type === 'ToolCompleted'
     )
 
     expect(events.map((event) => event.type)).toEqual([
-      'run.started',
-      'message.started',
-      'tool.started',
-      'tool.completed',
-      'message.completed',
-      'run.completed',
+      'RunStarted',
+      'MessageStarted',
+      'ToolStarted',
+      'ToolCompleted',
+      'MessageCompleted',
+      'RunCompleted',
     ])
     expect(toolStartedEvent).toMatchObject({
       runId,

@@ -1,73 +1,31 @@
 /**
- * 事件映射器测试 - 验证 StoredTaskEvent → AG-UI BaseEvent 的映射规则
+ * 事件映射器测试 - 验证 DomainEventEnvelope → AG-UI BaseEvent 的映射规则
  *
  * 测试业务行为，而非内部实现。
  * @module event-mapper.test
  */
 import { EventType } from '@ag-ui/client'
+import type { DomainEvent, DomainEventEnvelope } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
-import type { StoredTaskEvent } from '../../services/event-store.js'
-import {
-  type EventMapperContext,
-  createInitialStateSnapshot,
-  mapTaskEventToAgUiEvents,
-} from '../event-mapper.js'
+import { type EventMapperContext, createInitialStateSnapshot, mapToAgUi } from '../event-mapper.js'
 
 // ============================================================================
 // 测试辅助函数
 // ============================================================================
 
-/** 构造一个 lifecycle StoredTaskEvent */
-function makeLifecycleEvent(
-  type: string,
-  overrides: Partial<{
-    taskId: string
-    sequence: number
-    sessionId: string
-    runId: string
-    error: string
-    summary: string
-  }> = {}
-): StoredTaskEvent {
-  const payload = JSON.stringify({
-    kind: 'lifecycle',
-    taskId: overrides.taskId ?? 'task-001',
-    type,
-    sequence: overrides.sequence ?? 1,
-    timestamp: 1000,
-    ...(overrides.sessionId !== undefined && { sessionId: overrides.sessionId }),
-    ...(overrides.runId !== undefined && { runId: overrides.runId }),
-    ...(overrides.error !== undefined && { error: overrides.error }),
-    ...(overrides.summary !== undefined && { summary: overrides.summary }),
-  })
+/** 将裸 DomainEvent payload 包裹成 DomainEventEnvelope */
+function envelope(payload: DomainEvent): DomainEventEnvelope {
   return {
-    taskId: overrides.taskId ?? 'task-001',
-    sequence: overrides.sequence ?? 1,
-    kind: 'lifecycle',
-    payload,
-    receivedAt: 1000,
-  }
-}
-
-/** 构造一个 agent StoredTaskEvent，event 为 RuntimeEvent */
-function makeAgentEvent(
-  runtimeEvent: Record<string, unknown>,
-  taskId = 'task-001'
-): StoredTaskEvent {
-  const payload = JSON.stringify({
-    kind: 'agent',
-    taskId,
+    eventId: 'test-event-id',
+    type: payload.type,
+    occurredAt: '2026-01-01T00:00:00.000Z',
+    correlationId: 'test-correlation-id',
+    causationId: null,
     sequence: 1,
-    sessionId: 'session-001',
-    runId: 'run-001',
-    event: runtimeEvent,
-  })
-  return {
-    taskId,
-    sequence: 1,
-    kind: 'agent',
+    aggregateType: 'Task',
+    aggregateId: 'task-001',
+    source: { processKind: 'node', processId: 'node-proc-1', nodeId: 'node-001' },
     payload,
-    receivedAt: 1000,
   }
 }
 
@@ -93,7 +51,10 @@ describe('createInitialStateSnapshot', () => {
 
   it('不会作为运行流的首个事件，运行流首个事件由上层运行器负责发出 RUN_STARTED', () => {
     const initial = createInitialStateSnapshot()
-    const started = mapTaskEventToAgUiEvents(makeLifecycleEvent('task.started'), freshCtx())
+    const started = mapToAgUi(
+      envelope({ type: 'TaskStarted', taskId: 'task-001', timestamp: 1000 }),
+      freshCtx()
+    )
 
     expect(initial.type).toBe(EventType.STATE_SNAPSHOT)
     expect(started[0]?.type).toBe(EventType.STATE_DELTA)
@@ -101,21 +62,25 @@ describe('createInitialStateSnapshot', () => {
 })
 
 // ============================================================================
-// 生命周期事件映射
+// Task 事件映射
 // ============================================================================
 
-describe('lifecycle 事件映射', () => {
-  describe('task.started → STATE_DELTA', () => {
+describe('Task 事件映射', () => {
+  describe('TaskStarted → STATE_DELTA', () => {
     it('只产生一个 STATE_DELTA 事件', () => {
-      const stored = makeLifecycleEvent('task.started')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({ type: 'TaskStarted', taskId: 'task-001', timestamp: 1000 }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STATE_DELTA)
     })
 
     it('STATE_DELTA 包含 /taskStatus=running 和 /taskId patch', () => {
-      const stored = makeLifecycleEvent('task.started')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({ type: 'TaskStarted', taskId: 'task-001', timestamp: 1000 }),
+        freshCtx()
+      )
       const delta = result[0] as { delta: unknown[] }
       expect(delta.delta).toEqual([
         { op: 'replace', path: '/taskStatus', value: 'running' },
@@ -124,170 +89,233 @@ describe('lifecycle 事件映射', () => {
     })
   })
 
-  describe('task.completed → STATE_DELTA', () => {
+  describe('TaskCompleted → STATE_DELTA', () => {
     it('只产生一个 STATE_DELTA 事件，由上层运行器统一发送 RUN_FINISHED', () => {
-      const stored = makeLifecycleEvent('task.completed')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({ type: 'TaskCompleted', taskId: 'task-001', timestamp: 1000 }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STATE_DELTA)
     })
 
     it('不会直接产出 RUN_FINISHED，避免在终止事件后继续发送状态更新', () => {
-      const stored = makeLifecycleEvent('task.completed')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({ type: 'TaskCompleted', taskId: 'task-001', timestamp: 1000 }),
+        freshCtx()
+      )
       expect(result.some((event) => event.type === EventType.RUN_FINISHED)).toBe(false)
     })
 
     it('STATE_DELTA 包含 /taskStatus=completed patch', () => {
-      const stored = makeLifecycleEvent('task.completed')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({ type: 'TaskCompleted', taskId: 'task-001', timestamp: 1000 }),
+        freshCtx()
+      )
       const delta = result[0] as { delta: unknown[] }
       expect(delta.delta).toEqual([{ op: 'replace', path: '/taskStatus', value: 'completed' }])
     })
   })
 
-  describe('task.failed → STATE_DELTA + RUN_ERROR', () => {
+  describe('TaskFailed → STATE_DELTA + RUN_ERROR', () => {
     it('产生两个事件：先 STATE_DELTA，再 RUN_ERROR', () => {
-      const stored = makeLifecycleEvent('task.failed', { error: '任务执行超时' })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'TaskFailed',
+          taskId: 'task-001',
+          timestamp: 1000,
+          error: {
+            name: 'TianjiError',
+            category: 'internal',
+            code: 'ERR',
+            message: '任务执行超时',
+          },
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(2)
       expect(result[0].type).toBe(EventType.STATE_DELTA)
       expect(result[1].type).toBe(EventType.RUN_ERROR)
     })
 
-    it('RUN_ERROR 的 message 为 error 字段内容', () => {
-      const stored = makeLifecycleEvent('task.failed', { error: '任务执行超时' })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const ev = result[1] as { message: string }
-      expect(ev.message).toBe('任务执行超时')
-    })
-
-    it('error 为空时 message 为空字符串', () => {
-      const stored = makeLifecycleEvent('task.failed')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const ev = result[1] as { message: string }
-      expect(ev.message).toBe('')
+    it('RUN_ERROR 的 message 为 error.message 字段内容', () => {
+      const result = mapToAgUi(
+        envelope({
+          type: 'TaskFailed',
+          taskId: 'task-001',
+          timestamp: 1000,
+          error: {
+            name: 'TianjiError',
+            category: 'internal',
+            code: 'ERR',
+            message: '任务执行超时',
+          },
+        }),
+        freshCtx()
+      )
+      const resultEv = result[1] as { message: string }
+      expect(resultEv.message).toBe('任务执行超时')
     })
 
     it('STATE_DELTA 包含 /taskStatus=failed patch', () => {
-      const stored = makeLifecycleEvent('task.failed')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'TaskFailed',
+          taskId: 'task-001',
+          timestamp: 1000,
+          error: { name: 'TianjiError', category: 'internal', code: 'ERR', message: 'fail' },
+        }),
+        freshCtx()
+      )
       const delta = result[0] as { delta: unknown[] }
       expect(delta.delta).toEqual([{ op: 'replace', path: '/taskStatus', value: 'failed' }])
     })
   })
 
-  describe('task.cancelled → STATE_DELTA + RUN_ERROR', () => {
+  describe('TaskCancelled → STATE_DELTA + RUN_ERROR', () => {
     it('产生两个事件：先 STATE_DELTA，再 RUN_ERROR', () => {
-      const stored = makeLifecycleEvent('task.cancelled')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({ type: 'TaskCancelled', taskId: 'task-001', timestamp: 1000 }),
+        freshCtx()
+      )
       expect(result).toHaveLength(2)
       expect(result[0].type).toBe(EventType.STATE_DELTA)
       expect(result[1].type).toBe(EventType.RUN_ERROR)
     })
 
     it('RUN_ERROR 的 message 固定为 "Task cancelled"', () => {
-      const stored = makeLifecycleEvent('task.cancelled')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      const ev = result[1] as { message: string }
-      expect(ev.message).toBe('Task cancelled')
+      const result = mapToAgUi(
+        envelope({ type: 'TaskCancelled', taskId: 'task-001', timestamp: 1000 }),
+        freshCtx()
+      )
+      const resultEv = result[1] as { message: string }
+      expect(resultEv.message).toBe('Task cancelled')
     })
 
     it('STATE_DELTA 包含 /taskStatus=cancelled patch', () => {
-      const stored = makeLifecycleEvent('task.cancelled')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({ type: 'TaskCancelled', taskId: 'task-001', timestamp: 1000 }),
+        freshCtx()
+      )
       const delta = result[0] as { delta: unknown[] }
       expect(delta.delta).toEqual([{ op: 'replace', path: '/taskStatus', value: 'cancelled' }])
     })
   })
 
-  describe('task.session.attached → STATE_DELTA', () => {
+  describe('TaskSessionAttached → STATE_DELTA', () => {
     it('产生 STATE_DELTA 携带 /sessionId replace patch', () => {
-      const stored = makeLifecycleEvent('task.session.attached', { sessionId: 'sess-xyz' })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'TaskSessionAttached',
+          taskId: 'task-001',
+          timestamp: 1000,
+          sessionId: 'sess-xyz',
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STATE_DELTA)
-      const ev = result[0] as { delta: unknown[] }
-      expect(ev.delta).toEqual([{ op: 'replace', path: '/sessionId', value: 'sess-xyz' }])
+      const resultEv = result[0] as { delta: unknown[] }
+      expect(resultEv.delta).toEqual([{ op: 'replace', path: '/sessionId', value: 'sess-xyz' }])
     })
   })
 
-  describe('task.waiting → STATE_DELTA', () => {
+  describe('TaskWaiting → STATE_DELTA', () => {
     it('产生 STATE_DELTA 携带 /taskStatus replace patch', () => {
-      const stored = makeLifecycleEvent('task.waiting')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'TaskWaiting',
+          taskId: 'task-001',
+          timestamp: 1000,
+          reason: 'hitl',
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STATE_DELTA)
-      const ev = result[0] as { delta: unknown[] }
-      expect(ev.delta).toEqual([{ op: 'replace', path: '/taskStatus', value: 'waiting' }])
+      const resultEv = result[0] as { delta: unknown[] }
+      expect(resultEv.delta).toEqual([{ op: 'replace', path: '/taskStatus', value: 'waiting' }])
     })
   })
 
-  describe('未知 lifecycle 类型', () => {
-    it('返回空数组（静默忽略未知类型）', () => {
-      const stored = makeLifecycleEvent('task.unknown_future_type')
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+  describe('未知 / 不映射事件类型', () => {
+    it('TaskObservationLost 返回空数组（无 AG-UI 映射）', () => {
+      const result = mapToAgUi(
+        envelope({
+          type: 'TaskObservationLost',
+          taskId: 'task-001',
+          timestamp: 1000,
+          lastObservedAt: '2026-01-01T00:00:00.000Z',
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(0)
     })
   })
 })
 
 // ============================================================================
-// agent 事件映射 - 消息类
+// Run 事件映射 - 消息类
 // ============================================================================
 
-describe('agent 事件映射 - 消息', () => {
-  describe('message.started → TEXT_MESSAGE_START', () => {
+describe('Run 事件映射 - 消息', () => {
+  describe('MessageStarted → TEXT_MESSAGE_START', () => {
     it('映射为 TEXT_MESSAGE_START，role 为 assistant', () => {
-      const stored = makeAgentEvent({
-        type: 'message.started',
-        runId: 'run-001',
-        messageId: 'msg-001',
-        message: {},
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'MessageStarted',
+          runId: 'run-001',
+          messageId: 'msg-001',
+          message: { role: 'assistant', content: [] },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.TEXT_MESSAGE_START)
-      const ev = result[0] as { messageId: string; role: string }
-      expect(ev.messageId).toBe('msg-001')
-      expect(ev.role).toBe('assistant')
+      const resultEv = result[0] as { messageId: string; role: string }
+      expect(resultEv.messageId).toBe('msg-001')
+      expect(resultEv.role).toBe('assistant')
     })
   })
 
-  describe('message.delta channel=text → TEXT_MESSAGE_CONTENT', () => {
+  describe('MessageDelta channel=text → TEXT_MESSAGE_CONTENT', () => {
     it('映射为 TEXT_MESSAGE_CONTENT，delta 为 payload.content', () => {
-      const stored = makeAgentEvent({
-        type: 'message.delta',
-        runId: 'run-001',
-        messageId: 'msg-001',
-        sequence: 1,
-        channel: 'text',
-        payload: { content: 'Hello' },
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'MessageDelta',
+          runId: 'run-001',
+          messageId: 'msg-001',
+          sequence: 1,
+          channel: 'text',
+          payload: { content: 'Hello' },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.TEXT_MESSAGE_CONTENT)
-      const ev = result[0] as { messageId: string; delta: string }
-      expect(ev.messageId).toBe('msg-001')
-      expect(ev.delta).toBe('Hello')
+      const resultEv = result[0] as { messageId: string; delta: string }
+      expect(resultEv.messageId).toBe('msg-001')
+      expect(resultEv.delta).toBe('Hello')
     })
   })
 
-  describe('message.delta channel=thinking - 首个 thinking delta', () => {
+  describe('MessageDelta channel=thinking - 首个 thinking delta', () => {
     it('ctx.inThinking=false 时，前置 REASONING_START + REASONING_MESSAGE_START', () => {
-      const stored = makeAgentEvent({
-        type: 'message.delta',
-        runId: 'run-001',
-        messageId: 'msg-001',
-        sequence: 1,
-        channel: 'thinking',
-        payload: { content: '思考中...' },
-        timestamp: 1000,
-      })
       const ctx = freshCtx()
-      const result = mapTaskEventToAgUiEvents(stored, ctx)
+      const result = mapToAgUi(
+        envelope({
+          type: 'MessageDelta',
+          runId: 'run-001',
+          messageId: 'msg-001',
+          sequence: 1,
+          channel: 'thinking',
+          payload: { content: '思考中...' },
+          timestamp: 1000,
+        }),
+        ctx
+      )
       expect(result).toHaveLength(3)
       expect(result[0].type).toBe(EventType.REASONING_START)
       expect(result[1].type).toBe(EventType.REASONING_MESSAGE_START)
@@ -298,66 +326,74 @@ describe('agent 事件映射 - 消息', () => {
     })
 
     it('处理首个 thinking delta 后，ctx.inThinking 变为 true', () => {
-      const stored = makeAgentEvent({
-        type: 'message.delta',
-        runId: 'run-001',
-        messageId: 'msg-001',
-        sequence: 1,
-        channel: 'thinking',
-        payload: { content: '第一块' },
-        timestamp: 1000,
-      })
       const ctx = freshCtx()
-      mapTaskEventToAgUiEvents(stored, ctx)
+      mapToAgUi(
+        envelope({
+          type: 'MessageDelta',
+          runId: 'run-001',
+          messageId: 'msg-001',
+          sequence: 1,
+          channel: 'thinking',
+          payload: { content: '第一块' },
+          timestamp: 1000,
+        }),
+        ctx
+      )
       expect(ctx.inThinking).toBe(true)
     })
   })
 
-  describe('message.delta channel=thinking - 后续 thinking delta', () => {
+  describe('MessageDelta channel=thinking - 后续 thinking delta', () => {
     it('ctx.inThinking=true 时，只产生 REASONING_MESSAGE_CONTENT', () => {
-      const stored = makeAgentEvent({
-        type: 'message.delta',
-        runId: 'run-001',
-        messageId: 'msg-001',
-        sequence: 2,
-        channel: 'thinking',
-        payload: { content: '继续思考' },
-        timestamp: 1000,
-      })
       const ctx: EventMapperContext = { inThinking: true, taskId: 'task-001' }
-      const result = mapTaskEventToAgUiEvents(stored, ctx)
+      const result = mapToAgUi(
+        envelope({
+          type: 'MessageDelta',
+          runId: 'run-001',
+          messageId: 'msg-001',
+          sequence: 2,
+          channel: 'thinking',
+          payload: { content: '继续思考' },
+          timestamp: 1000,
+        }),
+        ctx
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.REASONING_MESSAGE_CONTENT)
     })
   })
 
-  describe('message.completed → TEXT_MESSAGE_END', () => {
+  describe('MessageCompleted → TEXT_MESSAGE_END', () => {
     it('非 thinking 状态时只产生 TEXT_MESSAGE_END', () => {
-      const stored = makeAgentEvent({
-        type: 'message.completed',
-        runId: 'run-001',
-        messageId: 'msg-001',
-        message: {},
-        timestamp: 1000,
-      })
       const ctx = freshCtx()
-      const result = mapTaskEventToAgUiEvents(stored, ctx)
+      const result = mapToAgUi(
+        envelope({
+          type: 'MessageCompleted',
+          runId: 'run-001',
+          messageId: 'msg-001',
+          message: { role: 'assistant', content: [] },
+          timestamp: 1000,
+        }),
+        ctx
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.TEXT_MESSAGE_END)
-      const ev = result[0] as { messageId: string }
-      expect(ev.messageId).toBe('msg-001')
+      const resultEv = result[0] as { messageId: string }
+      expect(resultEv.messageId).toBe('msg-001')
     })
 
     it('thinking 状态时前置 REASONING_MESSAGE_END + REASONING_END，最后 TEXT_MESSAGE_END', () => {
-      const stored = makeAgentEvent({
-        type: 'message.completed',
-        runId: 'run-001',
-        messageId: 'msg-001',
-        message: {},
-        timestamp: 1000,
-      })
       const ctx: EventMapperContext = { inThinking: true, taskId: 'task-001' }
-      const result = mapTaskEventToAgUiEvents(stored, ctx)
+      const result = mapToAgUi(
+        envelope({
+          type: 'MessageCompleted',
+          runId: 'run-001',
+          messageId: 'msg-001',
+          message: { role: 'assistant', content: [] },
+          timestamp: 1000,
+        }),
+        ctx
+      )
       expect(result).toHaveLength(3)
       expect(result[0].type).toBe(EventType.REASONING_MESSAGE_END)
       expect(result[1].type).toBe(EventType.REASONING_END)
@@ -365,49 +401,55 @@ describe('agent 事件映射 - 消息', () => {
     })
 
     it('thinking 状态结束后，ctx.inThinking 变为 false', () => {
-      const stored = makeAgentEvent({
-        type: 'message.completed',
-        runId: 'run-001',
-        messageId: 'msg-001',
-        message: {},
-        timestamp: 1000,
-      })
       const ctx: EventMapperContext = { inThinking: true, taskId: 'task-001' }
-      mapTaskEventToAgUiEvents(stored, ctx)
+      mapToAgUi(
+        envelope({
+          type: 'MessageCompleted',
+          runId: 'run-001',
+          messageId: 'msg-001',
+          message: { role: 'assistant', content: [] },
+          timestamp: 1000,
+        }),
+        ctx
+      )
       expect(ctx.inThinking).toBe(false)
     })
   })
 })
 
 // ============================================================================
-// agent 事件映射 - 工具调用
+// Run 事件映射 - 工具调用
 // ============================================================================
 
-describe('agent 事件映射 - 工具调用', () => {
-  describe('tool.started → TOOL_CALL_START（含 args，不发 TOOL_CALL_ARGS）', () => {
+describe('Run 事件映射 - 工具调用', () => {
+  describe('ToolStarted → TOOL_CALL_START（含 args，不发 TOOL_CALL_ARGS）', () => {
     it('只产生一个 TOOL_CALL_START 事件', () => {
-      const stored = makeAgentEvent({
-        type: 'tool.started',
-        runId: 'run-001',
-        toolCallId: 'call-001',
-        invocation: { toolName: 'search', args: { query: 'hello' } },
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'ToolStarted',
+          runId: 'run-001',
+          toolCallId: 'call-001',
+          invocation: { toolCallId: 'call-001', toolName: 'search', args: { query: 'hello' } },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.TOOL_CALL_START)
     })
 
     it('TOOL_CALL_START 包含 toolCallId、toolCallName 和 args（JSON 字符串）', () => {
       const args = { query: 'hello', limit: 5 }
-      const stored = makeAgentEvent({
-        type: 'tool.started',
-        runId: 'run-001',
-        toolCallId: 'call-001',
-        invocation: { toolName: 'search', args },
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'ToolStarted',
+          runId: 'run-001',
+          toolCallId: 'call-001',
+          invocation: { toolCallId: 'call-001', toolName: 'search', args },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       const start = result[0] as { toolCallId: string; toolCallName: string; args: string }
       expect(start.toolCallId).toBe('call-001')
       expect(start.toolCallName).toBe('search')
@@ -415,275 +457,324 @@ describe('agent 事件映射 - 工具调用', () => {
     })
   })
 
-  describe('tool.completed → TOOL_CALL_END + TOOL_CALL_RESULT', () => {
+  describe('ToolCompleted → TOOL_CALL_END + TOOL_CALL_RESULT', () => {
     it('产生两个事件：先 TOOL_CALL_END，再 TOOL_CALL_RESULT', () => {
-      const stored = makeAgentEvent({
-        type: 'tool.completed',
-        runId: 'run-001',
-        toolCallId: 'call-001',
-        invocation: { toolName: 'search', args: {} },
-        result: { value: '结果' },
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'ToolCompleted',
+          runId: 'run-001',
+          toolCallId: 'call-001',
+          invocation: { toolCallId: 'call-001', toolName: 'search', args: {} },
+          result: { toolCallId: 'call-001', result: { value: '结果' } },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(2)
       expect(result[0].type).toBe(EventType.TOOL_CALL_END)
       expect(result[1].type).toBe(EventType.TOOL_CALL_RESULT)
     })
 
-    it('TOOL_CALL_RESULT 包含 toolCallId 和 JSON 序列化的 content', () => {
-      const toolResult = { value: '结果数据', status: 'ok' }
-      const stored = makeAgentEvent({
-        type: 'tool.completed',
-        runId: 'run-001',
-        toolCallId: 'call-002',
-        invocation: { toolName: 'search', args: {} },
-        result: toolResult,
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+    it('TOOL_CALL_RESULT 包含 toolCallId 和 JSON 序列化的 result.result', () => {
+      const innerResult = { value: '结果数据', status: 'ok' }
+      const result = mapToAgUi(
+        envelope({
+          type: 'ToolCompleted',
+          runId: 'run-001',
+          toolCallId: 'call-002',
+          invocation: { toolCallId: 'call-002', toolName: 'search', args: {} },
+          result: { toolCallId: 'call-002', result: innerResult },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       const resultEv = result[1] as { toolCallId: string; content: string }
       expect(resultEv.toolCallId).toBe('call-002')
-      expect(resultEv.content).toBe(JSON.stringify(toolResult))
+      expect(resultEv.content).toBe(JSON.stringify(innerResult))
     })
   })
 
-  describe('tool.failed → TOOL_CALL_END', () => {
+  describe('ToolFailed → TOOL_CALL_END', () => {
     it('只产生 TOOL_CALL_END，携带 toolCallId 和 error 信息', () => {
-      const stored = makeAgentEvent({
-        type: 'tool.failed',
-        runId: 'run-001',
-        toolCallId: 'call-003',
-        invocation: { toolName: 'search', args: {} },
-        error: { code: 'TIMEOUT', message: '超时' },
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'ToolFailed',
+          runId: 'run-001',
+          toolCallId: 'call-003',
+          invocation: { toolCallId: 'call-003', toolName: 'search', args: {} },
+          error: { name: 'ToolError', category: 'tool', code: 'TIMEOUT', message: '超时' },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.TOOL_CALL_END)
-      const ev = result[0] as { toolCallId: string; error: string }
-      expect(ev.toolCallId).toBe('call-003')
-      expect(ev.error).toBe('超时')
+      const resultEv = result[0] as { toolCallId: string; error: string }
+      expect(resultEv.toolCallId).toBe('call-003')
+      expect(resultEv.error).toBe('超时')
     })
   })
 })
 
 // ============================================================================
-// agent 事件映射 - run 生命周期
+// Run 事件映射 - run 生命周期
 // ============================================================================
 
-describe('agent 事件映射 - run 生命周期', () => {
-  describe('run.started → STEP_STARTED', () => {
+describe('Run 事件映射 - run 生命周期', () => {
+  describe('RunStarted → STEP_STARTED', () => {
     it('映射为 STEP_STARTED，metadata 含 stepKind/runId/sessionId/triggerType', () => {
-      const stored = makeAgentEvent({
-        type: 'run.started',
-        runId: 'run-001',
-        sessionId: 'session-001',
-        triggerType: 'fresh',
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'RunStarted',
+          runId: 'run-001',
+          sessionId: 'session-001',
+          triggerType: 'fresh',
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STEP_STARTED)
-      const ev = result[0] as {
+      const resultEv = result[0] as {
         metadata?: { stepKind: string; runId: string; sessionId: string; triggerType: string }
       }
-      expect(ev.metadata?.stepKind).toBe('run')
-      expect(ev.metadata?.runId).toBe('run-001')
-      expect(ev.metadata?.sessionId).toBe('session-001')
-      expect(ev.metadata?.triggerType).toBe('fresh')
+      expect(resultEv.metadata?.stepKind).toBe('run')
+      expect(resultEv.metadata?.runId).toBe('run-001')
+      expect(resultEv.metadata?.sessionId).toBe('session-001')
+      expect(resultEv.metadata?.triggerType).toBe('fresh')
     })
   })
 
-  describe('run.completed → STEP_FINISHED', () => {
+  describe('RunCompleted → STEP_FINISHED', () => {
     it('映射为 STEP_FINISHED，metadata.stepKind 为 "run"', () => {
-      const stored = makeAgentEvent({
-        type: 'run.completed',
-        runId: 'run-001',
-        sessionId: 'session-001',
-        triggerType: 'fresh',
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'RunCompleted',
+          runId: 'run-001',
+          sessionId: 'session-001',
+          triggerType: 'fresh',
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STEP_FINISHED)
-      const ev = result[0] as { stepName: string; metadata?: { stepKind: string } }
-      expect(ev.metadata?.stepKind).toBe('run')
-    })
-  })
-})
-
-// ============================================================================
-// agent 事件映射 - graph 生命周期
-// ============================================================================
-
-describe('agent 事件映射 - graph 生命周期', () => {
-  describe('graph.started → STEP_STARTED', () => {
-    it('映射为 STEP_STARTED，metadata 含 stepKind/graphId/graphVersion', () => {
-      const stored = makeAgentEvent({
-        type: 'graph.started',
-        runId: 'run-001',
-        graphId: 'graph-abc',
-        graphVersion: 3,
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      expect(result).toHaveLength(1)
-      expect(result[0].type).toBe(EventType.STEP_STARTED)
-      const ev = result[0] as {
-        metadata?: { stepKind: string; graphId: string; graphVersion: number }
-      }
-      expect(ev.metadata?.stepKind).toBe('graph')
-      expect(ev.metadata?.graphId).toBe('graph-abc')
-      expect(ev.metadata?.graphVersion).toBe(3)
+      const resultEv = result[0] as { stepName: string; metadata?: { stepKind: string } }
+      expect(resultEv.metadata?.stepKind).toBe('run')
     })
   })
 
-  describe('graph.node.started → STEP_STARTED', () => {
-    it('映射为 STEP_STARTED，metadata 包含 stepKind="graph-node"、graphId、nodeId、nodeKind', () => {
-      const stored = makeAgentEvent({
-        type: 'graph.node.started',
-        runId: 'run-001',
-        graphId: 'graph-abc',
-        nodeId: 'node-1',
-        nodeKind: 'agent',
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      expect(result).toHaveLength(1)
-      expect(result[0].type).toBe(EventType.STEP_STARTED)
-      const ev = result[0] as {
-        metadata?: { stepKind: string; graphId: string; nodeId: string; nodeKind: string }
-      }
-      expect(ev.metadata?.stepKind).toBe('graph-node')
-      expect(ev.metadata?.graphId).toBe('graph-abc')
-      expect(ev.metadata?.nodeId).toBe('node-1')
-      expect(ev.metadata?.nodeKind).toBe('agent')
-    })
-  })
-
-  describe('graph.node.completed → STEP_FINISHED', () => {
-    it('映射为 STEP_FINISHED，metadata 包含 stepKind="graph-node" 和 output', () => {
-      const nodeOutput = { result: 'done' }
-      const stored = makeAgentEvent({
-        type: 'graph.node.completed',
-        runId: 'run-001',
-        graphId: 'graph-abc',
-        nodeId: 'node-1',
-        output: nodeOutput,
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
-      expect(result).toHaveLength(1)
-      expect(result[0].type).toBe(EventType.STEP_FINISHED)
-      const ev = result[0] as {
-        metadata?: { stepKind: string; graphId: string; nodeId: string; output: unknown }
-      }
-      expect(ev.metadata?.stepKind).toBe('graph-node')
-      expect(ev.metadata?.graphId).toBe('graph-abc')
-      expect(ev.metadata?.nodeId).toBe('node-1')
-      expect(ev.metadata?.output).toEqual(nodeOutput)
-    })
-  })
-
-  describe('run.failed → STEP_FINISHED', () => {
+  describe('RunFailed → STEP_FINISHED', () => {
     it('映射为 STEP_FINISHED，metadata 含 stepKind="run" 和 error', () => {
-      const stored = makeAgentEvent({
-        type: 'run.failed',
-        runId: 'run-001',
-        error: { code: 'ERR', message: '运行失败' },
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const error = {
+        name: 'TianjiError',
+        category: 'internal' as const,
+        code: 'ERR',
+        message: '运行失败',
+      }
+      const result = mapToAgUi(
+        envelope({
+          type: 'RunFailed',
+          runId: 'run-001',
+          sessionId: 'session-001',
+          triggerType: 'fresh',
+          error,
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STEP_FINISHED)
-      const ev = result[0] as {
+      const resultEv = result[0] as {
         stepName: string
         metadata?: { stepKind: string; runId: string; error: unknown }
       }
-      expect(ev.stepName).toBe('run:run-001')
-      expect(ev.metadata?.stepKind).toBe('run')
-      expect(ev.metadata?.runId).toBe('run-001')
-      expect(ev.metadata?.error).toEqual({ code: 'ERR', message: '运行失败' })
+      expect(resultEv.stepName).toBe('run:run-001')
+      expect(resultEv.metadata?.stepKind).toBe('run')
+      expect(resultEv.metadata?.runId).toBe('run-001')
+      expect(resultEv.metadata?.error).toEqual(error)
     })
   })
 
-  describe('run.cancelled → STEP_FINISHED', () => {
+  describe('RunCancelled → STEP_FINISHED', () => {
     it('映射为 STEP_FINISHED，metadata 含 stepKind="run" 和 cancelled=true', () => {
-      const stored = makeAgentEvent({
-        type: 'run.cancelled',
-        runId: 'run-002',
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const result = mapToAgUi(
+        envelope({
+          type: 'RunCancelled',
+          runId: 'run-002',
+          sessionId: 'session-001',
+          triggerType: 'fresh',
+          reason: 'abort',
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STEP_FINISHED)
-      const ev = result[0] as {
+      const resultEv = result[0] as {
         stepName: string
         metadata?: { stepKind: string; runId: string; cancelled: boolean }
       }
-      expect(ev.stepName).toBe('run:run-002')
-      expect(ev.metadata?.stepKind).toBe('run')
-      expect(ev.metadata?.cancelled).toBe(true)
+      expect(resultEv.stepName).toBe('run:run-002')
+      expect(resultEv.metadata?.stepKind).toBe('run')
+      expect(resultEv.metadata?.cancelled).toBe(true)
+    })
+  })
+})
+
+// ============================================================================
+// GraphRun 事件映射
+// ============================================================================
+
+describe('GraphRun 事件映射', () => {
+  describe('GraphRunStarted → STEP_STARTED', () => {
+    it('映射为 STEP_STARTED，metadata 含 stepKind/graphId/graphVersion', () => {
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphRunStarted',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          graphVersion: 3,
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
+      expect(result).toHaveLength(1)
+      expect(result[0].type).toBe(EventType.STEP_STARTED)
+      const resultEv = result[0] as {
+        metadata?: { stepKind: string; graphId: string; graphVersion: number }
+      }
+      expect(resultEv.metadata?.stepKind).toBe('graph')
+      expect(resultEv.metadata?.graphId).toBe('graph-abc')
+      expect(resultEv.metadata?.graphVersion).toBe(3)
     })
   })
 
-  describe('graph.completed → STEP_FINISHED', () => {
-    it('映射为 STEP_FINISHED，metadata 含 stepKind="graph" 和 finalState', () => {
-      const finalState = { status: 'ok', output: 42 }
-      const stored = makeAgentEvent({
-        type: 'graph.completed',
-        runId: 'run-001',
-        graphId: 'graph-abc',
-        finalState,
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+  describe('GraphNodeStarted → STEP_STARTED', () => {
+    it('映射为 STEP_STARTED，metadata 包含 stepKind="graph-node"、graphId、nodeId、nodeKind', () => {
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphNodeStarted',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          nodeId: 'node-1',
+          nodeKind: 'agent',
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
+      expect(result).toHaveLength(1)
+      expect(result[0].type).toBe(EventType.STEP_STARTED)
+      const resultEv = result[0] as {
+        metadata?: { stepKind: string; graphId: string; nodeId: string; nodeKind: string }
+      }
+      expect(resultEv.metadata?.stepKind).toBe('graph-node')
+      expect(resultEv.metadata?.graphId).toBe('graph-abc')
+      expect(resultEv.metadata?.nodeId).toBe('node-1')
+      expect(resultEv.metadata?.nodeKind).toBe('agent')
+    })
+  })
+
+  describe('GraphNodeCompleted → STEP_FINISHED', () => {
+    it('映射为 STEP_FINISHED，metadata 包含 stepKind="graph-node" 和 output', () => {
+      const nodeOutput = { result: 'done' }
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphNodeCompleted',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          nodeId: 'node-1',
+          nodeKind: 'agent',
+          output: nodeOutput,
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STEP_FINISHED)
-      const ev = result[0] as {
+      const resultEv = result[0] as {
+        metadata?: { stepKind: string; graphId: string; nodeId: string; output: unknown }
+      }
+      expect(resultEv.metadata?.stepKind).toBe('graph-node')
+      expect(resultEv.metadata?.graphId).toBe('graph-abc')
+      expect(resultEv.metadata?.nodeId).toBe('node-1')
+      expect(resultEv.metadata?.output).toEqual(nodeOutput)
+    })
+  })
+
+  describe('GraphRunCompleted → STEP_FINISHED', () => {
+    it('映射为 STEP_FINISHED，metadata 含 stepKind="graph" 和 finalState', () => {
+      const finalState = { status: 'ok', output: 42 }
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphRunCompleted',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          graphVersion: 1,
+          finalState,
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
+      expect(result).toHaveLength(1)
+      expect(result[0].type).toBe(EventType.STEP_FINISHED)
+      const resultEv = result[0] as {
         stepName: string
         metadata?: { stepKind: string; graphId: string; finalState: unknown }
       }
-      expect(ev.stepName).toBe('graph:graph-abc')
-      expect(ev.metadata?.stepKind).toBe('graph')
-      expect(ev.metadata?.finalState).toEqual(finalState)
+      expect(resultEv.stepName).toBe('graph:graph-abc')
+      expect(resultEv.metadata?.stepKind).toBe('graph')
+      expect(resultEv.metadata?.finalState).toEqual(finalState)
     })
   })
 
-  describe('graph.node.failed → STEP_FINISHED', () => {
+  describe('GraphNodeFailed → STEP_FINISHED', () => {
     it('映射为 STEP_FINISHED，metadata 含 stepKind="graph-node" 和 error', () => {
-      const stored = makeAgentEvent({
-        type: 'graph.node.failed',
-        runId: 'run-001',
-        graphId: 'graph-abc',
-        nodeId: 'node-2',
-        error: { code: 'NODE_ERR', message: '节点执行失败' },
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+      const error = {
+        name: 'TianjiError',
+        category: 'internal' as const,
+        code: 'NODE_ERR',
+        message: '节点执行失败',
+      }
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphNodeFailed',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          nodeId: 'node-2',
+          nodeKind: 'agent',
+          error,
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(1)
       expect(result[0].type).toBe(EventType.STEP_FINISHED)
-      const ev = result[0] as {
+      const resultEv = result[0] as {
         stepName: string
         metadata?: { stepKind: string; graphId: string; nodeId: string; error: unknown }
       }
-      expect(ev.stepName).toBe('graph-node:graph-abc:node-2')
-      expect(ev.metadata?.stepKind).toBe('graph-node')
-      expect(ev.metadata?.graphId).toBe('graph-abc')
-      expect(ev.metadata?.nodeId).toBe('node-2')
-      expect(ev.metadata?.error).toEqual({ code: 'NODE_ERR', message: '节点执行失败' })
+      expect(resultEv.stepName).toBe('graph-node:graph-abc:node-2')
+      expect(resultEv.metadata?.stepKind).toBe('graph-node')
+      expect(resultEv.metadata?.graphId).toBe('graph-abc')
+      expect(resultEv.metadata?.nodeId).toBe('node-2')
+      expect(resultEv.metadata?.error).toEqual(error)
     })
   })
 
-  describe('未知 agent 事件类型', () => {
-    it('返回空数组（静默忽略）', () => {
-      const stored = makeAgentEvent({
-        type: 'completely.unknown.future.event',
-        runId: 'run-001',
-        timestamp: 1000,
-      })
-      const result = mapTaskEventToAgUiEvents(stored, freshCtx())
+  describe('不映射的 GraphRun 事件', () => {
+    it('GraphRunFailed 返回空数组（无 AG-UI 映射）', () => {
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphRunFailed',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          graphVersion: 1,
+          error: { name: 'TianjiError', category: 'internal', code: 'ERR', message: 'fail' },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
       expect(result).toHaveLength(0)
     })
   })

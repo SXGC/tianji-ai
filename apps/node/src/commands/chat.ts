@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 
 import { DaemonClient } from '@tianji/agent'
+import { isRunEvent } from '@tianji/shared'
 
 import { getUserConfigPaths } from '../config.js'
 
@@ -52,9 +53,13 @@ export const chatCommand: CommandDefinition = {
         break
       }
 
-      for await (const event of client.sendChat(trimmed)) {
-        if (event.type === 'message.delta' && event.channel === 'text') {
-          process.stdout.write(event.payload.content)
+      for await (const envelope of client.sendChat(trimmed)) {
+        if (
+          isRunEvent(envelope) &&
+          envelope.payload.type === 'MessageDelta' &&
+          envelope.payload.channel === 'text'
+        ) {
+          process.stdout.write(envelope.payload.payload.content)
         }
       }
       process.stdout.write('\n')

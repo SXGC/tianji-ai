@@ -8,7 +8,6 @@ import type {
   MessageDelta,
   PendingOperation,
   RunSnapshot,
-  RuntimeEvent,
   SessionSnapshot,
   TaskRunPayload,
   ToolResult,
@@ -20,14 +19,11 @@ import {
   NODE_EXECUTION_STATES,
   NODE_STATUSES,
   ProviderError,
-  TASK_LIFECYCLE_TYPES,
-  TASK_STATUSES,
   createNodeId,
   createRunId,
   createSessionId,
   createTaskId,
   isTerminalCommandState,
-  isTerminalTaskStatus,
 } from '../index.js'
 
 interface PackageJson {
@@ -94,13 +90,6 @@ describe('@tianji/shared barrel', () => {
         payload: 'ready',
         timestamp: 1,
       }
-      const runtimeEvent: RuntimeEvent = {
-        type: 'message.completed',
-        runId: delta.runId,
-        messageId: message.id,
-        message,
-        timestamp: 1,
-      }
       const pendingOperation: PendingOperation = {
         id: 'pending-shared-exports',
         invocation: {
@@ -155,7 +144,6 @@ describe('@tianji/shared barrel', () => {
       expect(toolSpec.name).toBe('echo')
       expect(toolResult.toolCallId).toBe('tool-call-shared-exports')
       expect(message.role).toBe('assistant')
-      expect(runtimeEvent.type).toBe('message.completed')
       expect(sessionSnapshot.messages).toHaveLength(1)
       expect(runSnapshot.pendingOperations).toHaveLength(1)
       expect(artifact.type).toBe('structured-result')
@@ -164,9 +152,6 @@ describe('@tianji/shared barrel', () => {
       expect(combinedDelta).toEqual(delta)
       expect(taskPayload.sessionIds).toEqual([sessionSnapshot.sessionId])
       expect(nodeId).toBe('node-shared-exports')
-      expect(TASK_STATUSES).toContain('completed')
-      expect(TASK_LIFECYCLE_TYPES).toContain('task.started')
-      expect(isTerminalTaskStatus('completed')).toBe(true)
       expect(COMMAND_STATES).toContain('leased')
       expect(isTerminalCommandState('failed')).toBe(true)
       expect(NODE_EXECUTION_STATES).toContain('idle')

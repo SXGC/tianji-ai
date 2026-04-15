@@ -13,7 +13,7 @@
 import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
 import { InMemorySnapshotStore, ToolRegistry, createSessionRuntime } from '@tianji/runtime'
-import { type RuntimeEvent, createSessionId } from '@tianji/shared'
+import { type DomainEvent, createSessionId } from '@tianji/shared'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createFetchUrlTool } from '../../tools/fetch-url-tool.js'
@@ -23,8 +23,8 @@ import { createFetchUrlTool } from '../../tools/fetch-url-tool.js'
  * 工具失败场景下,runtime 会在 tool.failed/run.failed 之后让 stream throw,
  * 测试需要捕获以便对失败前的事件做断言。
  */
-async function collectEvents(iter: AsyncIterable<RuntimeEvent>): Promise<RuntimeEvent[]> {
-  const events: RuntimeEvent[] = []
+async function collectEvents(iter: AsyncIterable<DomainEvent>): Promise<DomainEvent[]> {
+  const events: DomainEvent[] = []
   try {
     for await (const event of iter) {
       events.push(event)
@@ -93,12 +93,12 @@ describe('fetch_url tool integration with SessionRuntime', () => {
     const events = await collectEvents(runtime.streamEvents(runId))
 
     const toolStarted = events.find(
-      (e): e is Extract<RuntimeEvent, { type: 'tool.started' }> =>
-        e.type === 'tool.started' && e.invocation.toolName === 'fetch_url'
+      (e): e is Extract<DomainEvent, { type: 'ToolStarted' }> =>
+        e.type === 'ToolStarted' && e.invocation.toolName === 'fetch_url'
     )
     const toolCompleted = events.find(
-      (e): e is Extract<RuntimeEvent, { type: 'tool.completed' }> =>
-        e.type === 'tool.completed' && e.toolCallId === 'call_fetch_url'
+      (e): e is Extract<DomainEvent, { type: 'ToolCompleted' }> =>
+        e.type === 'ToolCompleted' && e.toolCallId === 'call_fetch_url'
     )
 
     expect(toolStarted).toBeDefined()
@@ -161,8 +161,8 @@ describe('fetch_url tool integration with SessionRuntime', () => {
     })
     const events = await collectEvents(runtime.streamEvents(runId))
     const toolFailed = events.find(
-      (e): e is Extract<RuntimeEvent, { type: 'tool.failed' }> =>
-        e.type === 'tool.failed' && e.invocation.toolName === 'fetch_url'
+      (e): e is Extract<DomainEvent, { type: 'ToolFailed' }> =>
+        e.type === 'ToolFailed' && e.invocation.toolName === 'fetch_url'
     )
     expect(toolFailed).toBeDefined()
     expect(toolFailed?.error.message).toMatch(/HTTP 500/)

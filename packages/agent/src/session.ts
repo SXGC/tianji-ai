@@ -6,7 +6,7 @@ import {
   ToolRegistry,
   createSessionRuntime,
 } from '@tianji/runtime'
-import type { RunId, RuntimeEvent, SessionId } from '@tianji/shared'
+import type { DomainEvent, RunId, SessionId } from '@tianji/shared'
 
 import { type LoadedAgentContext, injectProviderEnv } from './context.js'
 import {
@@ -18,6 +18,19 @@ import { createFetchUrlTool } from './tools/fetch-url-tool.js'
 
 export interface AgentRuntimeOptions {
   readonly logger?: ObserverLogger
+  /** 可选：注入 DomainEvent 发射回调，用于发射 Session 生命周期事件。 */
+  readonly emitEvent?: (ev: DomainEvent) => void | Promise<void>
+}
+
+/**
+ * 会话恢复参数。
+ *
+ * @param checkpointId - 要从哪个检查点恢复的 ID（由 runtime 层保存）
+ * @param sessionId - 原始 session 的 ID，用于关联已有 session 快照
+ */
+export interface ResumeAgentSessionOptions {
+  readonly checkpointId: string
+  readonly sessionId: SessionId
 }
 
 /**
@@ -42,8 +55,10 @@ export interface AgentSession {
   readonly queryWithGraph: (
     graph: OrchestrationGraph,
     options: ChatWithGraphOptions
-  ) => AsyncIterable<RuntimeEvent>
+  ) => AsyncIterable<DomainEvent>
   readonly abort: () => void
+  /** 关闭 session，发射 SessionClosed 事件，中止所有进行中的图运行。 */
+  readonly close: () => void
 }
 
 /**
@@ -108,6 +123,12 @@ export async function createAgentSession(
   // 必须只在 AgentSession 工厂里调用一次,否则后续每轮 query 都会清掉前一轮 runTurn 累加的多轮历史。
   await runtime.createSession({ sessionId })
 
+  await options?.emitEvent?.({
+    type: 'SessionCreated',
+    sessionId,
+    timestamp: Date.now(),
+  })
+
   return {
     sessionId,
     abort(): void {
@@ -117,10 +138,29 @@ export async function createAgentSession(
         controller.abort()
       }
     },
+    close(): void {
+      for (const controller of activeGraphControllers) {
+        controller.abort()
+      }
+      // close() 是同步方法，无法 await。用 .catch 显式捕获，防止 fire-and-forget 丢失错误。
+      const result = options?.emitEvent?.({
+        type: 'SessionClosed',
+        sessionId,
+        timestamp: Date.now(),
+      })
+      if (result instanceof Promise) {
+        result.catch((err: unknown) => {
+          void options?.logger?.error(['agent', 'session'], 'SessionClosed emitEvent failed', {
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        })
+      }
+    },
     async *queryWithGraph(
       graph: OrchestrationGraph,
       graphOptions: ChatWithGraphOptions
-    ): AsyncIterable<RuntimeEvent> {
+    ): AsyncIterable<DomainEvent> {
       // runId 是 @tianji/shared 的分支类型，这里用 session 级时间戳生成唯一值即可。
       const runId = `run_graph_${Date.now()}` as RunId
       const controller = new AbortController()
@@ -145,8 +185,7 @@ export async function createAgentSession(
           },
         })
 
-        // GraphEvent 是 RuntimeEvent 的一个成员（详见 @tianji/shared events.ts），
-        // 直接按 RuntimeEvent 产出即可让 CLI 等上层消费者统一处理。
+        // DomainEvent 是图级与运行时事件的统一类型，直接产出给上层消费者。
         for await (const event of result.events) {
           yield event
         }
@@ -154,6 +193,102 @@ export async function createAgentSession(
       } finally {
         // 无论正常结束、消费者 break、还是底层抛错，都要从集合中移除 controller，
         // 避免悬挂的 controller 影响后续 abort() 语义。
+        activeGraphControllers.delete(controller)
+      }
+    },
+  }
+}
+
+/**
+ * 会话恢复入口：从指定检查点重建 runtime session，并通过 pipeline 发射 SessionResumed 事件。
+ *
+ * 按照 spec §三，SessionResumed 必须由 agent 层发射，checkpointId 随 payload 携带。
+ * 当前无调用者，但入口必须建立以便 Stage 07+ 集成。
+ *
+ * @param context - 已加载的 agent bootstrap 上下文
+ * @param resumeOptions - 恢复参数（checkpointId + sessionId）
+ * @param runtimeOptions - 运行时选项（logger、emitEvent）
+ * @returns 复用同一 sessionId 的 AgentSession 实例
+ */
+export async function resumeAgentSession(
+  context: LoadedAgentContext,
+  resumeOptions: ResumeAgentSessionOptions,
+  runtimeOptions?: AgentRuntimeOptions
+): Promise<AgentSession> {
+  const { checkpointId, sessionId } = resumeOptions
+  const runtime = await createAgentRuntime(context, runtimeOptions)
+  const activeGraphControllers = new Set<AbortController>()
+
+  // 恢复语义：runtime.createSession 使用已有 sessionId，runtime 内部会加载已有快照。
+  // 与 createAgentSession 的"初始化语义"不同，这里只是让 runtime 找到该 session。
+  await runtime.createSession({ sessionId })
+
+  await runtimeOptions?.emitEvent?.({
+    type: 'SessionResumed',
+    sessionId,
+    checkpointId,
+    timestamp: Date.now(),
+  })
+
+  return {
+    sessionId,
+    abort(): void {
+      for (const controller of activeGraphControllers) {
+        controller.abort()
+      }
+    },
+    close(): void {
+      for (const controller of activeGraphControllers) {
+        controller.abort()
+      }
+      // close() 是同步方法，无法 await。用 .catch 显式捕获，防止 fire-and-forget 丢失错误。
+      const result = runtimeOptions?.emitEvent?.({
+        type: 'SessionClosed',
+        sessionId,
+        timestamp: Date.now(),
+      })
+      if (result instanceof Promise) {
+        result.catch((err: unknown) => {
+          void runtimeOptions?.logger?.error(
+            ['agent', 'session'],
+            'SessionClosed emitEvent failed',
+            { sessionId, error: err instanceof Error ? err.message : String(err) }
+          )
+        })
+      }
+    },
+    async *queryWithGraph(
+      graph: OrchestrationGraph,
+      graphOptions: ChatWithGraphOptions
+    ): AsyncIterable<DomainEvent> {
+      const runId = `run_graph_${Date.now()}` as RunId
+      const controller = new AbortController()
+      activeGraphControllers.add(controller)
+
+      try {
+        const result = runOrchestrationGraph({
+          graph,
+          runId,
+          initialState: graphOptions.initialState,
+          compileOptions: graphOptions.compileOptions,
+          observer: runtimeOptions?.logger,
+          abortSignal: controller.signal,
+          onMermaid: (diagram) => {
+            void runtimeOptions?.logger?.info(['agent', 'orchestration'], 'graph.mermaid', {
+              sessionId,
+              runId,
+              graphId: graph.id,
+              graphVersion: graph.version,
+              diagram,
+            })
+          },
+        })
+
+        for await (const event of result.events) {
+          yield event
+        }
+        await result.finished
+      } finally {
         activeGraphControllers.delete(controller)
       }
     },

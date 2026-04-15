@@ -20,12 +20,12 @@ import {
   type AppMessage,
   CancelledError,
   DEFAULT_EXECUTION_POLICY,
+  type DomainEvent,
   type ExecutionPolicy,
   type MessageCompletedEvent,
   ProviderError,
   type RunId,
   type RunSnapshot,
-  type RuntimeEvent,
   type SessionId,
   type SessionSnapshot,
   TianjiError,
@@ -114,7 +114,7 @@ export interface SessionRuntime {
   readonly getRunSnapshot: (runId: RunId) => Promise<RunSnapshot | undefined>
   readonly runTurn: (options: RunTurnOptions) => Promise<RunId>
   readonly resumeRun: (options: ResumeRunOptions) => Promise<RunId>
-  readonly streamEvents: (runId: RunId) => AsyncIterable<RuntimeEvent>
+  readonly streamEvents: (runId: RunId) => AsyncIterable<DomainEvent>
   readonly cancelRun: (runId: RunId) => boolean
 }
 
@@ -122,7 +122,7 @@ interface ActiveRun {
   readonly runId: RunId
   readonly sessionId: SessionId
   readonly controller: AbortController
-  readonly events: ReplayableEventStream<RuntimeEvent>
+  readonly events: ReplayableEventStream<DomainEvent>
 }
 
 interface ExecuteRunInput {
@@ -272,7 +272,7 @@ class SessionRuntimeImpl implements SessionRuntime {
   private readonly snapshotStore: SnapshotStore
   private readonly toolCatalog: ToolCatalog
   private readonly activeRuns = new Map<RunId, ActiveRun>()
-  private readonly eventStreams = new Map<RunId, ReplayableEventStream<RuntimeEvent>>()
+  private readonly eventStreams = new Map<RunId, ReplayableEventStream<DomainEvent>>()
 
   constructor(private readonly options: SessionRuntimeOptions) {
     const requestedEngine = readRequestedEngine(options) ?? 'deepagents'
@@ -460,7 +460,7 @@ class SessionRuntimeImpl implements SessionRuntime {
     return resumedRunId
   }
 
-  readonly streamEvents = (runId: RunId): AsyncIterable<RuntimeEvent> => {
+  readonly streamEvents = (runId: RunId): AsyncIterable<DomainEvent> => {
     const events = this.eventStreams.get(runId)
 
     if (events === undefined) {
@@ -515,7 +515,7 @@ class SessionRuntimeImpl implements SessionRuntime {
       ),
     }
 
-    const events = new ReplayableEventStream<RuntimeEvent>()
+    const events = new ReplayableEventStream<DomainEvent>()
     const activeRun: ActiveRun = {
       runId: input.runId,
       sessionId: input.sessionSnapshot.sessionId,
@@ -550,7 +550,7 @@ class SessionRuntimeImpl implements SessionRuntime {
 
     try {
       activeRun.events.push({
-        type: 'run.started',
+        type: 'RunStarted',
         ...lineage,
         timestamp: Date.now(),
       })
@@ -647,8 +647,9 @@ class SessionRuntimeImpl implements SessionRuntime {
     await this.snapshotStore.saveRun(interruptedRunSnapshot)
 
     activeRun.events.push({
-      type: 'run.cancelled',
+      type: 'RunCancelled',
       ...lineage,
+      reason: 'hitl',
       timestamp: Date.now(),
     })
     this.logRunLifecycle('info', 'run.cancelled', lineage, {
@@ -705,7 +706,7 @@ class SessionRuntimeImpl implements SessionRuntime {
     await this.snapshotStore.saveRun(completedRunSnapshot)
 
     activeRun.events.push({
-      type: 'run.completed',
+      type: 'RunCompleted',
       ...lineage,
       timestamp: Date.now(),
     })
@@ -743,8 +744,9 @@ class SessionRuntimeImpl implements SessionRuntime {
     await this.snapshotStore.saveRun(cancelledRunSnapshot)
 
     activeRun.events.push({
-      type: 'run.cancelled',
+      type: 'RunCancelled',
       ...lineage,
+      reason: 'abort',
       timestamp: Date.now(),
     })
     this.logRunLifecycle('warn', 'run.cancelled', lineage, {
@@ -779,7 +781,7 @@ class SessionRuntimeImpl implements SessionRuntime {
     await this.snapshotStore.saveRun(failedRunSnapshot)
 
     activeRun.events.push({
-      type: 'run.failed',
+      type: 'RunFailed',
       ...lineage,
       error: resolvedError,
       timestamp: Date.now(),
@@ -837,16 +839,16 @@ class SessionRuntimeImpl implements SessionRuntime {
       emitEvent: (event) => {
         activeRun.events.push(event)
         if (
-          event.type === 'tool.started' ||
-          event.type === 'tool.completed' ||
-          event.type === 'tool.failed'
+          event.type === 'ToolStarted' ||
+          event.type === 'ToolCompleted' ||
+          event.type === 'ToolFailed'
         ) {
           this.logToolEvent(event, lineage)
         }
-        if (event.type === 'message.completed') {
+        if (event.type === 'MessageCompleted') {
           this.logMessageEvent(event, lineage)
         }
-        if (event.type === 'tool.started') {
+        if (event.type === 'ToolStarted') {
           const span = startToolSpan({
             toolName: event.invocation.toolName,
             runId: event.runId,
@@ -855,7 +857,7 @@ class SessionRuntimeImpl implements SessionRuntime {
             toolSpans.set(event.toolCallId, span)
           }
         }
-        if (event.type === 'tool.completed' || event.type === 'tool.failed') {
+        if (event.type === 'ToolCompleted' || event.type === 'ToolFailed') {
           const span = toolSpans.get(event.toolCallId)
           if (span !== undefined) {
             span.end()
@@ -929,7 +931,7 @@ class SessionRuntimeImpl implements SessionRuntime {
       return
     }
 
-    if (event.type === 'tool.started') {
+    if (event.type === 'ToolStarted') {
       void logger.info(['runtime', 'tool'], 'tool.started', {
         sessionId: fields.sessionId,
         runId: fields.runId,
@@ -937,7 +939,7 @@ class SessionRuntimeImpl implements SessionRuntime {
         toolName: event.invocation.toolName,
         args: event.invocation.args,
       })
-    } else if (event.type === 'tool.completed') {
+    } else if (event.type === 'ToolCompleted') {
       void logger.info(['runtime', 'tool'], 'tool.completed', {
         sessionId: fields.sessionId,
         runId: fields.runId,
@@ -975,7 +977,7 @@ class SessionRuntimeImpl implements SessionRuntime {
       .filter((p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text')
       .map((p) => p.text)
 
-    void logger.info(['runtime', 'message'], 'message.completed', {
+    void logger.info(['runtime', 'message'], 'MessageCompleted', {
       sessionId: fields.sessionId,
       runId: fields.runId,
       messageId: event.messageId,

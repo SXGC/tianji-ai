@@ -1,5 +1,11 @@
 import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
-import { type RuntimeEvent, createNodeId, createTaskId } from '@tianji/shared'
+import {
+  type DomainEvent,
+  type DomainEventEnvelope,
+  TianjiError,
+  createNodeId,
+  createTaskId,
+} from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { InProcessAgentRunner } from '../acp/in-process-runner.js'
@@ -8,7 +14,6 @@ import {
   SESSION_ID,
   createCommand,
   createFakeContext,
-  createNdjsonWriterStub,
   messageDeltaEvent,
   runCompletedEvent,
 } from './helpers/native-agent-test-utils.js'
@@ -42,18 +47,20 @@ beforeEach(async () => {
 // --- tests ---
 
 describe('TaskExecutor error recovery and resource cleanup', () => {
-  it('recovers to idle when connect fails with agent config not found', async () => {
+  it('recovers to idle when connect fails, emits TaskStarted then TaskFailed', async () => {
     vi.mocked(agentMock.loadAgentContextForName).mockRejectedValue(
       new Error('agent config not found')
     )
 
     const stateChanges: string[] = []
-    const { lines, writer } = createNdjsonWriterStub()
+    const emittedEvents: DomainEvent[] = []
     const baseContext = createFakeContext()
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      emitEvent: (ev) => emittedEvents.push(ev),
+      publishEnvelope: vi.fn(),
       createRunner: async (cmd) => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
@@ -62,7 +69,6 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
           executorFactory: stubExecutorFactory,
         })
       },
-      openEventStream: async () => writer,
     })
 
     const taskId = createTaskId('task-err-001')
@@ -77,16 +83,18 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     expect(executor.executionState).toBe('idle')
     expect(executor.currentTaskId).toBeNull()
 
-    // Events written: task.started + task.failed (with error message)
-    expect(lines).toHaveLength(2)
-    const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
-    expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
-    expect(parsed[1]).toMatchObject({
-      kind: 'lifecycle',
-      sequence: 2,
-      type: 'task.failed',
-      error: 'agent config not found',
-    })
+    // lifecycle events: TaskStarted + TaskFailed
+    const lifecycleTypes = emittedEvents.map((e) => e.type)
+    expect(lifecycleTypes).toContain('TaskStarted')
+    expect(lifecycleTypes).toContain('TaskFailed')
+    expect(lifecycleTypes).not.toContain('TaskCompleted')
+
+    // TaskFailed.error 携带原始错误消息
+    const failedEvent = emittedEvents.find(
+      (e): e is Extract<DomainEvent, { type: 'TaskFailed' }> => e.type === 'TaskFailed'
+    )
+    expect(failedEvent?.error).toBeInstanceOf(TianjiError)
+    expect(failedEvent?.error.message).toBe('agent config not found')
   })
 
   it('cleans up session when query fails mid-stream', async () => {
@@ -103,12 +111,15 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     })
 
     const stateChanges: string[] = []
-    const { lines, writer } = createNdjsonWriterStub()
+    const emittedEvents: DomainEvent[] = []
+    const publishedEnvelopes: DomainEventEnvelope[] = []
     const baseContext = createFakeContext()
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      emitEvent: (ev) => emittedEvents.push(ev),
+      publishEnvelope: (env) => publishedEnvelopes.push(env),
       createRunner: async (cmd) => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
@@ -117,7 +128,6 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
           executorFactory: stubExecutorFactory,
         })
       },
-      openEventStream: async () => writer,
     })
 
     const taskId = createTaskId('task-err-002')
@@ -125,18 +135,14 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
       'provider rate limited'
     )
 
-    // Events: task.started -> message.delta -> task.failed
-    expect(lines).toHaveLength(3)
-    const parsed = lines.map((l) => JSON.parse(l) as Record<string, unknown>)
-    expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
-    expect(parsed[1]).toMatchObject({ kind: 'agent', sequence: 2 })
-    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('message.delta')
-    expect(parsed[2]).toMatchObject({
-      kind: 'lifecycle',
-      sequence: 3,
-      type: 'task.failed',
-      error: 'provider rate limited',
-    })
+    // lifecycle: TaskStarted + TaskFailed
+    const lifecycleTypes = emittedEvents.map((e) => e.type)
+    expect(lifecycleTypes).toContain('TaskStarted')
+    expect(lifecycleTypes).toContain('TaskFailed')
+
+    // agent envelope published before throw
+    expect(publishedEnvelopes).toHaveLength(1)
+    expect(publishedEnvelopes[0]?.payload.type).toBe('MessageDelta')
 
     // session.abort() was called during runner.disconnect()
     expect(abortFn).toHaveBeenCalled()
@@ -167,15 +173,15 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     })
 
     const stateChanges: string[] = []
+    const emittedEvents: DomainEvent[] = []
+    const publishedEnvelopes: DomainEventEnvelope[] = []
     const baseContext = createFakeContext()
-
-    const failWriter = createNdjsonWriterStub()
-    const successWriter = createNdjsonWriterStub()
-    let callCount = 0
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      emitEvent: (ev) => emittedEvents.push(ev),
+      publishEnvelope: (env) => publishedEnvelopes.push(env),
       createRunner: async (cmd) => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
@@ -183,10 +189,6 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
           defaultGraph: stubDefaultGraph,
           executorFactory: stubExecutorFactory,
         })
-      },
-      openEventStream: async () => {
-        callCount += 1
-        return callCount === 1 ? failWriter.writer : successWriter.writer
       },
     })
 
@@ -200,13 +202,12 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     const taskId2 = createTaskId('task-err-003b')
     await executor.execute(createCommand(taskId2, 'will succeed'))
 
-    // Verify second run produced correct events
-    expect(successWriter.lines).toHaveLength(4)
-    const parsed = successWriter.lines.map((l) => JSON.parse(l) as Record<string, unknown>)
-    expect(parsed[0]).toMatchObject({ kind: 'lifecycle', sequence: 1, type: 'task.started' })
-    expect((parsed[1] as { event: RuntimeEvent }).event.type).toBe('message.delta')
-    expect((parsed[2] as { event: RuntimeEvent }).event.type).toBe('run.completed')
-    expect(parsed[3]).toMatchObject({ kind: 'lifecycle', sequence: 4, type: 'task.completed' })
+    // lifecycle events: TaskStarted + TaskFailed (first) + TaskStarted + TaskCompleted (second)
+    const lifecycleTypes = emittedEvents.map((e) => e.type)
+    expect(lifecycleTypes).toEqual(['TaskStarted', 'TaskFailed', 'TaskStarted', 'TaskCompleted'])
+
+    // agent envelopes: MessageDelta + RunCompleted (from second run only)
+    expect(publishedEnvelopes.map((e) => e.payload.type)).toEqual(['MessageDelta', 'RunCompleted'])
 
     // Executor is idle after both calls
     expect(executor.executionState).toBe('idle')

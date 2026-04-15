@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
+import type { DomainEventEnvelope } from '@tianji/shared'
+
 import {
   type ChatDoneSseMessage,
   type ChatErrorSseMessage,
@@ -14,6 +16,23 @@ import {
   encodeSseMessage,
 } from '../daemon-protocol.js'
 
+/** 构造最小合法的 DomainEventEnvelope 用于协议测试。 */
+function makeEnvelope(overrides: Partial<DomainEventEnvelope> = {}): DomainEventEnvelope {
+  return {
+    eventId: 'evt-test',
+    type: 'RunStarted',
+    occurredAt: '2026-04-14T00:00:00Z',
+    correlationId: 'corr-1',
+    causationId: null,
+    sequence: 1,
+    aggregateType: 'Run',
+    aggregateId: 'run-1',
+    source: { processKind: 'daemon', processId: 'proc-1' },
+    payload: {} as never,
+    ...overrides,
+  }
+}
+
 describe('daemon-protocol constants', () => {
   it('defines SSE event names as const strings', () => {
     expect(DAEMON_SSE_EVENT_NAME).toBe('chat.event')
@@ -23,18 +42,10 @@ describe('daemon-protocol constants', () => {
 })
 
 describe('encodeSseMessage', () => {
-  it('encodes a chat.event message with RuntimeEvent data', () => {
+  it('encodes a chat.event message with DomainEventEnvelope data', () => {
     const eventMessage: ChatEventSseMessage = {
       type: 'chat.event',
-      event: {
-        type: 'message.delta',
-        runId: 'run-123' as never,
-        messageId: 'msg-1',
-        sequence: 0,
-        channel: 'text',
-        payload: { content: 'hello' },
-        timestamp: 1000,
-      },
+      event: makeEnvelope({ eventId: 'evt-enc', type: 'RunStarted' }),
     }
 
     const result = encodeSseMessage({ event: DAEMON_SSE_EVENT_NAME, data: eventMessage })

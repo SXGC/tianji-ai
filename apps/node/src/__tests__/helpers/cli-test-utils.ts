@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { FakeListChatModel } from '@langchain/core/utils/testing'
 import { FileSnapshotStore, type SessionRuntime, createSessionRuntime } from '@tianji/runtime'
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent, DomainEventEnvelope } from '@tianji/shared'
 
 import type { AgentRunner } from '../../acp/index.js'
 import type { CliDependencies } from '../../commands/types.js'
@@ -229,18 +229,35 @@ export function createDepsWithoutLocale(overrides: Partial<CliDependencies> = {}
   }
 }
 
+/** 将裸 DomainEvent 包装为最小化 DomainEventEnvelope，专用于测试 helper。 */
+function wrapEvent(event: DomainEvent): DomainEventEnvelope {
+  const runId = 'runId' in event ? String(event.runId) : 'test'
+  return {
+    eventId: `test_${event.type}`,
+    type: event.type,
+    occurredAt: new Date().toISOString(),
+    correlationId: runId,
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: runId,
+    source: { processKind: 'node', processId: 'test' },
+    payload: event,
+  }
+}
+
 export function createFakeAgentRunner(
-  events: readonly RuntimeEvent[],
+  events: readonly DomainEvent[],
   onChat?: (prompt: string) => void | Promise<void>
 ): AgentRunner {
   return {
     agentId: 'default',
     connect: async () => undefined,
     disconnect: async () => undefined,
-    async *query(prompt: string): AsyncIterable<RuntimeEvent> {
+    async *query(prompt: string): AsyncIterable<DomainEventEnvelope> {
       await onChat?.(prompt)
       for (const event of events) {
-        yield event
+        yield wrapEvent(event)
       }
     },
   } as AgentRunner

@@ -17,9 +17,9 @@ import { FakeListChatModel } from '@langchain/core/utils/testing'
 import {
   type AggregatedMessageDeltaState,
   type AppMessage,
+  type DomainEvent,
   type RunId,
   type RunSnapshot,
-  type RuntimeEvent,
   type SessionId,
   applyMessageDelta,
 } from '@tianji/shared'
@@ -106,8 +106,8 @@ export function createAbortError(message: string): Error {
 export async function collectRuntimeEvents(
   runId: RunId,
   runtime: RuntimeUnderTest
-): Promise<RuntimeEvent[]> {
-  const events: RuntimeEvent[] = []
+): Promise<DomainEvent[]> {
+  const events: DomainEvent[] = []
 
   for await (const event of runtime.streamEvents(runId)) {
     events.push(event)
@@ -119,8 +119,8 @@ export async function collectRuntimeEvents(
 export async function collectRuntimeOutcome(
   runId: RunId,
   runtime: RuntimeUnderTest
-): Promise<{ events: RuntimeEvent[]; error?: Error }> {
-  const events: RuntimeEvent[] = []
+): Promise<{ events: DomainEvent[]; error?: Error }> {
+  const events: DomainEvent[] = []
 
   try {
     for await (const event of runtime.streamEvents(runId)) {
@@ -140,16 +140,16 @@ export async function collectRuntimeEventsWithAggregation(
   runId: RunId,
   runtime: RuntimeUnderTest
 ): Promise<{
-  events: RuntimeEvent[]
+  events: DomainEvent[]
   aggregatedAssistantMessage: AggregatedMessageDeltaState | undefined
 }> {
-  const events: RuntimeEvent[] = []
+  const events: DomainEvent[] = []
   let aggregatedAssistantMessage: AggregatedMessageDeltaState | undefined
 
   for await (const event of runtime.streamEvents(runId)) {
     events.push(event)
 
-    if (event.type !== 'message.delta') {
+    if (event.type !== 'MessageDelta') {
       continue
     }
 
@@ -294,8 +294,8 @@ export async function driveMultiTurn(
   sessionId: SessionId,
   prompts: Array<{ id: string; text: string }>,
   options?: { systemPrompt?: string }
-): Promise<Array<{ runId: RunId; events: RuntimeEvent[] }>> {
-  const results: Array<{ runId: RunId; events: RuntimeEvent[] }> = []
+): Promise<Array<{ runId: RunId; events: DomainEvent[] }>> {
+  const results: Array<{ runId: RunId; events: DomainEvent[] }> = []
 
   for (const prompt of prompts) {
     const message = createUserMessage(prompt.id, prompt.text)
@@ -322,9 +322,9 @@ export async function driveMultiTurn(
 export async function waitForEvent(
   runtime: SessionRuntime,
   runId: RunId,
-  eventType: RuntimeEvent['type'],
+  eventType: DomainEvent['type'],
   timeoutMs = 5_000
-): Promise<RuntimeEvent> {
+): Promise<DomainEvent> {
   const deadline = Date.now() + timeoutMs
 
   for await (const event of runtime.streamEvents(runId)) {
@@ -341,22 +341,22 @@ export async function waitForEvent(
 }
 
 /**
- * 断言事件列表中包含 run.completed 且不含 run.failed。
+ * 断言事件列表中包含 RunCompleted 且不含 RunFailed。
  */
-export function assertRunCompleted(events: RuntimeEvent[]): void {
+export function assertRunCompleted(events: DomainEvent[]): void {
   const types = events.map((e) => e.type)
-  expect(types).toContain('run.completed')
-  expect(types).not.toContain('run.failed')
+  expect(types).toContain('RunCompleted')
+  expect(types).not.toContain('RunFailed')
 }
 
 /**
- * 断言事件列表中包含 run.failed，可选匹配错误消息模式。
+ * 断言事件列表中包含 RunFailed，可选匹配错误消息模式。
  */
-export function assertRunFailed(events: RuntimeEvent[], errorPattern?: RegExp): void {
-  const failedEvent = events.find((e) => e.type === 'run.failed')
+export function assertRunFailed(events: DomainEvent[], errorPattern?: RegExp): void {
+  const failedEvent = events.find((e) => e.type === 'RunFailed')
   expect(failedEvent).toBeDefined()
 
-  if (errorPattern !== undefined && failedEvent?.type === 'run.failed') {
+  if (errorPattern !== undefined && failedEvent?.type === 'RunFailed') {
     expect(failedEvent.error.message).toMatch(errorPattern)
   }
 }
@@ -364,15 +364,13 @@ export function assertRunFailed(events: RuntimeEvent[], errorPattern?: RegExp): 
 /**
  * 断言指定工具被调用且成功完成。
  */
-export function assertToolCalled(events: RuntimeEvent[], toolName: string): void {
-  const started = events.find(
-    (e) => e.type === 'tool.started' && e.invocation.toolName === toolName
-  )
+export function assertToolCalled(events: DomainEvent[], toolName: string): void {
+  const started = events.find((e) => e.type === 'ToolStarted' && e.invocation.toolName === toolName)
   expect(started).toBeDefined()
 
-  if (started?.type === 'tool.started') {
+  if (started?.type === 'ToolStarted') {
     const completed = events.find(
-      (e) => e.type === 'tool.completed' && e.toolCallId === started.toolCallId
+      (e) => e.type === 'ToolCompleted' && e.toolCallId === started.toolCallId
     )
     expect(completed).toBeDefined()
   }
@@ -381,7 +379,7 @@ export function assertToolCalled(events: RuntimeEvent[], toolName: string): void
 /**
  * 断言指定工具执行失败。
  */
-export function assertToolFailed(events: RuntimeEvent[], toolName: string): void {
-  const failed = events.find((e) => e.type === 'tool.failed' && e.invocation.toolName === toolName)
+export function assertToolFailed(events: DomainEvent[], toolName: string): void {
+  const failed = events.find((e) => e.type === 'ToolFailed' && e.invocation.toolName === toolName)
   expect(failed).toBeDefined()
 }

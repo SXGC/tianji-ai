@@ -4,7 +4,7 @@
  * 业务职责：
  * - 将 SessionRuntime 的消息、工具、取消与事件协议转换为 deepagents 所需格式。
  * - 统一处理流式文本、工具调用观测、checkpoint 状态回读与超时控制。
- * - 保持 @tianji/shared 定义的 RuntimeEvent / ToolResult / 错误语义稳定。
+ * - 保持 @tianji/shared 定义的 DomainEvent / ToolResult / 错误语义稳定。
  *
  * 对外触点：
  * - 由 ../runtime.ts 在每次 runTurn/resumeRun 时调用 executeDeepagentsRun。
@@ -17,12 +17,12 @@ import { Command, type StateSnapshot } from '@langchain/langgraph'
 import {
   type AppMessage,
   CancelledError,
+  type DomainEvent,
   type ExecutionPolicy,
   type MessagePart,
   type MessageRole,
   type RunId,
   type RunSnapshot,
-  type RuntimeEvent,
   type SessionId,
   TianjiError,
   TimeoutError,
@@ -70,7 +70,7 @@ interface ExecuteDeepagentsRunOptions {
   }
   readonly llmRawDir?: string
   readonly logger?: ObserverLogger
-  readonly emitEvent: (event: RuntimeEvent) => void
+  readonly emitEvent: (event: DomainEvent) => void
 }
 
 type DeepAgentFactory = (params?: Record<string, unknown>) => DeepagentsAgentInstance
@@ -146,7 +146,7 @@ function processChatModelStreamEvent(
   if (text.length > 0) {
     state.currentText += text
     options.emitEvent({
-      type: 'message.delta',
+      type: 'MessageDelta',
       runId: options.runId,
       messageId: state.messageId,
       sequence: nextSequence(options.sequence),
@@ -160,7 +160,7 @@ function processChatModelStreamEvent(
   if (thinking.length > 0) {
     state.currentThinking += thinking
     options.emitEvent({
-      type: 'message.delta',
+      type: 'MessageDelta',
       runId: options.runId,
       messageId: state.messageId,
       sequence: nextSequence(options.sequence),
@@ -291,7 +291,7 @@ function processToolStartEvent(
   }
   state.builtinToolInvocations.set(toolCallId, invocation)
   options.emitEvent({
-    type: 'tool.started',
+    type: 'ToolStarted',
     runId: options.runId,
     toolCallId,
     invocation,
@@ -334,7 +334,7 @@ function processToolEndEvent(
   })
 
   options.emitEvent({
-    type: 'tool.completed',
+    type: 'ToolCompleted',
     runId: options.runId,
     toolCallId,
     invocation,
@@ -380,7 +380,7 @@ function dispatchStreamEvent(
 }
 
 /**
- * 执行一次 deepagents 运行并将其完整映射为 RuntimeEvent / RunResult。
+ * 执行一次 deepagents 运行并将其完整映射为 DomainEvent / RunResult。
  *
  * 处理流程：
  * 1. 校验运行配置并初始化 assistant 消息占位。
@@ -421,7 +421,7 @@ export async function executeDeepagentsRun(
     llmRecorder === undefined ? undefined : createRecordingMiddleware(llmRecorder)
 
   options.emitEvent({
-    type: 'message.started',
+    type: 'MessageStarted',
     runId: options.runId,
     messageId,
     message: initialMessage,
@@ -496,7 +496,7 @@ export async function executeDeepagentsRun(
 
   if (lastAssistantMessage !== undefined) {
     options.emitEvent({
-      type: 'message.completed',
+      type: 'MessageCompleted',
       runId: options.runId,
       messageId,
       message: lastAssistantMessage,
@@ -667,7 +667,7 @@ async function executeDeepagentsToolCall(
   const timestamp = Date.now()
 
   options.emitEvent({
-    type: 'tool.started',
+    type: 'ToolStarted',
     runId: options.runId,
     toolCallId,
     invocation,
@@ -720,7 +720,7 @@ async function executeDeepagentsToolCall(
     })
 
     options.emitEvent({
-      type: 'tool.completed',
+      type: 'ToolCompleted',
       runId: options.runId,
       toolCallId,
       invocation,
@@ -768,7 +768,7 @@ async function executeDeepagentsToolCall(
     })
 
     options.emitEvent({
-      type: 'tool.failed',
+      type: 'ToolFailed',
       runId: options.runId,
       toolCallId,
       invocation,

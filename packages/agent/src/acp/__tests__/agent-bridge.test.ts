@@ -29,7 +29,7 @@ function createMockConnection(): AgentSideConnection {
 function createMockSessionFactory() {
   const events = [
     {
-      type: 'message.delta' as const,
+      type: 'MessageDelta' as const,
       runId: createRunId('run-1'),
       messageId: 'msg-1',
       sequence: 0,
@@ -38,7 +38,7 @@ function createMockSessionFactory() {
       timestamp: Date.now(),
     },
     {
-      type: 'run.completed' as const,
+      type: 'RunCompleted' as const,
       runId: createRunId('run-1'),
       sessionId: createSessionId('s'),
       triggerType: 'new' as const,
@@ -49,6 +49,7 @@ function createMockSessionFactory() {
   return vi.fn().mockReturnValue({
     sessionId: createSessionId('session-test'),
     abort: vi.fn(),
+    close: vi.fn(),
     async *queryWithGraph(_graph: OrchestrationGraph) {
       for (const event of events) {
         yield event

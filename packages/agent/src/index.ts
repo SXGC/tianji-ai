@@ -27,8 +27,10 @@ export {
 export {
   createAgentRuntime,
   createAgentSession,
+  resumeAgentSession,
   type AgentRuntimeOptions,
   type AgentSession,
+  type ResumeAgentSessionOptions,
 } from './session.js'
 export { TianjiAcpAgent, mapRuntimeEventToSessionUpdate } from './acp/index.js'
 export { runAcpAgent } from './acp-entry.js'

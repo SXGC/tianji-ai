@@ -82,10 +82,14 @@ describe('foundation wave 6 verification', () => {
     const observerDependencies = Object.keys(observerPkg.dependencies ?? {})
     const runtimeDependencies = Object.keys(runtimePkg.dependencies ?? {})
 
+    // shared 是根节点，不能依赖任何内部包
     expect(sharedDependencies.filter((dependency) => dependency.startsWith('@tianji/'))).toEqual([])
-    expect(observerDependencies.filter((dependency) => dependency.startsWith('@tianji/'))).toEqual(
-      []
+    // observer 只能依赖 shared（Stage 06 引入 DomainEventEnvelope），不能依赖 runtime
+    const observerInternalDeps = observerDependencies.filter((dependency) =>
+      dependency.startsWith('@tianji/')
     )
+    expect(observerInternalDeps).not.toContain('@tianji/runtime')
+    expect(observerInternalDeps.every((dep) => dep === '@tianji/shared')).toBe(true)
     expect(runtimeDependencies).toContain('@langchain/core')
     expect(runtimeDependencies).toContain('deepagents')
     expect(runtimeDependencies).toContain('@tianji/shared')

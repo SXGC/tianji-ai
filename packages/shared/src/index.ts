@@ -76,15 +76,16 @@ export * from './artifact.js'
 export * from './delta-aggregator.js'
 export * from './delta.js'
 export * from './errors.js'
-export * from './events.js'
+export * from './events/index.js'
+export * from './bus/index.js'
 export * from './identifiers.js'
 export * from './message.js'
 export * from './policy.js'
 export * from './snapshot.js'
 export * from './tool.js'
-export * from './task-event.js'
 export * from './command.js'
 export * from './node-types.js'
+export * from './storage/event-log.js'
 
 export type { RunSnapshot, RunStatus, RunTriggerType } from './snapshot.js'
 
@@ -96,3 +97,6 @@ export {
   type RetryOptions,
   DEFAULT_RETRY_OPTIONS,
 } from './utils.js'
+
+// Batch utilities
+export { BatchCommitter, type BatchCommitterOptions } from './util/batch-committer.js'

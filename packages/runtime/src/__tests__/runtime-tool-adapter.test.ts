@@ -11,7 +11,7 @@
  */
 import { AIMessage } from '@langchain/core/messages'
 import { fakeModel } from '@langchain/core/testing'
-import { DEFAULT_EXECUTION_POLICY, type RuntimeEvent, createSessionId } from '@tianji/shared'
+import { DEFAULT_EXECUTION_POLICY, type DomainEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { InMemorySnapshotStore } from '../snapshot-store.js'
@@ -77,12 +77,12 @@ describe('deepagents tool adapter', () => {
     })
     const events = await collectRuntimeEvents(runId, runtime)
     const toolStartedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'tool.started' }> =>
-        event.type === 'tool.started'
+      (event): event is Extract<DomainEvent, { type: 'ToolStarted' }> =>
+        event.type === 'ToolStarted'
     )
     const toolCompletedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'tool.completed' }> =>
-        event.type === 'tool.completed'
+      (event): event is Extract<DomainEvent, { type: 'ToolCompleted' }> =>
+        event.type === 'ToolCompleted'
     )
     const sessionSnapshot = await runtime.getSessionSnapshot(session.sessionId)
 
@@ -148,8 +148,7 @@ describe('deepagents tool adapter', () => {
     })
     const outcome = await collectRuntimeOutcome(runId, runtime)
     const toolFailedEvent = outcome.events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'tool.failed' }> =>
-        event.type === 'tool.failed'
+      (event): event is Extract<DomainEvent, { type: 'ToolFailed' }> => event.type === 'ToolFailed'
     )
     const failedRun = await waitForRunStatus(runtime, runId, 'failed')
 
@@ -166,7 +165,7 @@ describe('deepagents tool adapter', () => {
         message: 'tool exploded',
       },
     })
-    expect(outcome.events.some((event) => event.type === 'run.failed')).toBe(true)
+    expect(outcome.events.some((event) => event.type === 'RunFailed')).toBe(true)
     expect(failedRun).toMatchObject({
       status: 'failed',
       pendingOperations: [
@@ -240,8 +239,7 @@ describe('deepagents tool adapter', () => {
     })
     const outcome = await collectRuntimeOutcome(runId, runtime)
     const toolFailedEvent = outcome.events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'tool.failed' }> =>
-        event.type === 'tool.failed'
+      (event): event is Extract<DomainEvent, { type: 'ToolFailed' }> => event.type === 'ToolFailed'
     )
     const failedRun = await waitForRunStatus(runtime, runId, 'failed')
     const observedAbortSignal = await toolSignalSeen.promise
@@ -254,7 +252,7 @@ describe('deepagents tool adapter', () => {
         code: 'TOOL_TIMEOUT',
       },
     })
-    expect(outcome.events.some((event) => event.type === 'run.failed')).toBe(true)
+    expect(outcome.events.some((event) => event.type === 'RunFailed')).toBe(true)
     expect(failedRun).toMatchObject({
       status: 'failed',
       pendingOperations: [

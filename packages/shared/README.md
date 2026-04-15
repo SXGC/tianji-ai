@@ -66,6 +66,34 @@ void soulPath
 
 其中 `providers` 负责声明连接信息，`agents` 负责声明“用哪个 provider/model 运行哪个 agent”，二者解耦，便于多个 agent 复用同一 provider 配置。
 
+## 事件系统
+
+tianji-ai 使用 Core / Integration / Protocol 三层事件架构：
+- Core：聚合根发射纯 DomainEvent（PascalCase，如 `RunStarted`）。
+- Integration：统一 `DomainEventEnvelope` 信封，`correlationId + causationId + sequence` 三件套。
+- Protocol：AG-UI / ACP / Daemon SSE / OTel / Observer 都是 EventBus 订阅者。
+
+旧 `RuntimeEvent` / `TaskEvent` 已移除。详见 `docs/superpowers/specs/2026-04-14-event-bus-design.md`。
+
+### EventBus 优雅关闭
+
+`EventBus` 提供 `close(): Promise<void>` 方法，用于进程退出前排空所有在途 envelope：
+
+1. 调用后标记 bus 为 closed，后续 `publish()` 调用直接抛出 `Error('EventBus is closed')`。
+2. 等待所有已入队的 envelope 被各自订阅者 handler 处理完毕。
+3. 取消并清除所有订阅者。
+4. 幂等：重复调用返回同一个 Promise。
+
+进程 shutdown 顺序（controlplane / daemon）：
+
+```
+monitor.stop()
+→ await bus.close()        // 排空在途 envelope
+→ await eventLogHandle.close() / forwarderDispose()
+→ server.close() / server.shutdown()
+→ process.exit()
+```
+
 ## 开发命令
 
 在仓库根目录执行：

@@ -280,7 +280,7 @@ describe('ControlPlaneClient', () => {
     it('throws when not authenticated', async () => {
       const unauthClient = new ControlPlaneClient({ baseUrl, nodeId })
 
-      await expect(unauthClient.openEventStream('task-1')).rejects.toThrow(
+      await expect(unauthClient.openEventStream()).rejects.toThrow(
         /Not authenticated\. Call register\(\) first\./
       )
     })
@@ -289,10 +289,10 @@ describe('ControlPlaneClient', () => {
       client.setAccessToken('stream-token')
       const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200))
 
-      await client.openEventStream('task-42')
+      await client.openEventStream()
 
       expect(spy).toHaveBeenCalledWith(
-        `${baseUrl}/api/tasks/task-42/events`,
+        `${baseUrl}/api/events`,
         expect.objectContaining({
           method: 'POST',
           headers: expect.objectContaining({
@@ -308,7 +308,7 @@ describe('ControlPlaneClient', () => {
       client.setAccessToken('stream-token')
       vi.spyOn(globalThis, 'fetch').mockResolvedValue(mockResponse(200))
 
-      const writer = await client.openEventStream('task-1')
+      const writer = await client.openEventStream()
 
       expect(typeof writer.write).toBe('function')
       expect(typeof writer.writeKeepalive).toBe('function')

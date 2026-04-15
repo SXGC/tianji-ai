@@ -1,5 +1,5 @@
 // packages/agent/src/orchestration/__tests__/acp-executor.test.ts
-import type { RunId, RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent, RunId } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import { type AcpRunnerLike, createAcpExecutorFactory } from '../executors/acp-executor.js'
@@ -28,20 +28,19 @@ function makeFakeRunner(responses: string[]): AcpRunnerLike {
   let callIndex = 0
   return {
     connect: vi.fn(async () => {}),
-    async *query(): AsyncIterable<RuntimeEvent> {
+    async *query(): AsyncIterable<DomainEvent> {
       const text = responses[callIndex] ?? ''
       callIndex += 1
       yield {
-        type: 'run.started',
+        type: 'RunStarted',
         runId: 'inner_run' as RunId,
         sessionId: 'inner_session' as never,
         triggerType: 'new',
         timestamp: Date.now(),
       }
       yield {
-        type: 'message.completed',
+        type: 'MessageCompleted',
         runId: 'inner_run' as RunId,
-        sessionId: 'inner_session' as never,
         messageId: 'msg1',
         message: {
           id: 'msg1',
@@ -50,9 +49,9 @@ function makeFakeRunner(responses: string[]): AcpRunnerLike {
           createdAt: Date.now(),
         },
         timestamp: Date.now(),
-      } as RuntimeEvent
+      } as DomainEvent
       yield {
-        type: 'run.completed',
+        type: 'RunCompleted',
         runId: 'inner_run' as RunId,
         sessionId: 'inner_session' as never,
         triggerType: 'new',
@@ -64,8 +63,8 @@ function makeFakeRunner(responses: string[]): AcpRunnerLike {
 }
 
 describe('createAcpExecutorFactory', () => {
-  it('透传内部 RuntimeEvent 到 emitRuntimeEvent 回调', async () => {
-    const runtimeEvents: RuntimeEvent[] = []
+  it('透传内部 DomainEvent 到 emitRuntimeEvent 回调', async () => {
+    const runtimeEvents: DomainEvent[] = []
     const runner = makeFakeRunner(['hello'])
     const factory = createAcpExecutorFactory({
       runnerProvider: () => runner,
@@ -78,9 +77,9 @@ describe('createAcpExecutorFactory', () => {
     await action({ q: 'test' }, {} as never)
 
     const types = runtimeEvents.map((e) => e.type)
-    expect(types).toContain('run.started')
-    expect(types).toContain('message.completed')
-    expect(types).toContain('run.completed')
+    expect(types).toContain('RunStarted')
+    expect(types).toContain('MessageCompleted')
+    expect(types).toContain('RunCompleted')
   })
 
   it('emitRuntimeEvent 未提供时不报错', async () => {

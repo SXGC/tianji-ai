@@ -2,7 +2,7 @@ import { type IncomingMessage, type ServerResponse, createServer } from 'node:ht
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEventEnvelope } from '@tianji/shared'
 
 import { DaemonClient, type DaemonClientOptions } from '../daemon-client.js'
 import {
@@ -12,6 +12,23 @@ import {
   encodeSseMessage,
 } from '../daemon-protocol.js'
 import type { ChatErrorSseMessage, ChatSseMessage } from '../daemon-protocol.js'
+
+/** 构造最小合法的 DomainEventEnvelope 用于客户端测试。 */
+function makeEnvelope(overrides: Partial<DomainEventEnvelope> = {}): DomainEventEnvelope {
+  return {
+    eventId: 'evt-1',
+    type: 'RunStarted',
+    occurredAt: '2026-04-14T00:00:00Z',
+    correlationId: 'corr-1',
+    causationId: null,
+    sequence: 1,
+    aggregateType: 'Run',
+    aggregateId: 'run-1',
+    source: { processKind: 'daemon', processId: 'proc-1' },
+    payload: {} as never,
+    ...overrides,
+  }
+}
 
 function writeJson(res: ServerResponse, data: unknown): void {
   res.writeHead(200, { 'content-type': 'application/json' })
@@ -26,7 +43,7 @@ function writeSseHeaders(res: ServerResponse): void {
   })
 }
 
-function sseEvent(event: RuntimeEvent): string {
+function sseEvent(event: DomainEventEnvelope): string {
   const msg: ChatSseMessage = { type: 'chat.event', event }
   return encodeSseMessage({ event: DAEMON_SSE_EVENT_NAME, data: msg })
 }
@@ -99,15 +116,15 @@ describe('DaemonClient', () => {
     expect(result).toEqual({ ok: true })
   })
 
-  it('sendChat yields runtime events from SSE stream', async () => {
-    const event1 = { type: 'message.delta', content: 'hello' } as unknown as RuntimeEvent
-    const event2 = { type: 'message.delta', content: ' world' } as unknown as RuntimeEvent
+  it('sendChat yields DomainEventEnvelope objects from SSE stream', async () => {
+    const env1 = makeEnvelope({ eventId: 'evt-1', type: 'RunStarted' })
+    const env2 = makeEnvelope({ eventId: 'evt-2', type: 'RunCompleted' })
 
     const { client, close } = await setupServer((req, res) => {
       if (req.method === 'POST' && req.url === '/chat') {
         writeSseHeaders(res)
-        res.write(sseEvent(event1))
-        res.write(sseEvent(event2))
+        res.write(sseEvent(env1))
+        res.write(sseEvent(env2))
         res.write(sseDone())
         res.end()
       } else {
@@ -117,12 +134,12 @@ describe('DaemonClient', () => {
     })
     closeServer = close
 
-    const collected: RuntimeEvent[] = []
-    for await (const event of client.sendChat('hi')) {
-      collected.push(event)
+    const collected: DomainEventEnvelope[] = []
+    for await (const env of client.sendChat('hi')) {
+      collected.push(env)
     }
 
-    expect(collected).toEqual([event1, event2])
+    expect(collected).toEqual([env1, env2])
   })
 
   it('sendChat throws on BUSY error from SSE', async () => {

@@ -1,6 +1,6 @@
 import { type IncomingMessage, request } from 'node:http'
 
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEventEnvelope } from '@tianji/shared'
 
 import type {
   ChatErrorSseMessage,
@@ -86,13 +86,13 @@ function parseSseLine(line: string, state: { event: string; data: string }): Raw
 }
 
 /**
- * Processes a list of SSE lines, yielding RuntimeEvents.
+ * Processes a list of SSE lines, yielding DomainEventEnvelopes.
  * Returns true if the stream is done and the caller should stop.
  */
 function* drainSseLines(
   lines: string[],
   sseState: { event: string; data: string }
-): Generator<RuntimeEvent, boolean> {
+): Generator<DomainEventEnvelope, boolean> {
   for (const line of lines) {
     const message = parseSseLine(line, sseState)
     if (!message) continue
@@ -103,8 +103,8 @@ function* drainSseLines(
   return false
 }
 
-/** Handles a parsed SSE message: yields events, throws on errors, returns on done. */
-function handleSseMessage(msg: RawSseMessage): IteratorResult<RuntimeEvent> {
+/** Handles a parsed SSE message: yields envelopes, throws on errors, returns on done. */
+function handleSseMessage(msg: RawSseMessage): IteratorResult<DomainEventEnvelope> {
   const parsed = JSON.parse(msg.data) as ChatSseMessage
 
   if (parsed.type === 'chat.error') {
@@ -168,10 +168,10 @@ export class DaemonClient {
   }
 
   /**
-   * Sends a POST /chat request and yields {@link RuntimeEvent} objects
+   * Sends a POST /chat request and yields {@link DomainEventEnvelope} objects
    * from the SSE stream. Stops on `chat.done`, throws on `chat.error`.
    */
-  async *sendChat(prompt: string): AsyncIterable<RuntimeEvent> {
+  async *sendChat(prompt: string): AsyncIterable<DomainEventEnvelope> {
     const body = JSON.stringify({ prompt })
     const res = await httpRequest(
       { host: this.#host, port: this.#port, method: 'POST', path: '/chat' },

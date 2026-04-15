@@ -97,12 +97,21 @@ CREATE TABLE IF NOT EXISTS task_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_task_sessions_session ON task_sessions(session_id, attached_at DESC);
 
-CREATE TABLE IF NOT EXISTS task_events (
-  task_id TEXT NOT NULL REFERENCES tasks(task_id),
-  sequence INTEGER NOT NULL,
-  kind TEXT NOT NULL CHECK(kind IN ('lifecycle', 'agent')),
-  payload TEXT NOT NULL,
-  received_at INTEGER NOT NULL,
-  PRIMARY KEY (task_id, sequence)
+CREATE TABLE IF NOT EXISTS event_log (
+  event_id       TEXT PRIMARY KEY,
+  type           TEXT NOT NULL,
+  occurred_at    TEXT NOT NULL,
+  correlation_id TEXT NOT NULL,
+  causation_id   TEXT,
+  sequence       INTEGER NOT NULL,
+  aggregate_type TEXT NOT NULL,
+  aggregate_id   TEXT NOT NULL,
+  source_json    TEXT NOT NULL,
+  payload_json   TEXT NOT NULL,
+  UNIQUE(aggregate_type, aggregate_id, sequence)
 );
+
+CREATE INDEX IF NOT EXISTS idx_event_log_correlation ON event_log(correlation_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_event_log_aggregate ON event_log(aggregate_type, aggregate_id, sequence);
+CREATE INDEX IF NOT EXISTS idx_event_log_occurred_at ON event_log(occurred_at);
 `

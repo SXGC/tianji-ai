@@ -11,8 +11,10 @@ export {
   createObserverLogger,
   createMemorySink,
   createStdoutSink,
+  formatEnvelopeLog,
   getDefaultObserverSensitiveKeys,
   sanitizeObserverLogData,
+  subscribeEventBusLogger,
 } from './logger/index.js'
 
 export type { CreateJsonlFileSinkOptions } from './logger/index.js'
@@ -31,6 +33,7 @@ export type {
 
 export {
   getTracer,
+  handleSpanEvent,
   initTracing,
   isTracingEnabled,
   shutdownTracing,
@@ -38,4 +41,5 @@ export {
   startRunSpan,
   startSessionSpan,
   startToolSpan,
+  subscribeOtelAdapter,
 } from './tracing/index.js'

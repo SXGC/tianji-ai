@@ -47,15 +47,15 @@ describe('deepagents runtime bootstrap', () => {
     const completedRun = await waitForRunStatus(runtime, runId, 'completed')
     const sessionSnapshot = await runtime.getSessionSnapshot(session.sessionId)
     const completedMessage = events.find(
-      (event): event is Extract<(typeof events)[number], { type: 'message.completed' }> =>
-        event.type === 'message.completed'
+      (event): event is Extract<(typeof events)[number], { type: 'MessageCompleted' }> =>
+        event.type === 'MessageCompleted'
     )
 
-    expect(events[0]?.type).toBe('run.started')
-    expect(events[1]?.type).toBe('message.started')
-    expect(events.some((event) => event.type === 'message.delta')).toBe(true)
-    expect(events.some((event) => event.type === 'message.completed')).toBe(true)
-    expect(events.at(-1)?.type).toBe('run.completed')
+    expect(events[0]?.type).toBe('RunStarted')
+    expect(events[1]?.type).toBe('MessageStarted')
+    expect(events.some((event) => event.type === 'MessageDelta')).toBe(true)
+    expect(events.some((event) => event.type === 'MessageCompleted')).toBe(true)
+    expect(events.at(-1)?.type).toBe('RunCompleted')
     expect(readTextContent(completedMessage?.message)).toBe('hello from deepagents')
     expect(readTextContent(sessionSnapshot?.messages.at(-1))).toBe('hello from deepagents')
     expect(readRunRuntimeMetadata(completedRun.metadata)).toEqual({

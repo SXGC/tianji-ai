@@ -7,7 +7,7 @@ import {
   createAgentSession,
   loadAgentContextForName,
 } from '@tianji/agent'
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent, DomainEventEnvelope } from '@tianji/shared'
 
 /**
  * Runs native agents inside the daemon process to avoid ACP subprocess overhead.
@@ -42,11 +42,11 @@ export class InProcessAgentRunner {
   }
 
   /**
-   * 通过 queryWithGraph 向 session 发送 prompt，产出 RuntimeEvent 流。
+   * 通过 queryWithGraph 向 session 发送 prompt，产出 DomainEventEnvelope 流。
    *
    * @param prompt - 用户输入的文本
    */
-  async *query(prompt: string): AsyncIterable<RuntimeEvent> {
+  async *query(prompt: string): AsyncIterable<DomainEventEnvelope> {
     if (this.#session === null) {
       throw new Error('Not connected. Call connect() first.')
     }
@@ -63,14 +63,14 @@ export class InProcessAgentRunner {
         return
       }
 
-      if (event.type === 'run.completed') {
+      if (event.type === 'RunCompleted') {
         if (completedSeen) {
           continue
         }
         completedSeen = true
       }
 
-      yield event
+      yield wrapInProcessEvent(event)
     }
   }
 
@@ -78,5 +78,26 @@ export class InProcessAgentRunner {
     this.#session?.abort()
     this.#session = null
     this.#activeGeneration += 1
+  }
+}
+
+/**
+ * 将 DomainEvent 包装为 Run 聚合的 DomainEventEnvelope。
+ * source.processKind 固定为 'node'，表示 in-process runner。
+ */
+function wrapInProcessEvent(event: DomainEvent): DomainEventEnvelope {
+  const now = Date.now()
+  const runId = 'runId' in event ? String(event.runId) : ''
+  return {
+    eventId: `inproc_${event.type}_${now}`,
+    type: event.type,
+    occurredAt: new Date(now).toISOString(),
+    correlationId: runId,
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: runId,
+    source: { processKind: 'node', processId: String(process.pid) },
+    payload: event,
   }
 }

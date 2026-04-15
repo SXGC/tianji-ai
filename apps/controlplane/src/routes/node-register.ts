@@ -1,5 +1,10 @@
 import type { ObserverLogger } from '@tianji/observer'
-import type { AgentInfo, NodeRegisterRequest, NodeRegisterResponse } from '@tianji/shared'
+import type {
+  AgentInfo,
+  DomainEvent,
+  NodeRegisterRequest,
+  NodeRegisterResponse,
+} from '@tianji/shared'
 import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from '../db/index.js'
@@ -12,8 +17,13 @@ const SCOPE_REGISTER = ['controlplane', 'register'] as const
  *
  * @param db - controlplane 数据库实例
  * @param logger - 结构化日志实例
+ * @param emitEvent - 可选：DomainEvent 发射回调，用于发射 Node 生命周期事件
  */
-export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogger): Hono {
+export function createNodeRegisterRoute(
+  db: ControlPlaneDb,
+  logger: ObserverLogger,
+  emitEvent?: (ev: DomainEvent) => void | Promise<void>
+): Hono {
   const app = new Hono()
 
   app.post('/api/nodes/register', async (c) => {
@@ -64,6 +74,12 @@ export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogg
         pid: body.pid ?? null,
         agentCount: body.agentList.length,
       })
+      await emitEvent?.({
+        type: 'NodeRegistered',
+        nodeId: body.nodeId,
+        version: body.version,
+        timestamp: now,
+      })
     } else {
       db.raw
         .prepare(
@@ -96,6 +112,12 @@ export function createNodeRegisterRoute(db: ControlPlaneDb, logger: ObserverLogg
         platform: body.platform,
         pid: body.pid ?? null,
         agentCount: body.agentList.length,
+      })
+      await emitEvent?.({
+        type: 'NodeReRegistered',
+        nodeId: body.nodeId,
+        version: body.version,
+        timestamp: now,
       })
     }
 

@@ -8,7 +8,7 @@
  * @module delta
  */
 
-import type { MessageDeltaChannel } from './events.js'
+import type { MessageDeltaChannel } from './events/run.js'
 import type { RunId } from './identifiers.js'
 
 export type DeltaOp = 'append' | 'replace' | 'complete'

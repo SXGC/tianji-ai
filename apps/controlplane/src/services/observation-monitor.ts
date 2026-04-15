@@ -1,9 +1,27 @@
 import type { ObserverLogger } from '@tianji/observer'
+import type { DomainEvent } from '@tianji/shared'
 
 import type { ControlPlaneDb } from '../db/index.js'
 import { HEARTBEAT_TIMEOUT_MS } from '../routes/node-heartbeat.js'
 
 const SCOPE_MONITOR = ['controlplane', 'monitor'] as const
+
+/** 同步上下文中发射事件并捕获错误，防止 fire-and-forget 丢失异常。 */
+function emitSafe(
+  emitEvent: ((ev: DomainEvent) => void | Promise<void>) | undefined,
+  event: DomainEvent,
+  logger: ObserverLogger
+): void {
+  const result = emitEvent?.(event)
+  if (result instanceof Promise) {
+    result.catch((err: unknown) => {
+      void logger.error(SCOPE_MONITOR, 'emitEvent failed', {
+        eventType: event.type,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+  }
+}
 
 /**
  * 监控离线 node，并把活动任务转为 observation_lost。
@@ -11,15 +29,28 @@ const SCOPE_MONITOR = ['controlplane', 'monitor'] as const
 export class ObservationMonitor {
   readonly #db: ControlPlaneDb
   readonly #logger: ObserverLogger
+  readonly #emitEvent: ((ev: DomainEvent) => void | Promise<void>) | undefined
+  readonly #enterCorrelation:
+    | (<T>(correlationId: string, fn: () => Promise<T>) => Promise<T>)
+    | undefined
   #timer: ReturnType<typeof setInterval> | null = null
 
   /**
    * @param db - controlplane 数据库实例
    * @param logger - 结构化日志实例
+   * @param emitEvent - 可选：DomainEvent 发射回调，用于发射 Node/Task 生命周期事件
+   * @param enterCorrelation - 可选：建立独立因果链上下文的包裹器
    */
-  constructor(db: ControlPlaneDb, logger: ObserverLogger) {
+  constructor(
+    db: ControlPlaneDb,
+    logger: ObserverLogger,
+    emitEvent?: (ev: DomainEvent) => void | Promise<void>,
+    enterCorrelation?: <T>(correlationId: string, fn: () => Promise<T>) => Promise<T>
+  ) {
     this.#db = db
     this.#logger = logger
+    this.#emitEvent = emitEvent
+    this.#enterCorrelation = enterCorrelation
   }
 
   /** 启动周期检查。 */
@@ -36,9 +67,25 @@ export class ObservationMonitor {
 
   /**
    * 将心跳超时 node 上的 running/waiting 任务转为 observation_lost。
-   * checkOfflineNodes 由 setInterval 同步调用，logger 调用使用 void 触发。
+   * checkOfflineNodes 由 setInterval 同步调用，若注入了 enterCorrelation 则在独立上下文内运行，
+   * 使定时检查产生的事件拥有独立的因果链，不污染其他请求。
    */
   checkOfflineNodes(): void {
+    if (this.#enterCorrelation !== undefined) {
+      const correlationId = crypto.randomUUID()
+      void this.#enterCorrelation(correlationId, async () => {
+        this.#doCheckOfflineNodes()
+      })
+    } else {
+      this.#doCheckOfflineNodes()
+    }
+  }
+
+  /**
+   * 执行实际的离线节点检查与事件发射逻辑。
+   * checkOfflineNodes 由 setInterval 同步调用，logger 调用使用 void 触发。
+   */
+  #doCheckOfflineNodes(): void {
     const now = Date.now()
     const threshold = now - HEARTBEAT_TIMEOUT_MS
     const offlineNodes = this.#db.raw
@@ -55,20 +102,51 @@ export class ObservationMonitor {
 
       if (statusChange.changes > 0) {
         void this.#logger.warn(SCOPE_MONITOR, 'Node marked offline', { nodeId })
+        emitSafe(
+          this.#emitEvent,
+          {
+            type: 'NodeMarkedOffline',
+            nodeId,
+            reason: 'heartbeat-timeout',
+            timestamp: now,
+          },
+          this.#logger
+        )
       }
 
-      const taskChange = this.#db.raw
+      // 先查出受影响的 task_id，再批量更新状态，以便逐一发射 TaskObservationLost 事件。
+      const affectedTasks = this.#db.raw
         .prepare(
-          `UPDATE tasks SET status = 'observation_lost', failure_reason = 'observation_lost', updated_at = ?
+          `SELECT task_id, updated_at FROM tasks
            WHERE node_id = ? AND status IN ('running', 'waiting')`
         )
-        .run(now, nodeId)
+        .all(nodeId) as Array<{ task_id: string; updated_at: number }>
 
-      if (taskChange.changes > 0) {
+      if (affectedTasks.length > 0) {
+        this.#db.raw
+          .prepare(
+            `UPDATE tasks SET status = 'observation_lost', failure_reason = 'observation_lost', updated_at = ?
+             WHERE node_id = ? AND status IN ('running', 'waiting')`
+          )
+          .run(now, nodeId)
+
         void this.#logger.warn(SCOPE_MONITOR, 'Tasks marked as observation_lost', {
           nodeId,
-          taskCount: taskChange.changes,
+          taskCount: affectedTasks.length,
         })
+
+        for (const { task_id: taskId, updated_at: lastUpdatedAt } of affectedTasks) {
+          emitSafe(
+            this.#emitEvent,
+            {
+              type: 'TaskObservationLost',
+              taskId,
+              lastObservedAt: new Date(lastUpdatedAt).toISOString(),
+              timestamp: now,
+            },
+            this.#logger
+          )
+        }
       }
 
       this.#db.raw

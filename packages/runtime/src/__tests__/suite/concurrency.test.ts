@@ -235,9 +235,9 @@ describe('suite/concurrency', () => {
       collectRuntimeEvents(runIdB, runtimeB),
     ])
 
-    // A 有 run.cancelled
+    // A 有 RunCancelled
     const typesA = outcomeA.events.map((e) => e.type)
-    expect(typesA).toContain('run.cancelled')
+    expect(typesA).toContain('RunCancelled')
 
     // B 正常完成
     assertRunCompleted(eventsB)

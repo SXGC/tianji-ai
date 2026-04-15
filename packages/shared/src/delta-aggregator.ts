@@ -1,5 +1,5 @@
 import type { MessageDelta } from './delta.js'
-import type { MessageDeltaChannel } from './events.js'
+import type { MessageDeltaChannel } from './events/run.js'
 import type { AppMessage, MessagePart, TextContent, ThinkingContent } from './message.js'
 
 export interface AggregatedMessageDeltaState {

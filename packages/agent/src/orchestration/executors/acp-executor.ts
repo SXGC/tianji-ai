@@ -5,13 +5,13 @@
  * - 把编排图中的 AcpAgentNode 编译为一个可供 LangGraph 调用的节点 action。
  * - 本文件不直接拉起 ACP 子进程；真正的 runner 由上层（通常是 apps/node 的 AgentRunner）
  *   通过 runnerProvider 注入，本 package 只提供适配层。
- * - 通过 emitGraphEvent 广播 graph.node.started / graph.node.completed 给上层 runner。
+ * - 通过 emitGraphEvent 广播 GraphNodeStarted / GraphNodeCompleted 给上层 runner。
  *
  * 对外触点：
  * - apps/node 配置 SessionRuntime 时，把此工厂连同具体的 runnerProvider 一起传入。
  */
 import { TianjiError } from '@tianji/shared'
-import type { RuntimeEvent } from '@tianji/shared'
+import type { DomainEvent } from '@tianji/shared'
 
 import type { AcpAgentNode } from '../graph-schema.js'
 import {
@@ -27,7 +27,7 @@ import type { AcpExecutorFactory, NodeAction, NodeExecutorContext } from './exec
  */
 export interface AcpRunnerLike {
   connect(): Promise<void>
-  query(prompt: string): AsyncIterable<RuntimeEvent>
+  query(prompt: string): AsyncIterable<DomainEvent>
   disconnect(): Promise<void>
 }
 
@@ -70,7 +70,7 @@ export function createAcpExecutorFactory(
 
       const startTimestamp = Date.now()
       ctx.emitGraphEvent({
-        type: 'graph.node.started',
+        type: 'GraphNodeStarted',
         runId: ctx.runId,
         graphId: ctx.graphId,
         nodeId: node.id,
@@ -86,7 +86,7 @@ export function createAcpExecutorFactory(
         try {
           for await (const event of runner.query(fullPrompt)) {
             ctx.emitRuntimeEvent?.(event)
-            if (event.type === 'message.completed' && event.message.role === 'assistant') {
+            if (event.type === 'MessageCompleted' && event.message.role === 'assistant') {
               accumulatedText = extractText(event.message)
             }
           }
@@ -98,10 +98,11 @@ export function createAcpExecutorFactory(
         const stateUpdate = buildStateUpdateFromText(accumulatedText, node.output)
 
         ctx.emitGraphEvent({
-          type: 'graph.node.completed',
+          type: 'GraphNodeCompleted',
           runId: ctx.runId,
           graphId: ctx.graphId,
           nodeId: node.id,
+          nodeKind: 'acp-agent',
           output: stateUpdate,
           timestamp: Date.now(),
         })
@@ -111,10 +112,11 @@ export function createAcpExecutorFactory(
         // 连接 / query / 解析失败统一走 failed 事件，再把原始错误再抛出。
         const tianjiError = toTianjiError(error_)
         ctx.emitGraphEvent({
-          type: 'graph.node.failed',
+          type: 'GraphNodeFailed',
           runId: ctx.runId,
           graphId: ctx.graphId,
           nodeId: node.id,
+          nodeKind: 'acp-agent',
           error: tianjiError,
           timestamp: Date.now(),
         })

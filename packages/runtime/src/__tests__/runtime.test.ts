@@ -14,7 +14,7 @@ import { fakeModel } from '@langchain/core/testing'
 import { FakeStreamingChatModel } from '@langchain/core/utils/testing'
 import { ChatOpenAI } from '@langchain/openai'
 import { type ObserverLogEntry, createMemorySink, createObserverLogger } from '@tianji/observer'
-import { type RuntimeEvent, createSessionId } from '@tianji/shared'
+import { type DomainEvent, createSessionId } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { InMemorySnapshotStore } from '../snapshot-store.js'
@@ -68,39 +68,38 @@ describe('SessionRuntime', () => {
     const runId = await runtime.runTurn({ sessionId: session.sessionId, message: userMessage })
     const events = await collectRuntimeEvents(runId, runtime)
     const runStartedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'run.started' }> =>
-        event.type === 'run.started'
+      (event): event is Extract<DomainEvent, { type: 'RunStarted' }> => event.type === 'RunStarted'
     )
     const messageStartedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'message.started' }> =>
-        event.type === 'message.started'
+      (event): event is Extract<DomainEvent, { type: 'MessageStarted' }> =>
+        event.type === 'MessageStarted'
     )
     const messageCompletedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'message.completed' }> =>
-        event.type === 'message.completed'
+      (event): event is Extract<DomainEvent, { type: 'MessageCompleted' }> =>
+        event.type === 'MessageCompleted'
     )
 
     expect(events.map((event) => event.type)).toEqual([
-      'run.started',
-      'message.started',
-      'tool.started',
-      'tool.completed',
-      'message.completed',
-      'run.completed',
+      'RunStarted',
+      'MessageStarted',
+      'ToolStarted',
+      'ToolCompleted',
+      'MessageCompleted',
+      'RunCompleted',
     ])
     expect(runStartedEvent).toMatchObject({ runId, sessionId: session.sessionId })
     expect(messageStartedEvent?.message.content).toEqual([])
 
     const toolStartedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'tool.started' }> =>
-        event.type === 'tool.started'
+      (event): event is Extract<DomainEvent, { type: 'ToolStarted' }> =>
+        event.type === 'ToolStarted'
     )
     expect(toolStartedEvent?.toolCallId).toBe('tool-1')
     expect(toolStartedEvent?.invocation.toolName).toBe('sum')
 
     const toolCompletedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'tool.completed' }> =>
-        event.type === 'tool.completed'
+      (event): event is Extract<DomainEvent, { type: 'ToolCompleted' }> =>
+        event.type === 'ToolCompleted'
     )
     expect(toolCompletedEvent?.toolCallId).toBe('tool-1')
     expect(toolCompletedEvent?.result.result).toBe(3)
@@ -166,26 +165,26 @@ describe('SessionRuntime', () => {
       runtime
     )
     const deltaEvents = events.filter(
-      (event): event is Extract<RuntimeEvent, { type: 'message.delta' }> =>
-        event.type === 'message.delta'
+      (event): event is Extract<DomainEvent, { type: 'MessageDelta' }> =>
+        event.type === 'MessageDelta'
     )
     const completedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'message.completed' }> =>
-        event.type === 'message.completed'
+      (event): event is Extract<DomainEvent, { type: 'MessageCompleted' }> =>
+        event.type === 'MessageCompleted'
     )
     const startedEvent = events.find(
-      (event): event is Extract<RuntimeEvent, { type: 'message.started' }> =>
-        event.type === 'message.started'
+      (event): event is Extract<DomainEvent, { type: 'MessageStarted' }> =>
+        event.type === 'MessageStarted'
     )
 
     expect(events.map((event) => event.type)).toEqual([
-      'run.started',
-      'message.started',
-      'message.delta',
-      'message.delta',
-      'message.delta',
-      'message.completed',
-      'run.completed',
+      'RunStarted',
+      'MessageStarted',
+      'MessageDelta',
+      'MessageDelta',
+      'MessageDelta',
+      'MessageCompleted',
+      'RunCompleted',
     ])
     expect(deltaEvents.map((event) => event.sequence)).toEqual([1, 2, 3])
     expect(deltaEvents.map((event) => event.payload.content)).toEqual(['hel', 'lo ', 'world'])
@@ -218,10 +217,8 @@ describe('SessionRuntime', () => {
     const lifecycleEvents = events.filter(
       (
         event
-      ): event is Extract<RuntimeEvent, { type: 'run.started' | 'run.completed' | 'run.failed' }> =>
-        event.type === 'run.started' ||
-        event.type === 'run.completed' ||
-        event.type === 'run.failed'
+      ): event is Extract<DomainEvent, { type: 'RunStarted' | 'RunCompleted' | 'RunFailed' }> =>
+        event.type === 'RunStarted' || event.type === 'RunCompleted' || event.type === 'RunFailed'
     )
     const runtimeRunLogEntries = memorySink.entries.filter(
       (entry: ObserverLogEntry): entry is ObserverLogEntry & { data: Record<string, unknown> } =>
@@ -232,14 +229,14 @@ describe('SessionRuntime', () => {
     expect(run.parentRunId).toBeUndefined()
     expect(lifecycleEvents).toEqual([
       expect.objectContaining({
-        type: 'run.started',
+        type: 'RunStarted',
         runId,
         sessionId: session.sessionId,
         triggerType: 'new',
         parentRunId: undefined,
       }),
       expect.objectContaining({
-        type: 'run.completed',
+        type: 'RunCompleted',
         runId,
         sessionId: session.sessionId,
         triggerType: 'new',
@@ -255,15 +252,22 @@ describe('SessionRuntime', () => {
         triggerType: entry.data.triggerType,
         parentRunId: entry.data.parentRunId,
       }))
-    ).toEqual(
-      lifecycleEvents.map((event) => ({
-        message: event.type,
-        sessionId: event.sessionId,
-        runId: event.runId,
-        triggerType: event.triggerType,
-        parentRunId: event.parentRunId,
-      }))
-    )
+    ).toEqual([
+      {
+        message: 'run.started',
+        sessionId: session.sessionId,
+        runId,
+        triggerType: 'new',
+        parentRunId: undefined,
+      },
+      {
+        message: 'run.completed',
+        sessionId: session.sessionId,
+        runId,
+        triggerType: 'new',
+        parentRunId: undefined,
+      },
+    ])
   })
 
   it('keeps failed lifecycle events and observer logs in the same lineage order', async () => {

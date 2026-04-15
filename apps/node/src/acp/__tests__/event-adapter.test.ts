@@ -8,7 +8,7 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
   const runId = createRunId('run-001')
   const sessionId = 'session-001'
 
-  it('should map agent_message_chunk to message.delta (text)', () => {
+  it('should map agent_message_chunk to envelope with MessageDelta payload (text)', () => {
     const update: SessionNotification = {
       sessionId,
       update: {
@@ -20,14 +20,16 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    expect(result?.type).toBe('message.delta')
-    if (result?.type === 'message.delta') {
-      expect(result.channel).toBe('text')
-      expect(result.payload.content).toBe('Hello')
+    expect(result?.type).toBe('MessageDelta')
+    expect(result?.aggregateType).toBe('Run')
+    const payload = result?.payload
+    if (payload?.type === 'MessageDelta') {
+      expect(payload.channel).toBe('text')
+      expect(payload.payload.content).toBe('Hello')
     }
   })
 
-  it('should map agent_thought_chunk to message.delta (thinking)', () => {
+  it('should map agent_thought_chunk to envelope with MessageDelta payload (thinking)', () => {
     const update: SessionNotification = {
       sessionId,
       update: {
@@ -39,12 +41,13 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    if (result?.type === 'message.delta') {
-      expect(result.channel).toBe('thinking')
+    const payload = result?.payload
+    if (payload?.type === 'MessageDelta') {
+      expect(payload.channel).toBe('thinking')
     }
   })
 
-  it('should map tool_call to tool.started', () => {
+  it('should map tool_call to envelope with ToolStarted payload', () => {
     const update: SessionNotification = {
       sessionId,
       update: {
@@ -60,10 +63,10 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    expect(result?.type).toBe('tool.started')
+    expect(result?.type).toBe('ToolStarted')
   })
 
-  it('should map tool_call_update with status completed to tool.completed', () => {
+  it('should map tool_call_update completed to envelope with ToolCompleted payload', () => {
     const update: SessionNotification = {
       sessionId,
       update: {
@@ -78,10 +81,11 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    expect(result?.type).toBe('tool.completed')
-    if (result?.type === 'tool.completed') {
-      expect(result.toolCallId).toBe('tc-2')
-      expect(result.invocation.toolName).toBe('write_file')
+    expect(result?.type).toBe('ToolCompleted')
+    const payload = result?.payload
+    if (payload?.type === 'ToolCompleted') {
+      expect(payload.toolCallId).toBe('tc-2')
+      expect(payload.invocation.toolName).toBe('write_file')
     }
   })
 
@@ -116,8 +120,9 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    if (result?.type === 'tool.started') {
-      expect(result.invocation.toolName).toBe('unknown')
+    const payload = result?.payload
+    if (payload?.type === 'ToolStarted') {
+      expect(payload.invocation.toolName).toBe('unknown')
     }
   })
 
@@ -135,8 +140,9 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    if (result?.type === 'tool.completed') {
-      expect(result.invocation.toolName).toBe('unknown')
+    const payload = result?.payload
+    if (payload?.type === 'ToolCompleted') {
+      expect(payload.invocation.toolName).toBe('unknown')
     }
   })
 
@@ -152,8 +158,9 @@ describe('mapSessionUpdateToRuntimeEvent', () => {
     const result = mapSessionUpdateToRuntimeEvent(update, runId)
 
     expect(result).not.toBeNull()
-    if (result?.type === 'message.delta') {
-      expect(result.payload.content).toBe('')
+    const payload = result?.payload
+    if (payload?.type === 'MessageDelta') {
+      expect(payload.payload.content).toBe('')
     }
   })
 

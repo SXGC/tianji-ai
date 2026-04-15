@@ -1,10 +1,28 @@
 import { writeFile } from 'node:fs/promises'
+import type { DomainEvent, DomainEventEnvelope } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import { chatCommand } from '../commands/chat.js'
 import type { CommandContext } from '../commands/types.js'
 import { createI18n } from '../i18n/index.js'
 import { createTempCliPaths } from './helpers/cli-test-utils.js'
+
+/** 将裸 DomainEvent 包装为最小化 DomainEventEnvelope，专用于测试。 */
+function wrapEvent(event: DomainEvent): DomainEventEnvelope {
+  const runId = 'runId' in event ? String(event.runId) : 'test'
+  return {
+    eventId: `test_${event.type}`,
+    type: event.type,
+    occurredAt: new Date().toISOString(),
+    correlationId: runId,
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: runId,
+    source: { processKind: 'node', processId: 'test' },
+    payload: event,
+  }
+}
 
 vi.mock('@tianji/agent', async (importOriginal) => {
   const original = await importOriginal<typeof import('@tianji/agent')>()
@@ -165,16 +183,24 @@ describe('chatCommand', () => {
     const mockPing = vi.fn(async () => ({ pid: 1234 }))
 
     async function* fakeSendChat(_prompt: string) {
-      yield {
-        type: 'message.delta' as const,
-        channel: 'text' as const,
+      yield wrapEvent({
+        type: 'MessageDelta',
+        runId: 'run-test' as never,
+        messageId: 'msg-1',
+        sequence: 0,
+        channel: 'text',
         payload: { content: 'Hello' },
-      }
-      yield {
-        type: 'message.delta' as const,
-        channel: 'text' as const,
+        timestamp: Date.now(),
+      })
+      yield wrapEvent({
+        type: 'MessageDelta',
+        runId: 'run-test' as never,
+        messageId: 'msg-2',
+        sequence: 1,
+        channel: 'text',
         payload: { content: ' World' },
-      }
+        timestamp: Date.now(),
+      })
     }
 
     MockedDaemonClient.mockImplementation(
@@ -237,7 +263,15 @@ describe('chatCommand', () => {
 
     const mockPing = vi.fn(async () => ({ pid: 1234 }))
     const mockSendChat = vi.fn(async function* () {
-      yield { type: 'message.delta' as const, channel: 'text' as const, payload: { content: 'ok' } }
+      yield wrapEvent({
+        type: 'MessageDelta',
+        runId: 'run-test' as never,
+        messageId: 'msg-1',
+        sequence: 0,
+        channel: 'text',
+        payload: { content: 'ok' },
+        timestamp: Date.now(),
+      })
     })
 
     MockedDaemonClient.mockImplementation(

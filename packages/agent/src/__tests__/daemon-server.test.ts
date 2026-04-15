@@ -2,9 +2,9 @@ import { readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import type { RuntimeEvent } from '@tianji/shared'
+import { type DomainEventEnvelope, type EventBus, createEventBus } from '@tianji/shared'
 
 import {
   type ControlPlaneStatusSnapshot,
@@ -33,18 +33,51 @@ const STUB_EXECUTOR_FACTORY: AgentExecutorFactory = () => {
   throw new Error('stub executor factory should not be called')
 }
 
-function createStubSession(events: RuntimeEvent[] = []): AgentSession {
+/** 构造最小合法的 DomainEventEnvelope 用于测试。 */
+function makeEnvelope(overrides: Partial<DomainEventEnvelope> = {}): DomainEventEnvelope {
+  return {
+    eventId: 'evt-1',
+    type: 'RunStarted',
+    occurredAt: '2026-04-14T00:00:00Z',
+    correlationId: 'corr-1',
+    causationId: null,
+    sequence: 1,
+    aggregateType: 'Run',
+    aggregateId: 'run-1',
+    source: { processKind: 'daemon', processId: 'proc-1' },
+    payload: {} as never,
+    ...overrides,
+  }
+}
+
+/** 创建测试用 EventBus，lagSink 用 vi.fn() 接收。 */
+function createStubBus(): EventBus {
+  return createEventBus({ lagSink: vi.fn() })
+}
+
+/**
+ * 创建一个简单存根 session，queryWithGraph 会在运行时将 envelopes publish 到 bus，
+ * 然后正常完成迭代。
+ */
+function createStubSession(bus: EventBus, envelopes: DomainEventEnvelope[] = []): AgentSession {
   return {
     sessionId: 'session_test' as unknown as AgentSession['sessionId'],
     abort: () => undefined,
+    close: () => undefined,
     async *queryWithGraph(_graph, _options) {
-      for (const event of events) {
-        yield event
+      for (const env of envelopes) {
+        bus.publish(env)
+        // 让 microtask 队列有机会 drain，确保 bus handler 在 session 完成前被调度
+        await new Promise<void>((r) => queueMicrotask(r))
       }
     },
   }
 }
 
+/**
+ * 创建一个阻塞 session，会在 resolve() 调用后才结束 queryWithGraph，
+ * 用于测试并发 BUSY 场景。
+ */
 function createBlockingSession(): AgentSession & { resolve: () => void } {
   let resolve!: () => void
   const barrier = new Promise<void>((r) => {
@@ -54,8 +87,15 @@ function createBlockingSession(): AgentSession & { resolve: () => void } {
     sessionId: 'session_blocking' as unknown as AgentSession['sessionId'],
     resolve,
     abort: () => undefined,
-    async *queryWithGraph(_graph, _options) {
-      yield await barrier.then((): RuntimeEvent => ({ type: 'run.completed' }) as RuntimeEvent)
+    close: () => undefined,
+    queryWithGraph(_graph, _options) {
+      return {
+        [Symbol.asyncIterator]() {
+          return {
+            next: () => barrier.then(() => ({ value: undefined as never, done: true as const })),
+          }
+        },
+      }
     },
   }
 }
@@ -92,11 +132,13 @@ describe('DaemonServer', () => {
   })
 
   it('GET /ping returns session metadata', async () => {
-    const session = createStubSession()
+    const bus = createStubBus()
+    const session = createStubSession(bus)
     server = new DaemonServer({
       session,
       defaultGraph: STUB_GRAPH,
       executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
     })
     await server.listen(0)
 
@@ -118,7 +160,8 @@ describe('DaemonServer', () => {
   })
 
   it('GET /ping returns controlplane snapshot from getter', async () => {
-    const session = createStubSession()
+    const bus = createStubBus()
+    const session = createStubSession(bus)
     const controlPlane: ControlPlaneStatusSnapshot = {
       enabled: true,
       status: 'degraded',
@@ -130,6 +173,7 @@ describe('DaemonServer', () => {
       session,
       defaultGraph: STUB_GRAPH,
       executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
       getControlPlaneStatus: () => controlPlane,
     })
     await server.listen(0)
@@ -141,16 +185,18 @@ describe('DaemonServer', () => {
     expect(body.controlPlane).toEqual(controlPlane)
   })
 
-  it('POST /chat streams chat events and terminates with chat.done', async () => {
-    const events = [
-      { type: 'message.delta', content: 'hello' } as unknown as RuntimeEvent,
-      { type: 'message.delta', content: ' world' } as unknown as RuntimeEvent,
+  it('POST /chat streams DomainEventEnvelope events and terminates with chat.done', async () => {
+    const bus = createStubBus()
+    const envelopes = [
+      makeEnvelope({ eventId: 'evt-1', type: 'RunStarted', aggregateType: 'Run' }),
+      makeEnvelope({ eventId: 'evt-2', type: 'RunCompleted', aggregateType: 'Run' }),
     ]
-    const session = createStubSession(events)
+    const session = createStubSession(bus, envelopes)
     server = new DaemonServer({
       session,
       defaultGraph: STUB_GRAPH,
       executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
     })
     await server.listen(0)
 
@@ -170,22 +216,63 @@ describe('DaemonServer', () => {
     expect(blocks[0].event).toBe(DAEMON_SSE_EVENT_NAME)
     const parsed0 = JSON.parse(blocks[0].data)
     expect(parsed0.type).toBe('chat.event')
+    expect(parsed0.event.eventId).toBe('evt-1')
 
     expect(blocks[1].event).toBe(DAEMON_SSE_EVENT_NAME)
     const parsed1 = JSON.parse(blocks[1].data)
     expect(parsed1.type).toBe('chat.event')
+    expect(parsed1.event.eventId).toBe('evt-2')
 
     expect(blocks[2].event).toBe(DAEMON_SSE_DONE_NAME)
     const parsed2 = JSON.parse(blocks[2].data) as ChatDoneSseMessage
     expect(parsed2.type).toBe('chat.done')
   })
 
+  it('bus filter only delivers GraphRun and Run aggregate events', async () => {
+    const bus = createStubBus()
+    const envelopes = [
+      makeEnvelope({ eventId: 'session-evt', aggregateType: 'Session' }),
+      makeEnvelope({ eventId: 'graphrun-evt', aggregateType: 'GraphRun' }),
+      makeEnvelope({ eventId: 'run-evt', aggregateType: 'Run' }),
+      makeEnvelope({ eventId: 'task-evt', aggregateType: 'Task' }),
+    ]
+    const session = createStubSession(bus, envelopes)
+    server = new DaemonServer({
+      session,
+      defaultGraph: STUB_GRAPH,
+      executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
+    })
+    await server.listen(0)
+
+    const res = await fetch(`${baseUrl(server)}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'hi' }),
+    })
+    const text = await res.text()
+    const blocks = parseSseBlocks(text)
+
+    // 仅 GraphRun 和 Run 类型的事件被推送，Session 和 Task 被过滤掉
+    const eventBlocks = blocks.filter((b) => b.event === DAEMON_SSE_EVENT_NAME)
+    expect(eventBlocks.length).toBe(2)
+    const ids = eventBlocks.map(
+      (b) => (JSON.parse(b.data) as { event: DomainEventEnvelope }).event.eventId
+    )
+    expect(ids).toContain('graphrun-evt')
+    expect(ids).toContain('run-evt')
+    expect(ids).not.toContain('session-evt')
+    expect(ids).not.toContain('task-evt')
+  })
+
   it('concurrent chat returns BUSY error', async () => {
+    const bus = createStubBus()
     const blockingSession = createBlockingSession()
     server = new DaemonServer({
       session: blockingSession,
       defaultGraph: STUB_GRAPH,
       executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
     })
     await server.listen(0)
 
@@ -220,11 +307,13 @@ describe('DaemonServer', () => {
     const portPath = join(tmpdir(), `tianji-test-daemon-port-${Date.now()}`)
     const pidPath = join(tmpdir(), `tianji-test-daemon-pid-${Date.now()}`)
 
-    const session = createStubSession()
+    const bus = createStubBus()
+    const session = createStubSession(bus)
     const opts: DaemonServerOptions = {
       session,
       defaultGraph: STUB_GRAPH,
       executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
       paths: {
         daemonPortPath: portPath,
         daemonPidPath: pidPath,
@@ -249,11 +338,13 @@ describe('DaemonServer', () => {
   })
 
   it('shutdown is idempotent', async () => {
-    const session = createStubSession()
+    const bus = createStubBus()
+    const session = createStubSession(bus)
     server = new DaemonServer({
       session,
       defaultGraph: STUB_GRAPH,
       executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
     })
     await server.listen(0)
 
@@ -262,11 +353,13 @@ describe('DaemonServer', () => {
   })
 
   it('returns 404 for unknown routes', async () => {
-    const session = createStubSession()
+    const bus = createStubBus()
+    const session = createStubSession(bus)
     server = new DaemonServer({
       session,
       defaultGraph: STUB_GRAPH,
       executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
     })
     await server.listen(0)
 
@@ -275,11 +368,13 @@ describe('DaemonServer', () => {
   })
 
   it('POST /chat with invalid body returns 400', async () => {
-    const session = createStubSession()
+    const bus = createStubBus()
+    const session = createStubSession(bus)
     server = new DaemonServer({
       session,
       defaultGraph: STUB_GRAPH,
       executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
     })
     await server.listen(0)
 
@@ -292,6 +387,7 @@ describe('DaemonServer', () => {
   })
 
   it('POST /chat handles internal errors from session', async () => {
+    const bus = createStubBus()
     const errorSession: AgentSession = {
       sessionId: 'session_error' as unknown as AgentSession['sessionId'],
       abort: () => undefined,
@@ -303,6 +399,7 @@ describe('DaemonServer', () => {
       session: errorSession,
       defaultGraph: STUB_GRAPH,
       executorFactory: STUB_EXECUTOR_FACTORY,
+      bus,
     })
     await server.listen(0)
 

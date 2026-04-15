@@ -3,7 +3,7 @@ import { access, readFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 import { type AgentSession, DaemonClient } from '@tianji/agent'
-import type { RunId, RuntimeEvent, SessionId } from '@tianji/shared'
+import type { DomainEvent, RunId, SessionId } from '@tianji/shared'
 
 import type { UserConfigPaths } from '../../config.js'
 
@@ -25,13 +25,13 @@ export function createStubSession(chunks: readonly string[]): AgentSession {
   return {
     sessionId,
     abort: () => undefined,
-    async *queryWithGraph(): AsyncIterable<RuntimeEvent> {
+    async *queryWithGraph(): AsyncIterable<DomainEvent> {
       const runId = `run_${Date.now()}` as RunId
       const messageId = `msg_${Date.now()}`
 
       for (let i = 0; i < chunks.length; i++) {
         yield {
-          type: 'message.delta',
+          type: 'MessageDelta',
           runId,
           messageId,
           sequence: i,
@@ -42,7 +42,7 @@ export function createStubSession(chunks: readonly string[]): AgentSession {
       }
 
       yield {
-        type: 'run.completed',
+        type: 'RunCompleted',
         runId,
         sessionId,
         triggerType: 'new',

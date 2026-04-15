@@ -1,9 +1,34 @@
-import { type Command, ToolError, createNodeId, createTaskId } from '@tianji/shared'
-import { describe, expect, it } from 'vitest'
+import {
+  type Command,
+  type DomainEvent,
+  type DomainEventEnvelope,
+  TianjiError,
+  ToolError,
+  createNodeId,
+  createTaskId,
+} from '@tianji/shared'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { IAgentRunner } from '../../acp/index.js'
 import { createCliLogger } from '../../logger.js'
 import type { TaskExecutorConfig } from '../task-executor.js'
+
+/** 将裸 DomainEvent 包装为最小化 DomainEventEnvelope，专用于测试。 */
+function wrap(event: DomainEvent): DomainEventEnvelope {
+  const runId = 'runId' in event ? String(event.runId) : 'test'
+  return {
+    eventId: `test_${event.type}`,
+    type: event.type,
+    occurredAt: new Date().toISOString(),
+    correlationId: runId,
+    causationId: null,
+    sequence: 0,
+    aggregateType: 'Run',
+    aggregateId: runId,
+    source: { processKind: 'node', processId: 'test' },
+    payload: event,
+  }
+}
 
 function createCommand(taskId: ReturnType<typeof createTaskId>, goal: string): Command {
   return {
@@ -26,58 +51,47 @@ function createRunnerStub(): IAgentRunner {
     connect: async () => undefined,
     disconnect: async () => undefined,
     async *query() {
-      yield {
-        type: 'run.started',
+      yield wrap({
+        type: 'RunStarted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
-      }
-      yield {
-        type: 'run.completed',
+      })
+      yield wrap({
+        type: 'RunCompleted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
-      }
+      })
     },
+  }
+}
+
+/** 构造最小化 TaskExecutorConfig，emitEvent/publishEnvelope 默认为 vi.fn()。 */
+function makeConfig(overrides: Partial<TaskExecutorConfig> = {}): TaskExecutorConfig {
+  return {
+    nodeId: createNodeId('node-001'),
+    onExecutionStateChange: () => undefined,
+    emitEvent: vi.fn(),
+    publishEnvelope: vi.fn(),
+    createRunner: async () => {
+      throw new Error('not implemented')
+    },
+    ...overrides,
   }
 }
 
 describe('TaskExecutorConfig', () => {
   it('should define required fields', () => {
-    const config: TaskExecutorConfig = {
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      createRunner: async () => {
-        throw new Error('not implemented')
-      },
-      openEventStream: async () => ({
-        write: async () => undefined,
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    }
-
+    const config: TaskExecutorConfig = makeConfig()
     expect(config.nodeId).toBe(createNodeId('node-001'))
   })
 
   it('should expose idle execution state by default', async () => {
     const module = await import('../task-executor.js')
-    const executor = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      createRunner: async () => {
-        throw new Error('not implemented')
-      },
-      openEventStream: async () => ({
-        write: async () => undefined,
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
+    const executor = new module.TaskExecutor(makeConfig())
 
     expect(executor.executionState).toBe('idle')
     expect(executor.currentTaskId).toBeNull()
@@ -87,17 +101,9 @@ describe('TaskExecutorConfig', () => {
     const module = await import('../task-executor.js')
     const taskId = createTaskId('task-001')
 
-    const executor = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      createRunner: async () => createRunnerStub(),
-      openEventStream: async () => ({
-        write: async () => undefined,
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
+    const executor = new module.TaskExecutor(
+      makeConfig({ createRunner: async () => createRunnerStub() })
+    )
 
     const first = executor.execute(createCommand(taskId, 'first'))
 
@@ -123,18 +129,9 @@ describe('TaskExecutorConfig', () => {
       },
     })
 
-    const executor = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      logger,
-      createRunner: async () => createRunnerStub(),
-      openEventStream: async () => ({
-        write: async () => undefined,
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
+    const executor = new module.TaskExecutor(
+      makeConfig({ logger, createRunner: async () => createRunnerStub() })
+    )
 
     await executor.execute(createCommand(createTaskId('task-001'), 'first'))
 
@@ -153,109 +150,109 @@ describe('TaskExecutorConfig', () => {
     ).toBe(true)
   })
 
-  it('writes task.failed lifecycle event when runner query throws', async () => {
+  it('emits TaskStarted and TaskCompleted lifecycle events on success', async () => {
     const module = await import('../task-executor.js')
-    const writes: string[] = []
+    const emitEvent = vi.fn()
+
+    const executor = new module.TaskExecutor(
+      makeConfig({ emitEvent, createRunner: async () => createRunnerStub() })
+    )
+
+    await executor.execute(createCommand(createTaskId('task-001'), 'success'))
+
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('TaskStarted')
+    expect(emittedTypes).toContain('TaskCompleted')
+    expect(emittedTypes).not.toContain('TaskFailed')
+  })
+
+  it('emits TaskStarted then TaskFailed when runner query throws', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
     const failure = new Error('runner exploded')
 
-    const executor = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      createRunner: async () => ({
-        agentId: 'default',
-        connect: async () => undefined,
-        disconnect: async () => undefined,
-        async *query() {
-          yield undefined as never
-          throw failure
-        },
-      }),
-      openEventStream: async () => ({
-        write: async (json: string) => {
-          writes.push(json)
-        },
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield undefined as never
+            throw failure
+          },
+        }),
+      })
+    )
 
     await expect(executor.execute(createCommand(createTaskId('task-001'), 'boom'))).rejects.toThrow(
       'runner exploded'
     )
 
-    expect(writes).toHaveLength(3)
-    expect(JSON.parse(writes[0] ?? 'null')).toMatchObject({
-      kind: 'lifecycle',
-      sequence: 1,
-      type: 'task.started',
-    })
-    expect(JSON.parse(writes[1] ?? 'null')).toMatchObject({
-      kind: 'agent',
-      sequence: 2,
-    })
-    expect(JSON.parse(writes[2] ?? 'null')).toMatchObject({
-      kind: 'lifecycle',
-      sequence: 3,
-      type: 'task.failed',
-      error: 'runner exploded',
-    })
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes[0]).toBe('TaskStarted')
+    expect(emittedTypes[emittedTypes.length - 1]).toBe('TaskFailed')
+
+    // TaskFailed.error 必须携带原始错误消息
+    const failedEvent = emitEvent.mock.calls.find(
+      ([e]: [DomainEvent]) => e.type === 'TaskFailed'
+    )?.[0] as Extract<DomainEvent, { type: 'TaskFailed' }> | undefined
+    expect(failedEvent?.error).toBeInstanceOf(TianjiError)
+    expect(failedEvent?.error.message).toBe('runner exploded')
   })
 
-  it('writes task.failed lifecycle event when runner ends without run completion', async () => {
+  it('emits TaskFailed when runner ends without terminal event', async () => {
     const module = await import('../task-executor.js')
-    const writes: string[] = []
+    const emitEvent = vi.fn()
 
-    const executor = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      createRunner: async () => ({
-        agentId: 'default',
-        connect: async () => undefined,
-        disconnect: async () => undefined,
-        async *query() {
-          yield {
-            type: 'run.started',
-            runId: 'run-test' as never,
-            sessionId: 'session-test' as never,
-            triggerType: 'new',
-            timestamp: Date.now(),
-          }
-        },
-      }),
-      openEventStream: async () => ({
-        write: async (json: string) => {
-          writes.push(json)
-        },
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield wrap({
+              type: 'RunStarted',
+              runId: 'run-test' as never,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: Date.now(),
+            })
+          },
+        }),
+      })
+    )
 
     await expect(
       executor.execute(createCommand(createTaskId('task-001'), 'missing terminal event'))
     ).rejects.toThrow('Agent run ended without a terminal event')
 
-    expect(writes).toHaveLength(3)
-    expect(JSON.parse(writes[0] ?? 'null')).toMatchObject({
-      kind: 'lifecycle',
-      sequence: 1,
-      type: 'task.started',
-    })
-    expect(JSON.parse(writes[1] ?? 'null')).toMatchObject({
-      kind: 'agent',
-      sequence: 2,
-      event: {
-        type: 'run.started',
-      },
-    })
-    expect(JSON.parse(writes[2] ?? 'null')).toMatchObject({
-      kind: 'lifecycle',
-      sequence: 3,
-      type: 'task.failed',
-      error: 'Agent run ended without a terminal event',
-    })
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('TaskStarted')
+    expect(emittedTypes).toContain('TaskFailed')
+    expect(emittedTypes).not.toContain('TaskCompleted')
+  })
+
+  it('publishes agent envelopes to bus via publishEnvelope', async () => {
+    const module = await import('../task-executor.js')
+    const publishEnvelope = vi.fn()
+
+    const executor = new module.TaskExecutor(
+      makeConfig({ publishEnvelope, createRunner: async () => createRunnerStub() })
+    )
+
+    await executor.execute(createCommand(createTaskId('task-001'), 'envelopes'))
+
+    // createRunnerStub yields RunStarted + RunCompleted
+    expect(publishEnvelope).toHaveBeenCalledTimes(2)
+    const types = (publishEnvelope.mock.calls as Array<[DomainEventEnvelope]>).map(
+      ([env]) => env.payload.type
+    )
+    expect(types).toContain('RunStarted')
+    expect(types).toContain('RunCompleted')
   })
 
   it('logs message.completed, tool.completed, and tool.failed events', async () => {
@@ -276,66 +273,60 @@ describe('TaskExecutorConfig', () => {
     const runId = 'run-test' as never
     const now = Date.now()
 
-    const executor = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      logger,
-      createRunner: async () => ({
-        agentId: 'default',
-        connect: async () => undefined,
-        disconnect: async () => undefined,
-        async *query() {
-          yield {
-            type: 'run.started',
-            runId,
-            sessionId: 'session-test' as never,
-            triggerType: 'new',
-            timestamp: now,
-          }
-          yield {
-            type: 'message.completed',
-            runId,
-            messageId: 'msg-1',
-            message: {
-              id: 'msg-1',
-              role: 'assistant',
-              content: [{ type: 'text', text: 'hello' }],
-              createdAt: now,
-            },
-            timestamp: now,
-          }
-          yield {
-            type: 'tool.completed',
-            runId,
-            toolCallId: 'tc-1',
-            invocation: { toolCallId: 'tc-1', toolName: 'read_file', args: { path: '/a.ts' } },
-            result: { toolCallId: 'tc-1', result: 'file content' },
-            timestamp: now,
-          }
-          yield {
-            type: 'tool.failed',
-            runId,
-            toolCallId: 'tc-2',
-            invocation: { toolCallId: 'tc-2', toolName: 'write_file', args: { path: '/b.ts' } },
-            error: new ToolError('WRITE_DENIED', 'permission denied'),
-            timestamp: now,
-          }
-          yield {
-            type: 'run.completed',
-            runId,
-            sessionId: 'session-test' as never,
-            triggerType: 'new',
-            timestamp: now,
-          }
-        },
-      }),
-      openEventStream: async () => ({
-        write: async () => undefined,
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        logger,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield wrap({
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: now,
+            })
+            yield wrap({
+              type: 'MessageCompleted',
+              runId,
+              messageId: 'msg-1',
+              message: {
+                id: 'msg-1',
+                role: 'assistant',
+                content: [{ type: 'text', text: 'hello' }],
+                createdAt: now,
+              },
+              timestamp: now,
+            })
+            yield wrap({
+              type: 'ToolCompleted',
+              runId,
+              toolCallId: 'tc-1',
+              invocation: { toolCallId: 'tc-1', toolName: 'read_file', args: { path: '/a.ts' } },
+              result: { toolCallId: 'tc-1', result: 'file content' },
+              timestamp: now,
+            })
+            yield wrap({
+              type: 'ToolFailed',
+              runId,
+              toolCallId: 'tc-2',
+              invocation: { toolCallId: 'tc-2', toolName: 'write_file', args: { path: '/b.ts' } },
+              error: new ToolError('WRITE_DENIED', 'permission denied'),
+              timestamp: now,
+            })
+            yield wrap({
+              type: 'RunCompleted',
+              runId,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: now,
+            })
+          },
+        }),
+      })
+    )
 
     await executor.execute(createCommand(createTaskId('task-001'), 'test events'))
 
@@ -361,51 +352,45 @@ describe('TaskExecutorConfig', () => {
     const runId = 'run-test' as never
     const now = Date.now()
 
-    const executor = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      logger,
-      createRunner: async () => ({
-        agentId: 'default',
-        connect: async () => undefined,
-        disconnect: async () => undefined,
-        async *query() {
-          // 先发 message.completed，此时 turn 为 null，应被忽略
-          yield {
-            type: 'message.completed',
-            runId,
-            messageId: 'msg-orphan',
-            message: {
-              id: 'msg-orphan',
-              role: 'assistant',
-              content: [{ type: 'text', text: 'orphan' }],
-              createdAt: now,
-            },
-            timestamp: now,
-          }
-          yield {
-            type: 'run.started',
-            runId,
-            sessionId: 'session-test' as never,
-            triggerType: 'new',
-            timestamp: now,
-          }
-          yield {
-            type: 'run.completed',
-            runId,
-            sessionId: 'session-test' as never,
-            triggerType: 'new',
-            timestamp: now,
-          }
-        },
-      }),
-      openEventStream: async () => ({
-        write: async () => undefined,
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        logger,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            // 先发 message.completed，此时 turn 为 null，应被忽略
+            yield wrap({
+              type: 'MessageCompleted',
+              runId,
+              messageId: 'msg-orphan',
+              message: {
+                id: 'msg-orphan',
+                role: 'assistant',
+                content: [{ type: 'text', text: 'orphan' }],
+                createdAt: now,
+              },
+              timestamp: now,
+            })
+            yield wrap({
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: now,
+            })
+            yield wrap({
+              type: 'RunCompleted',
+              runId,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: now,
+            })
+          },
+        }),
+      })
+    )
 
     await executor.execute(createCommand(createTaskId('task-001'), 'orphan event'))
 
@@ -428,139 +413,79 @@ describe('TaskExecutorConfig', () => {
     const now = Date.now()
 
     // 测试 run.failed
-    const executor1 = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      logger,
-      createRunner: async () => ({
-        agentId: 'default',
-        connect: async () => undefined,
-        disconnect: async () => undefined,
-        async *query() {
-          yield {
-            type: 'run.started',
-            runId,
-            sessionId: 'session-test' as never,
-            triggerType: 'new',
-            timestamp: now,
-          }
-          yield {
-            type: 'run.failed',
-            runId,
-            sessionId: 'session-test' as never,
-            triggerType: 'new',
-            error: { category: 'internal', code: 'FAIL', message: 'failed' },
-            timestamp: now,
-          }
-        },
-      }),
-      openEventStream: async () => ({
-        write: async () => undefined,
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
+    const executor1 = new module.TaskExecutor(
+      makeConfig({
+        logger,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield wrap({
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: now,
+            })
+            yield wrap({
+              type: 'RunFailed',
+              runId,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              error: { category: 'internal', code: 'FAIL', message: 'failed' },
+              timestamp: now,
+            })
+          },
+        }),
+      })
+    )
 
     await executor1.execute(createCommand(createTaskId('task-001'), 'run failed'))
 
     const failedSummary = written.find(
       (e) =>
         e.message === 'Run turn summary' &&
-        (e.data as Record<string, unknown>)?.endReason === 'run.failed'
+        (e.data as Record<string, unknown>)?.endReason === 'RunFailed'
     )
     expect(failedSummary).toBeDefined()
 
     // 测试 run.cancelled
     written.length = 0
-    const executor2 = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      logger,
-      createRunner: async () => ({
-        agentId: 'default',
-        connect: async () => undefined,
-        disconnect: async () => undefined,
-        async *query() {
-          yield {
-            type: 'run.started',
-            runId,
-            sessionId: 'session-test' as never,
-            triggerType: 'new',
-            timestamp: now,
-          }
-          yield {
-            type: 'run.cancelled',
-            runId,
-            sessionId: 'session-test' as never,
-            triggerType: 'new',
-            timestamp: now,
-          }
-        },
-      }),
-      openEventStream: async () => ({
-        write: async () => undefined,
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
+    const executor2 = new module.TaskExecutor(
+      makeConfig({
+        logger,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield wrap({
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: now,
+            })
+            yield wrap({
+              type: 'RunCancelled',
+              runId,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: now,
+            })
+          },
+        }),
+      })
+    )
 
     await executor2.execute(createCommand(createTaskId('task-002'), 'run cancelled'))
 
     const cancelledSummary = written.find(
       (e) =>
         e.message === 'Run turn summary' &&
-        (e.data as Record<string, unknown>)?.endReason === 'run.cancelled'
+        (e.data as Record<string, unknown>)?.endReason === 'RunCancelled'
     )
     expect(cancelledSummary).toBeDefined()
-  })
-
-  it('logs stream write failure when eventStream.write throws on task failure', async () => {
-    const module = await import('../task-executor.js')
-    const written: Array<{ level: string; message: string }> = []
-    const logger = createCliLogger({
-      sink: {
-        async write(entry) {
-          written.push({ level: entry.level, message: entry.message })
-        },
-      },
-    })
-
-    let writeCount = 0
-    const executor = new module.TaskExecutor({
-      nodeId: createNodeId('node-001'),
-      onExecutionStateChange: () => undefined,
-      logger,
-      createRunner: async () => ({
-        agentId: 'default',
-        connect: async () => undefined,
-        disconnect: async () => undefined,
-        async *query() {
-          yield undefined as never
-          throw new Error('runner crashed')
-        },
-      }),
-      openEventStream: async () => ({
-        write: async () => {
-          writeCount++
-          // task.started (seq 1) 成功, agent event (seq 2) 成功, task.failed (seq 3) 失败
-          if (writeCount >= 3) {
-            throw new Error('stream broken')
-          }
-        },
-        writeKeepalive: async () => undefined,
-        close: async () => undefined,
-        abort: () => undefined,
-      }),
-    })
-
-    await expect(executor.execute(createCommand(createTaskId('task-001'), 'boom'))).rejects.toThrow(
-      'runner crashed'
-    )
-
-    expect(
-      written.some((e) => e.level === 'error' && e.message === 'Failed to write task failure event')
-    ).toBe(true)
   })
 })

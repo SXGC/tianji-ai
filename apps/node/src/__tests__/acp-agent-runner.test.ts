@@ -128,7 +128,7 @@ describe('AgentRunner', () => {
       )
     })
 
-    it('yields events from buffer and ends with run.completed', async () => {
+    it('yields events from buffer and ends with RunCompleted', async () => {
       const { mapSessionUpdateToRuntimeEvent } = await import('../acp/event-adapter.js')
       const mapFn = mapSessionUpdateToRuntimeEvent as ReturnType<typeof vi.fn>
 
@@ -157,26 +157,51 @@ describe('AgentRunner', () => {
 
       mapFn.mockImplementation(
         (notification: { update: { sessionUpdate: string } }, runId: string) => {
+          const now = Date.now()
           if (notification.update.sessionUpdate === 'agent_message_chunk') {
-            return {
-              type: 'message.delta',
+            const event = {
+              type: 'MessageDelta',
               runId,
               messageId: 'msg1',
               sequence: 0,
               channel: 'text',
               payload: { content: 'hi' },
-              timestamp: Date.now(),
+              timestamp: now,
+            }
+            return {
+              eventId: `test_msg_${now}`,
+              type: 'MessageDelta',
+              occurredAt: new Date(now).toISOString(),
+              correlationId: String(runId),
+              causationId: null,
+              sequence: 0,
+              aggregateType: 'Run',
+              aggregateId: String(runId),
+              source: { processKind: 'node', processId: 'test' },
+              payload: event,
             }
           }
           if (notification.update.sessionUpdate === 'agent_thought_chunk') {
-            return {
-              type: 'message.delta',
+            const event = {
+              type: 'MessageDelta',
               runId,
               messageId: 'msg2',
               sequence: 1,
               channel: 'thinking',
               payload: { content: 'thinking' },
-              timestamp: Date.now(),
+              timestamp: now,
+            }
+            return {
+              eventId: `test_thought_${now}`,
+              type: 'MessageDelta',
+              occurredAt: new Date(now).toISOString(),
+              correlationId: String(runId),
+              causationId: null,
+              sequence: 0,
+              aggregateType: 'Run',
+              aggregateId: String(runId),
+              source: { processKind: 'node', processId: 'test' },
+              payload: event,
             }
           }
           return null
@@ -196,14 +221,14 @@ describe('AgentRunner', () => {
         events.push(event)
       }
 
-      // 应包含两个 message.delta 和一个 run.completed
+      // 应包含两个 MessageDelta 和一个 RunCompleted
       expect(events.length).toBe(3)
-      expect(events[0]!.type).toBe('message.delta')
-      expect(events[1]!.type).toBe('message.delta')
-      expect(events[2]!.type).toBe('run.completed')
+      expect(events[0]!.type).toBe('MessageDelta')
+      expect(events[1]!.type).toBe('MessageDelta')
+      expect(events[2]!.type).toBe('RunCompleted')
     })
 
-    it('yields run.completed even when no events are produced', async () => {
+    it('yields RunCompleted even when no events are produced', async () => {
       const { mapSessionUpdateToRuntimeEvent } = await import('../acp/event-adapter.js')
       const mapFn = mapSessionUpdateToRuntimeEvent as ReturnType<typeof vi.fn>
       mapFn.mockReturnValue(null)
@@ -225,7 +250,7 @@ describe('AgentRunner', () => {
       }
 
       expect(events.length).toBe(1)
-      expect(events[0]!.type).toBe('run.completed')
+      expect(events[0]!.type).toBe('RunCompleted')
     })
 
     it('unsubscribes from session updates after query completes', async () => {

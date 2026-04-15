@@ -123,6 +123,18 @@ TIANJI_CP_DATA_DIR=/path/to/controlplane pnpm --filter @tianji/controlplane migr
 
 建议在启动旧版本数据库前，先执行一次 migration。
 
+## 升级步骤
+
+**每次升级 controlplane 前，必须先执行：**
+
+```bash
+pnpm --filter @tianji/controlplane migrate
+```
+
+该命令会扫描 `apps/controlplane/migrations/` 目录，把尚未应用的 SQL 文件按文件名顺序逐一执行，并记录执行状态以避免重复运行。本次升级包含 `20260414-drop-task-events.sql`，会删除旧版遗留的 `task_events` 表。
+
+如果跳过此步骤，旧 `task_events` 空表会继续留在数据库中。功能不受影响，但与当前代码的语义不一致，后续排查问题时容易产生混淆。
+
 ## 目录结构
 
 ```text
@@ -139,6 +151,15 @@ apps/controlplane/
 ├─ README.md
 └─ vite.config.ts
 ```
+
+## 事件系统
+
+tianji-ai 使用 Core / Integration / Protocol 三层事件架构：
+- Core：聚合根发射纯 DomainEvent（PascalCase，如 `RunStarted`）。
+- Integration：统一 `DomainEventEnvelope` 信封，`correlationId + causationId + sequence` 三件套。
+- Protocol：AG-UI / ACP / Daemon SSE / OTel / Observer 都是 EventBus 订阅者。
+
+旧 `RuntimeEvent` / `TaskEvent` 已移除。详见 `docs/superpowers/specs/2026-04-14-event-bus-design.md`。
 
 ## 相关文档
 
