@@ -15,12 +15,7 @@ import { CancelledError, ProviderError, type RunSnapshot, TianjiError } from '@t
 
 import { ToolRegistry } from '../tool-catalog.js'
 import type { ToolCatalog } from '../tool-catalog.js'
-import type {
-  AbortSignalScope,
-  DeepagentsInterruptRecord,
-  RunLineageFields,
-  SessionRuntimeOptions,
-} from './types.js'
+import type { AbortSignalScope, RunLineageFields, SessionRuntimeOptions } from './types.js'
 
 // ── lineage ──────────────────────────────────────────────────────────────────
 
@@ -65,23 +60,6 @@ export function normalizeToolCatalog(
 
 function isToolCatalog(value: SessionRuntimeOptions['toolCatalog']): value is ToolCatalog {
   return value !== undefined && !Array.isArray(value) && !(value instanceof ToolRegistry)
-}
-
-// ── 类型守卫 ──────────────────────────────────────────────────────────────────
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null
-}
-
-export function isDeepagentsInterruptRecord(value: unknown): value is DeepagentsInterruptRecord {
-  if (!isRecord(value)) {
-    return false
-  }
-
-  return (
-    (value.id === undefined || typeof value.id === 'string') &&
-    ('value' in value || value.value === undefined)
-  )
 }
 
 // ── abort signal ──────────────────────────────────────────────────────────────
