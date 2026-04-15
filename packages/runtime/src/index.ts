@@ -34,6 +34,7 @@ export {
   type ToolCatalog,
 } from './tool-catalog.js'
 export { resolveAgentModel } from './model-resolver.js'
+export * from './bus/index.js'
 export {
   createSessionRuntime,
   type CreateSessionOptions,
