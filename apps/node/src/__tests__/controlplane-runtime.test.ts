@@ -73,7 +73,7 @@ function createConnectionDouble(): ControlPlaneConnectionLike {
     stop: vi.fn(),
     setExecutionState: vi.fn(),
     client: {
-      postTaskEvents: vi.fn(async () => undefined),
+      postDomainEvents: vi.fn(async () => undefined),
     },
   }
 }

@@ -241,14 +241,14 @@ export async function runDaemonEntry(): Promise<void> {
       )
 
       // ---- 装配 forwarder（订阅在 als.run() 外，符合 Stage 06 review 约束）----
-      // 从 connection.client 获取 postTaskEvents，当 client 不可用时直接抛出（let it crash）
+      // 从 connection.client 获取 postDomainEvents，当 client 不可用时直接抛出（let it crash）
       const cpClient = runtime.connection.client
       if (cpClient !== undefined) {
         const forwarder = createForwarder({
           bus,
-          post: async ({ taskId, events }) => {
+          post: async ({ events }) => {
             const ndjson = events.map((e) => JSON.stringify(e)).join('\n')
-            await cpClient.postTaskEvents(taskId, ndjson)
+            await cpClient.postDomainEvents(ndjson)
           },
           maxItems: 500,
           flushIntervalMs: 50,

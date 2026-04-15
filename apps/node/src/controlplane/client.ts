@@ -99,15 +99,14 @@ export class ControlPlaneClient {
    * 批量 POST DomainEventEnvelope NDJSON 到 cp。
    * 供 forwarder 调用，每次 flush 触发一次请求。
    *
-   * @param taskId - URL 路由参数（用于 cp 鉴权）
    * @param ndjson - 序列化后的 NDJSON 字符串（每行一个 JSON envelope）
    */
-  async postTaskEvents(taskId: string, ndjson: string): Promise<void> {
+  async postDomainEvents(ndjson: string): Promise<void> {
     if (!this.#accessToken) {
       throw new Error('Not authenticated. Call register() first.')
     }
 
-    const response = await fetch(`${this.#baseUrl}/api/tasks/${taskId}/events`, {
+    const response = await fetch(`${this.#baseUrl}/api/events`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-ndjson',
@@ -117,20 +116,20 @@ export class ControlPlaneClient {
     })
 
     if (response.status === 401) {
-      throw new ControlPlaneAuthError('Post task events rejected: token expired or revoked')
+      throw new ControlPlaneAuthError('Post domain events rejected: token expired or revoked')
     }
 
     if (!response.ok) {
-      throw new Error(`Post task events failed: ${response.status}`)
+      throw new Error(`Post domain events failed: ${response.status}`)
     }
   }
 
-  async openEventStream(taskId: string): Promise<NdjsonWriter> {
+  async openEventStream(): Promise<NdjsonWriter> {
     if (!this.#accessToken) {
       throw new Error('Not authenticated. Call register() first.')
     }
 
-    const url = `${this.#baseUrl}/api/tasks/${taskId}/events`
+    const url = `${this.#baseUrl}/api/events`
     const controller = new AbortController()
     const encoder = new TextEncoder()
 

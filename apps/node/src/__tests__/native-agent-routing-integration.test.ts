@@ -47,14 +47,14 @@ beforeEach(async () => {
   agentMock = await import('@tianji/agent')
 })
 
-/** 创建 ControlPlaneConnectionLike double，client 提供 postTaskEvents stub。 */
+/** 创建 ControlPlaneConnectionLike double，client 提供 postDomainEvents stub。 */
 function createConnectionDouble(): ControlPlaneConnectionLike {
   return {
     start: vi.fn(async () => undefined),
     stop: vi.fn(),
     setExecutionState: vi.fn(),
     client: {
-      postTaskEvents: vi.fn(async () => undefined),
+      postDomainEvents: vi.fn(async () => undefined),
     },
   }
 }

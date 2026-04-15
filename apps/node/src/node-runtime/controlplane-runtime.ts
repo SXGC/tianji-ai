@@ -63,9 +63,9 @@ export interface ControlPlaneRuntimeDeps {
 }
 
 export interface ControlPlaneConnectionLike {
-  /** 暴露给 daemon-entry 的 HTTP client，用于 forwarder 的 postTaskEvents。 */
+  /** 暴露给 daemon-entry 的 HTTP client，用于 forwarder 的 postDomainEvents。 */
   readonly client?: {
-    postTaskEvents(taskId: string, ndjson: string): Promise<void>
+    postDomainEvents(ndjson: string): Promise<void>
   }
   start(): Promise<void>
   stop(): void

@@ -51,7 +51,6 @@ describe('Forwarder', () => {
     await flushMicrotasks()
 
     expect(post).toHaveBeenCalledTimes(1)
-    expect(post.mock.calls[0][0].taskId).toBe('t1')
     expect(post.mock.calls[0][0].events).toHaveLength(2)
 
     await fwd.dispose()
@@ -94,7 +93,6 @@ describe('Forwarder', () => {
     })
 
     const env = makeEnvelope(99)
-    env.correlationId // 'c1'
 
     bus.publish(env)
     await flushMicrotasks()

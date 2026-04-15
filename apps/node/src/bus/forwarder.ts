@@ -7,16 +7,14 @@
  * - BatchCommitter 负责 maxItems 满或 flushIntervalMs 到时批量 POST。
  * - dispose() 顺序：unsubscribe → committer.dispose()（含 final flush）。
  *
- * currentTaskId：路由占位符，实际 ingest 不强校验此 id。
  * @module bus/forwarder
  */
 
 import type { DomainEventEnvelope, EventBus, SubscriptionHandle } from '@tianji/shared'
 import { BatchCommitter } from '@tianji/shared'
 
-/** POST 函数签名：接受 taskId + envelope 数组，返回 Promise<void>。 */
+/** POST 函数签名：接受 envelope 数组，返回 Promise<void>。 */
 export type ForwarderPost = (body: {
-  taskId: string
   events: readonly DomainEventEnvelope[]
 }) => Promise<void>
 
@@ -31,7 +29,7 @@ export interface ForwarderDeps {
   /** BatchCommitter 定时 flush 间隔（毫秒）。 */
   readonly flushIntervalMs: number
   /**
-   * 动态获取当前 task 路由 ID 的 getter。
+   * 动态获取当前执行任务 ID 的 getter。
    * daemon 是长进程，每次执行不同任务；通过 getter 动态获取当前 taskId。
    * 返回 null 时 flush 将跳过（无任务执行中）。
    */
@@ -55,12 +53,11 @@ export function createForwarder(deps: ForwarderDeps): ForwarderHandle {
     maxItems: deps.maxItems,
     flushIntervalMs: deps.flushIntervalMs,
     flush: async (events) => {
-      const taskId = deps.getCurrentTaskId()
-      if (taskId === null) {
-        // 无任务执行中，丢弃（daemon 启动阶段的背景噪音事件无需转发）
+      // 无任务执行中，丢弃（daemon 启动阶段的背景噪音事件无需转发）
+      if (deps.getCurrentTaskId() === null) {
         return
       }
-      await deps.post({ taskId, events })
+      await deps.post({ events })
     },
   })
 
