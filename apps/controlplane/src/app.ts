@@ -62,7 +62,11 @@ export function createApp(
   app.route('/', createNodeRegisterRoute(db, logger, emitEvent))
   app.route('/', createNodeHeartbeatRoute(db, logger))
   app.route('/', createCommandPollRoute(db, logger))
-  app.route('/', createTaskEventsRoute(db, logger))
+  // bus 由 Task 5 统一注入；未注入时跳过路由注册（等同于 404），
+  // 避免在无 bus 的测试环境中启动时 throw。
+  if (bus !== undefined) {
+    app.route('/', createTaskEventsRoute({ db, logger, bus }))
+  }
 
   app.route('/', createUiNodesRoute(db))
   app.route('/', createCopilotRoute(db, bus))
