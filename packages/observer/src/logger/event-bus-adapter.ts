@@ -61,7 +61,7 @@ export function formatEnvelopeLog(env: DomainEventEnvelope): {
 export function subscribeEventBusLogger(bus: EventBus, logger: ObserverLogger): SubscriptionHandle {
   return bus.subscribe(
     {},
-    (env) => {
+    (env: DomainEventEnvelope) => {
       const { message, scope, data } = formatEnvelopeLog(env)
       void logger.trace(scope, message, data)
     },

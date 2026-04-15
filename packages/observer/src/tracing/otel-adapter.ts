@@ -180,5 +180,7 @@ export function handleSpanEvent(env: DomainEventEnvelope): void {
  * ```
  */
 export function subscribeOtelAdapter(bus: EventBus): SubscriptionHandle {
-  return bus.subscribe(OTEL_ADAPTER_FILTER, (env) => handleSpanEvent(env), { name: 'otel-adapter' })
+  return bus.subscribe(OTEL_ADAPTER_FILTER, (env: DomainEventEnvelope) => {
+    handleSpanEvent(env)
+  }, { name: 'otel-adapter' })
 }
