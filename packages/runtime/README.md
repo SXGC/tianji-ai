@@ -109,6 +109,17 @@ void runtime
 - 当 run 因 HITL 中断而暂停时，调用方应先读取 `readRunRuntimeMetadata(run.metadata)` 和 `readDeepagentsRunWorkflowState(run.workflowState)`，再通过 `resumeRun({ runId, resumeValue })` 提交与上游 LangGraph `Command({ resume })` 兼容的 JSON 值。
 - `readSessionRuntimeMetadata` 与 `readRunRuntimeMetadata` 仍会识别 legacy metadata，便于校验历史快照、迁移脚本和只读兼容测试。
 
+## 事件系统
+
+tianji-ai 使用 Core / Integration / Protocol 三层事件架构：
+- Core：聚合根发射纯 DomainEvent（PascalCase，如 `RunStarted`）。
+- Integration：统一 `DomainEventEnvelope` 信封，`correlationId + causationId + sequence` 三件套。
+- Protocol：AG-UI / ACP / Daemon SSE / OTel / Observer 都是 EventBus 订阅者。
+
+旧 `RuntimeEvent` / `TaskEvent` 已移除。详见 `docs/superpowers/specs/2026-04-14-event-bus-design.md`。
+
+注意：runtime 内部通过 `AsyncLocalStorage` 传播 `correlationId`，无需在每个方法参数中手动传递。
+
 ## 主要依赖
 
 - `deepagents` — 运行时执行引擎

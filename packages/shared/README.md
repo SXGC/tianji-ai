@@ -66,6 +66,15 @@ void soulPath
 
 其中 `providers` 负责声明连接信息，`agents` 负责声明“用哪个 provider/model 运行哪个 agent”，二者解耦，便于多个 agent 复用同一 provider 配置。
 
+## 事件系统
+
+tianji-ai 使用 Core / Integration / Protocol 三层事件架构：
+- Core：聚合根发射纯 DomainEvent（PascalCase，如 `RunStarted`）。
+- Integration：统一 `DomainEventEnvelope` 信封，`correlationId + causationId + sequence` 三件套。
+- Protocol：AG-UI / ACP / Daemon SSE / OTel / Observer 都是 EventBus 订阅者。
+
+旧 `RuntimeEvent` / `TaskEvent` 已移除。详见 `docs/superpowers/specs/2026-04-14-event-bus-design.md`。
+
 ## 开发命令
 
 在仓库根目录执行：

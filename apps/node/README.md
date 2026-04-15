@@ -257,6 +257,15 @@ pnpm --filter @tianji/node clean
 - `@tianji/runtime`：会话执行、事件流、快照与工具目录。
 - `@tianji/shared`：运行时协议类型与配置 schema。
 
+## 事件系统
+
+tianji-ai 使用 Core / Integration / Protocol 三层事件架构：
+- Core：聚合根发射纯 DomainEvent（PascalCase，如 `RunStarted`）。
+- Integration：统一 `DomainEventEnvelope` 信封，`correlationId + causationId + sequence` 三件套。
+- Protocol：AG-UI / ACP / Daemon SSE / OTel / Observer 都是 EventBus 订阅者。
+
+旧 `RuntimeEvent` / `TaskEvent` 已移除。详见 `docs/superpowers/specs/2026-04-14-event-bus-design.md`。
+
 ## 许可证
 
 MIT

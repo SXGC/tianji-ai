@@ -140,6 +140,15 @@ apps/controlplane/
 └─ vite.config.ts
 ```
 
+## 事件系统
+
+tianji-ai 使用 Core / Integration / Protocol 三层事件架构：
+- Core：聚合根发射纯 DomainEvent（PascalCase，如 `RunStarted`）。
+- Integration：统一 `DomainEventEnvelope` 信封，`correlationId + causationId + sequence` 三件套。
+- Protocol：AG-UI / ACP / Daemon SSE / OTel / Observer 都是 EventBus 订阅者。
+
+旧 `RuntimeEvent` / `TaskEvent` 已移除。详见 `docs/superpowers/specs/2026-04-14-event-bus-design.md`。
+
 ## 相关文档
 
 - 仓库级使用说明：[`../../docs/usage/controlplane.md`](../../docs/usage/controlplane.md)
