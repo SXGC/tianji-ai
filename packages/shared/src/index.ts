@@ -110,6 +110,7 @@ export * from './tool.js'
 export * from './task-event.js'
 export * from './command.js'
 export * from './node-types.js'
+export * from './storage/event-log.js'
 
 export type { RunSnapshot, RunStatus, RunTriggerType } from './snapshot.js'
 
