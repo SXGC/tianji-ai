@@ -1,3 +1,4 @@
+import type { BaseEvent } from '@ag-ui/client'
 import { createEventBus } from '@tianji/shared'
 import { firstValueFrom, toArray } from 'rxjs'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -319,5 +320,143 @@ describe('TianjiAgent.cancelTask', () => {
     const agent = new TianjiAgent(db, 'node-1', 'agent-1')
 
     await expect(agent.cancelTask('ghost-task')).rejects.toThrow(/not found/i)
+  })
+})
+
+describe('TianjiAgent cancel 终态', () => {
+  let db: ControlPlaneDb
+
+  afterEach(() => {
+    db?.close()
+  })
+
+  function setupOnlineNode(nodeId: string) {
+    db.raw
+      .prepare(
+        `INSERT INTO enrollment_tokens (token, created_at) VALUES ('test-token', ${Date.now()})
+         ON CONFLICT(token) DO NOTHING`
+      )
+      .run()
+
+    db.raw
+      .prepare(
+        `INSERT INTO nodes
+           (node_id, hostname, platform, version, status, access_token_hash, access_token_expires_at, enrollment_token, created_at, updated_at)
+         VALUES (?, 'host', 'linux', '1.0.0', 'online', 'hash', ${Date.now() + 3600000}, 'test-token', ${Date.now()}, ${Date.now()})`
+      )
+      .run(nodeId)
+  }
+
+  function createTestBus() {
+    return createEventBus({
+      lagSink: (info) => {
+        console.warn('[test-bus] subscriber lag', info)
+      },
+    })
+  }
+
+  it('TaskCancelled envelope 到达后，订阅者收到 RUN_FINISHED（而非 RUN_ERROR）', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+    const bus = createTestBus()
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus)
+
+    const events: BaseEvent[] = []
+    const subscription = agent
+      .run({
+        threadId: 'thread-cancel-1',
+        runId: 'run-cancel-1',
+        messages: [{ id: 'm-cancel', role: 'user', content: 'hi' }],
+        tools: [],
+        context: [],
+        forwardedProps: {},
+        state: {},
+      })
+      .subscribe((e) => events.push(e))
+
+    // 等待 task 记录写入 DB
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const taskRow = db.raw
+      .prepare('SELECT task_id FROM tasks ORDER BY created_at DESC LIMIT 1')
+      .get() as { task_id: string } | undefined
+
+    expect(taskRow).toBeDefined()
+    const taskId = taskRow!.task_id
+
+    // 通过 bus 发 TaskCancelled envelope
+    bus.publish({
+      eventId: 'evt-cancel-1',
+      type: 'TaskCancelled',
+      occurredAt: new Date().toISOString(),
+      correlationId: 'corr-cancel-1',
+      causationId: null,
+      sequence: 1,
+      aggregateType: 'Task',
+      aggregateId: taskId,
+      source: { processKind: 'node', processId: 'node-proc-1', nodeId: 'node-1' },
+      payload: { type: 'TaskCancelled', taskId, timestamp: Date.now() },
+    })
+
+    // 等待 Observable 完成
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    subscription.unsubscribe()
+
+    expect(events.some((e) => e.type === 'RUN_FINISHED')).toBe(true)
+    expect(events.some((e) => e.type === 'RUN_ERROR')).toBe(false)
+  })
+
+  it('TaskCancelled 产出的 RUN_FINISHED 携带正确的 threadId 和 runId', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+    const bus = createTestBus()
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus)
+
+    const events: BaseEvent[] = []
+    const subscription = agent
+      .run({
+        threadId: 'thread-cancel-2',
+        runId: 'run-cancel-2',
+        messages: [{ id: 'm-cancel-2', role: 'user', content: 'bye' }],
+        tools: [],
+        context: [],
+        forwardedProps: {},
+        state: {},
+      })
+      .subscribe((e) => events.push(e))
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const taskRow = db.raw
+      .prepare('SELECT task_id FROM tasks ORDER BY created_at DESC LIMIT 1')
+      .get() as { task_id: string } | undefined
+
+    expect(taskRow).toBeDefined()
+    const taskId = taskRow!.task_id
+
+    bus.publish({
+      eventId: 'evt-cancel-2',
+      type: 'TaskCancelled',
+      occurredAt: new Date().toISOString(),
+      correlationId: 'corr-cancel-2',
+      causationId: null,
+      sequence: 1,
+      aggregateType: 'Task',
+      aggregateId: taskId,
+      source: { processKind: 'node', processId: 'node-proc-1', nodeId: 'node-1' },
+      payload: { type: 'TaskCancelled', taskId, timestamp: Date.now() },
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    subscription.unsubscribe()
+
+    const runFinished = events.find((e) => e.type === 'RUN_FINISHED') as
+      | (BaseEvent & { threadId: string; runId: string; reason?: string })
+      | undefined
+
+    expect(runFinished).toBeDefined()
+    expect(runFinished!.threadId).toBe('thread-cancel-2')
+    expect(runFinished!.runId).toBe('run-cancel-2')
+    expect(runFinished!.reason).toBe('cancelled')
   })
 })

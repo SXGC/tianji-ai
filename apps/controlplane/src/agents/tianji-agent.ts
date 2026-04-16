@@ -151,11 +151,22 @@ export class TianjiAgent extends AbstractAgent {
             }
 
             if (!sawTerminalAgUiEvent) {
-              subscriber.next(
-                env.type === 'TaskCompleted'
-                  ? ({ type: EventType.RUN_FINISHED, threadId, runId } as BaseEvent)
-                  : ({ type: EventType.RUN_ERROR, message: `Task ${env.type}` } as BaseEvent)
-              )
+              // TaskCompleted 和 TaskCancelled 都是优雅结束，发 RUN_FINISHED。
+              // cancel 携带 reason='cancelled' 以便客户端区分。
+              // 其他终态（TaskFailed、TaskObservationLost）视为错误，发 RUN_ERROR。
+              if (env.type === 'TaskCompleted' || env.type === 'TaskCancelled') {
+                subscriber.next({
+                  type: EventType.RUN_FINISHED,
+                  threadId,
+                  runId,
+                  ...(env.type === 'TaskCancelled' ? { reason: 'cancelled' } : {}),
+                } as BaseEvent)
+              } else {
+                subscriber.next({
+                  type: EventType.RUN_ERROR,
+                  message: `Task ${env.type}`,
+                } as BaseEvent)
+              }
             }
 
             subscription.unsubscribe()

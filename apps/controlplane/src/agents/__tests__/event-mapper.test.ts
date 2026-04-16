@@ -172,24 +172,22 @@ describe('Task 事件映射', () => {
     })
   })
 
-  describe('TaskCancelled → STATE_DELTA + RUN_ERROR', () => {
-    it('产生两个事件：先 STATE_DELTA，再 RUN_ERROR', () => {
+  describe('TaskCancelled → 只发 STATE_DELTA（取消不是错误）', () => {
+    it('不产生 RUN_ERROR（cancel 是用户主动取消，非错误）', () => {
       const result = mapToAgUi(
         envelope({ type: 'TaskCancelled', taskId: 'task-001', timestamp: 1000 }),
         freshCtx()
       )
-      expect(result).toHaveLength(2)
-      expect(result[0].type).toBe(EventType.STATE_DELTA)
-      expect(result[1].type).toBe(EventType.RUN_ERROR)
+      expect(result.some((e) => e.type === EventType.RUN_ERROR)).toBe(false)
     })
 
-    it('RUN_ERROR 的 message 固定为 "Task cancelled"', () => {
+    it('只产生一个 STATE_DELTA 事件，由上层运行器统一发送 RUN_FINISHED', () => {
       const result = mapToAgUi(
         envelope({ type: 'TaskCancelled', taskId: 'task-001', timestamp: 1000 }),
         freshCtx()
       )
-      const resultEv = result[1] as { message: string }
-      expect(resultEv.message).toBe('Task cancelled')
+      expect(result).toHaveLength(1)
+      expect(result[0].type).toBe(EventType.STATE_DELTA)
     })
 
     it('STATE_DELTA 包含 /taskStatus=cancelled patch', () => {

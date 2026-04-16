@@ -90,15 +90,13 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
       ]
     }
 
+    // cancel 是用户主动取消，不是错误。只更新状态，RUN_FINISHED 由 tianji-agent 持有
+    // threadId/runId 后补发，与 TaskCompleted 处理方式对齐。
     case 'TaskCancelled':
       return [
         ev({
           type: EventType.STATE_DELTA,
           delta: [{ op: 'replace', path: '/taskStatus', value: 'cancelled' }],
-        }),
-        ev({
-          type: EventType.RUN_ERROR,
-          message: 'Task cancelled',
         }),
       ]
 
