@@ -8,6 +8,7 @@ import {
   type Command,
   type DomainEvent,
   type DomainEventEnvelope,
+  ProviderError,
   TianjiError,
   ToolError,
   createNodeId,
@@ -256,12 +257,13 @@ describe('TaskExecutorConfig', () => {
     expect(emittedTypes[0]).toBe('TaskStarted')
     expect(emittedTypes[emittedTypes.length - 1]).toBe('TaskFailed')
 
-    // TaskFailed.error 必须携带原始错误消息
+    // TaskFailed.error 必须携带原始错误消息与 code（普通 Error.name 默认为 'Error'）
     const failedEvent = emitEvent.mock.calls.find(
       (call) => (call[0] as DomainEvent).type === 'TaskFailed'
     )?.[0] as Extract<DomainEvent, { type: 'TaskFailed' }> | undefined
     expect(failedEvent?.error).toBeInstanceOf(TianjiError)
     expect(failedEvent?.error.message).toBe('runner exploded')
+    expect(failedEvent?.error.code).toBe('Error')
   })
 
   it('emits TaskFailed when runner ends without terminal event', async () => {
@@ -735,6 +737,187 @@ describe('TaskExecutorConfig', () => {
     expect(events.some((e) => e.type === 'MessageStarted')).toBe(true)
   })
 
+  // ── Task 1.2：Run 终端分发 Task 终端 + error 透传 ─────────────────────────────
+
+  it('yield RunCompleted 时发 TaskCompleted（而非 TaskFailed）', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-dispatch-completed' as never
+    const now = Date.now()
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield {
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-dispatch' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+            yield {
+              type: 'RunCompleted',
+              runId,
+              sessionId: 'session-dispatch' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+          },
+        }),
+      })
+    )
+
+    await executor.execute(createCommand(createTaskId('task-dispatch-1'), 'dispatch completed'))
+
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('TaskCompleted')
+    expect(emittedTypes).not.toContain('TaskFailed')
+  })
+
+  it('yield RunFailed 时发 TaskFailed，error 透传自 RunFailed.error', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-dispatch-failed' as never
+    const now = Date.now()
+    const runFailedError = new ProviderError('PROVIDER_HTTP_500', '500 empty_stream')
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield {
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-dispatch-failed' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+            yield {
+              type: 'RunFailed',
+              runId,
+              sessionId: 'session-dispatch-failed' as never,
+              triggerType: 'new',
+              error: runFailedError,
+              timestamp: now,
+            }
+          },
+        }),
+      })
+    )
+
+    await executor.execute(createCommand(createTaskId('task-dispatch-2'), 'dispatch failed'))
+
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('TaskStarted')
+    expect(emittedTypes).toContain('TaskFailed')
+    expect(emittedTypes).not.toContain('TaskCompleted')
+
+    const failedEvent = (emitEvent.mock.calls as Array<[DomainEvent]>)
+      .map(([e]) => e)
+      .find((e) => e.type === 'TaskFailed') as
+      | Extract<DomainEvent, { type: 'TaskFailed' }>
+      | undefined
+    expect(failedEvent?.error.code).toBe('PROVIDER_HTTP_500')
+    expect(failedEvent?.error.message).toBe('500 empty_stream')
+    // error 是同一个实例（直接透传）
+    expect(failedEvent?.error).toBe(runFailedError)
+  })
+
+  it('yield RunCancelled 时 execute 抛错，提示待 Phase 2.5 支持', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-dispatch-cancelled' as never
+    const now = Date.now()
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield {
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-dispatch-cancelled' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+            yield {
+              type: 'RunCancelled',
+              runId,
+              sessionId: 'session-dispatch-cancelled' as never,
+              triggerType: 'new',
+              reason: 'abort',
+              timestamp: now,
+            }
+          },
+        }),
+      })
+    )
+
+    // RunCancelled 尚未支持，应 reject 并提示 Phase 2.5
+    await expect(
+      executor.execute(createCommand(createTaskId('task-dispatch-3'), 'dispatch cancelled'))
+    ).rejects.toThrow(/Phase 2\.5/i)
+
+    // catch 块被触发，应发 TaskFailed
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('TaskFailed')
+  })
+
+  it('for-await 抛 ProviderError 时，TaskFailed.error.code/message/category 透传自异常', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-passthrough-error' as never
+    const now = Date.now()
+    const boom = new ProviderError('PROVIDER_TIMEOUT', '1200ms timeout')
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield {
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-passthrough' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+            throw boom
+          },
+        }),
+      })
+    )
+
+    await expect(
+      executor.execute(createCommand(createTaskId('task-passthrough'), 'passthrough error'))
+    ).rejects.toThrow('1200ms timeout')
+
+    const failedEvent = (emitEvent.mock.calls as Array<[DomainEvent]>)
+      .map(([e]) => e)
+      .find((e) => e.type === 'TaskFailed') as
+      | Extract<DomainEvent, { type: 'TaskFailed' }>
+      | undefined
+    expect(failedEvent?.error.code).toBe('PROVIDER_TIMEOUT')
+    expect(failedEvent?.error.message).toBe('1200ms timeout')
+    expect(failedEvent?.error.category).toBe('provider')
+  })
+
   it('一个 task 产出多条 assistant 消息时，各自保持独立的 TaskMessage* 链', async () => {
     const module = await import('../task-executor.js')
     const emitEvent = vi.fn()
@@ -855,9 +1038,10 @@ describe('TaskExecutorConfig', () => {
     ])
   })
 
-  it('logs run.failed and run.cancelled turn summaries', async () => {
+  it('logs run.failed turn summary and emits TaskFailed', async () => {
     const module = await import('../task-executor.js')
     const written: Array<{ level: string; message: string; data?: Record<string, unknown> }> = []
+    const emitEvent = vi.fn()
     const logger = createCliLogger({
       sink: {
         async write(entry) {
@@ -869,10 +1053,11 @@ describe('TaskExecutorConfig', () => {
     const runId = 'run-test' as never
     const now = Date.now()
 
-    // 测试 run.failed
+    // 测试 run.failed：循环正常结束，分发 TaskFailed（非 TaskCompleted）
     const executor1 = new module.TaskExecutor(
       makeConfig({
         logger,
+        emitEvent,
         createRunner: async () => ({
           agentId: 'default',
           connect: async () => undefined,
@@ -900,6 +1085,7 @@ describe('TaskExecutorConfig', () => {
 
     await executor1.execute(createCommand(createTaskId('task-001'), 'run failed'))
 
+    // turn summary 日志仍存在
     const failedSummary = written.find(
       (e) =>
         e.message === 'Run turn summary' &&
@@ -907,11 +1093,32 @@ describe('TaskExecutorConfig', () => {
     )
     expect(failedSummary).toBeDefined()
 
-    // 测试 run.cancelled
-    written.length = 0
+    // 分发 TaskFailed，而非 TaskCompleted
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('TaskFailed')
+    expect(emittedTypes).not.toContain('TaskCompleted')
+  })
+
+  it('logs run.cancelled turn summary and execute rejects (Phase 2.5 placeholder)', async () => {
+    const module = await import('../task-executor.js')
+    const written: Array<{ level: string; message: string; data?: Record<string, unknown> }> = []
+    const emitEvent = vi.fn()
+    const logger = createCliLogger({
+      sink: {
+        async write(entry) {
+          written.push({ level: entry.level, message: entry.message, data: entry.data })
+        },
+      },
+    })
+
+    const runId = 'run-test' as never
+    const now = Date.now()
+
+    // 测试 run.cancelled：当前阶段 execute 应抛错，留待 Phase 2.5 支持 TaskCancelled
     const executor2 = new module.TaskExecutor(
       makeConfig({
         logger,
+        emitEvent,
         createRunner: async () => ({
           agentId: 'default',
           connect: async () => undefined,
@@ -937,13 +1144,21 @@ describe('TaskExecutorConfig', () => {
       })
     )
 
-    await executor2.execute(createCommand(createTaskId('task-002'), 'run cancelled'))
+    // RunCancelled 当前不支持，execute 应 reject
+    await expect(
+      executor2.execute(createCommand(createTaskId('task-002'), 'run cancelled'))
+    ).rejects.toThrow(/Phase 2\.5/i)
 
+    // turn summary 日志仍存在（在 throw 前已记录）
     const cancelledSummary = written.find(
       (e) =>
         e.message === 'Run turn summary' &&
         (e.data as Record<string, unknown>)?.endReason === 'RunCancelled'
     )
     expect(cancelledSummary).toBeDefined()
+
+    // catch 块接住了 throw，所以会发 TaskFailed
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('TaskFailed')
   })
 })

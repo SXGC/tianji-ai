@@ -14,13 +14,17 @@ import type {
   MessageCompletedEvent,
   NodeExecutionState,
   NodeId,
+  RunCancelledEvent,
+  RunCompletedEvent,
+  RunFailedEvent,
   TaskMessageCompletedEvent,
   TaskMessageDeltaEvent,
   TaskMessageStartedEvent,
   ToolCompletedEvent,
   ToolFailedEvent,
 } from '@tianji/shared'
-import { TianjiError } from '@tianji/shared'
+
+import { toPassThroughTianjiError } from './error-passthrough.js'
 
 interface TurnSummary {
   runId: string
@@ -102,7 +106,7 @@ export class TaskExecutor {
         })
 
         let turn: TurnSummary | null = null
-        let sawTerminalRunEvent = false
+        let lastRunTerminal: RunFailedEvent | RunCancelledEvent | RunCompletedEvent | null = null
 
         for await (const event of runner.query(command.payload.goal)) {
           turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
@@ -111,7 +115,7 @@ export class TaskExecutor {
             event.type === 'RunFailed' ||
             event.type === 'RunCancelled'
           ) {
-            sawTerminalRunEvent = true
+            lastRunTerminal = event
           }
 
           this.#config.emitEvent(event)
@@ -122,29 +126,56 @@ export class TaskExecutor {
           }
         }
 
-        if (!sawTerminalRunEvent) {
+        if (lastRunTerminal === null) {
           throw new Error('Agent run ended without a terminal event')
         }
 
-        await this.#config.logger?.logDebug(this.#scope, 'Emitting TaskCompleted lifecycle event', {
-          taskId,
-        })
-        this.#config.emitEvent({ type: 'TaskCompleted', taskId, timestamp: now() })
-        await this.#config.logger?.logDebug(this.#scope, 'Task execution finished successfully', {
-          taskId,
-        })
+        switch (lastRunTerminal.type) {
+          case 'RunCompleted': {
+            await this.#config.logger?.logDebug(
+              this.#scope,
+              'Emitting TaskCompleted lifecycle event',
+              { taskId }
+            )
+            this.#config.emitEvent({ type: 'TaskCompleted', taskId, timestamp: now() })
+            await this.#config.logger?.logDebug(
+              this.#scope,
+              'Task execution finished successfully',
+              { taskId }
+            )
+            break
+          }
+          case 'RunFailed': {
+            await this.#config.logger?.logDebug(
+              this.#scope,
+              'Emitting TaskFailed lifecycle event from RunFailed',
+              { taskId }
+            )
+            this.#config.emitEvent({
+              type: 'TaskFailed',
+              taskId,
+              timestamp: now(),
+              error: lastRunTerminal.error,
+            })
+            break
+          }
+          case 'RunCancelled': {
+            // TODO(Phase 2.5)：补齐 TaskCancelled 分发，当前先 throw 暴露未支持状态
+            throw new Error('RunCancelled terminal not supported yet; will be handled in Phase 2.5')
+          }
+        }
       } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error)
+        const resolvedError = toPassThroughTianjiError(error)
         await this.#config.logger?.logError(this.#scope, 'Task execution failed', {
           taskId,
-          error: errorMessage,
+          error: resolvedError.message,
         })
 
         this.#config.emitEvent({
           type: 'TaskFailed',
           taskId,
           timestamp: now(),
-          error: new TianjiError('internal', 'TASK_EXECUTION_FAILED', errorMessage),
+          error: resolvedError,
         })
 
         throw error
