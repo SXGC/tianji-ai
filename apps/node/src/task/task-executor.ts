@@ -11,10 +11,12 @@ import type { ObserverLogScope } from '@tianji/observer'
 import type {
   Command,
   DomainEvent,
-  DomainEventEnvelope,
   MessageCompletedEvent,
   NodeExecutionState,
   NodeId,
+  TaskMessageCompletedEvent,
+  TaskMessageDeltaEvent,
+  TaskMessageStartedEvent,
   ToolCompletedEvent,
   ToolFailedEvent,
 } from '@tianji/shared'
@@ -34,15 +36,10 @@ export interface TaskExecutorConfig {
   /** 在任务级入口建立独立因果链上下文。 */
   readonly enterCorrelation: <T>(correlationId: string, fn: () => Promise<T>) => Promise<T>
   /**
-   * 发射 Task 生命周期领域事件（TaskStarted / TaskCompleted / TaskFailed 等）。
+   * 发射 Task 生命周期领域事件与 runner 产出的领域事件。
    * 事件经 pipeline 包装后进入 bus，由 forwarder 批量转发至 cp。
    */
   readonly emitEvent: (event: DomainEvent) => void
-  /**
-   * 将 agent runner 产生的 DomainEventEnvelope 直接 publish 到 bus。
-   * bus 订阅的 forwarder 负责批量转发至 cp。
-   */
-  readonly publishEnvelope: (envelope: DomainEventEnvelope) => void
   readonly logger?: RuntimeLogger
 }
 
@@ -107,21 +104,22 @@ export class TaskExecutor {
         let turn: TurnSummary | null = null
         let sawTerminalRunEvent = false
 
-        for await (const envelope of runner.query(command.payload.goal)) {
-          if (envelope != null) {
-            const event = envelope.payload
-            turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
-            if (
-              event.type === 'RunCompleted' ||
-              event.type === 'RunFailed' ||
-              event.type === 'RunCancelled'
-            ) {
-              sawTerminalRunEvent = true
-            }
+        for await (const event of runner.query(command.payload.goal)) {
+          turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
+          if (
+            event.type === 'RunCompleted' ||
+            event.type === 'RunFailed' ||
+            event.type === 'RunCancelled'
+          ) {
+            sawTerminalRunEvent = true
           }
 
-          // agent envelope 直接 publish 到 bus，由 forwarder 批量转发至 cp
-          this.#config.publishEnvelope(envelope)
+          this.#config.emitEvent(event)
+
+          const mirrored = mirrorRunMessageToTaskMessage(taskId, event, now())
+          if (mirrored !== null) {
+            this.#config.emitEvent(mirrored)
+          }
         }
 
         if (!sawTerminalRunEvent) {
@@ -242,4 +240,58 @@ async function handleEvent(
   }
 
   return turn
+}
+
+/**
+ * 将 run 级 Message* 事件镜像为 task 级 TaskMessage* 事件。
+ * run 级原事件保留给 observability / 审计；task 级镜像用于 controlplane 展示。
+ *
+ * 只镜像 assistant 消息：`MessageDelta` 在当前 ACP 协议下仅由 agent_message_chunk /
+ * agent_thought_chunk 产生（见 event-adapter），语义天然是 assistant。
+ *
+ * @param taskId    - 任务 ID，用作 task 级事件的 aggregateId
+ * @param event     - runner 产出的裸领域事件
+ * @param timestamp - 镜像事件发射时间
+ * @returns 对应的 TaskMessage* 事件；非消息事件返回 null
+ */
+function mirrorRunMessageToTaskMessage(
+  taskId: string,
+  event: DomainEvent,
+  timestamp: number
+): TaskMessageStartedEvent | TaskMessageDeltaEvent | TaskMessageCompletedEvent | null {
+  if (event.type === 'MessageStarted') {
+    if (event.message.role !== 'assistant') return null
+    return {
+      type: 'TaskMessageStarted',
+      taskId,
+      messageId: event.messageId,
+      role: 'assistant',
+      timestamp,
+    }
+  }
+
+  if (event.type === 'MessageDelta') {
+    return {
+      type: 'TaskMessageDelta',
+      taskId,
+      messageId: event.messageId,
+      sequence: event.sequence,
+      channel: event.channel,
+      payload: event.payload,
+      timestamp,
+    }
+  }
+
+  if (event.type === 'MessageCompleted') {
+    if (event.message.role !== 'assistant') return null
+    return {
+      type: 'TaskMessageCompleted',
+      taskId,
+      messageId: event.messageId,
+      message: event.message,
+      timestamp,
+    }
+  }
+
+  return null
 }

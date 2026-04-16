@@ -1,4 +1,10 @@
 import {
+  CausalContext,
+  NoopSequenceRecoverer,
+  SequenceCounter,
+  createRuntimeEventPipeline,
+} from '@tianji/runtime'
+import {
   type Command,
   type DomainEvent,
   type DomainEventEnvelope,
@@ -12,23 +18,6 @@ import { describe, expect, it, vi } from 'vitest'
 import type { IAgentRunner } from '../../acp/index.js'
 import { createCliLogger } from '../../logger.js'
 import type { TaskExecutorConfig } from '../task-executor.js'
-
-/** 将裸 DomainEvent 包装为最小化 DomainEventEnvelope，专用于测试。 */
-function wrap(event: DomainEvent): DomainEventEnvelope {
-  const runId = 'runId' in event ? String(event.runId) : 'test'
-  return {
-    eventId: `test_${event.type}`,
-    type: event.type,
-    occurredAt: new Date().toISOString(),
-    correlationId: runId,
-    causationId: null,
-    sequence: 0,
-    aggregateType: 'Run',
-    aggregateId: runId,
-    source: { processKind: 'node', processId: 'test' },
-    payload: event,
-  }
-}
 
 function createCommand(taskId: ReturnType<typeof createTaskId>, goal: string): Command {
   return {
@@ -51,36 +40,79 @@ function createRunnerStub(): IAgentRunner {
     connect: async () => undefined,
     disconnect: async () => undefined,
     async *query() {
-      yield wrap({
+      yield {
         type: 'RunStarted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
-      })
-      yield wrap({
+      }
+      yield {
         type: 'RunCompleted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
-      })
+      }
     },
   }
 }
 
-/** 构造最小化 TaskExecutorConfig，emitEvent/publishEnvelope 默认为 vi.fn()。 */
+/** 构造最小化 TaskExecutorConfig，emitEvent 默认为 vi.fn()。 */
 function makeConfig(overrides: Partial<TaskExecutorConfig> = {}): TaskExecutorConfig {
   return {
     nodeId: createNodeId('node-001'),
     onExecutionStateChange: () => undefined,
     emitEvent: vi.fn(),
-    publishEnvelope: vi.fn(),
     enterCorrelation: async (_correlationId, fn) => fn(),
     createRunner: async () => {
       throw new Error('not implemented')
     },
     ...overrides,
+  }
+}
+
+function createEnvelopeCollector() {
+  const publishedEnvelopes: DomainEventEnvelope[] = []
+  const contextRef = { current: CausalContext.root('task-test-correlation') }
+  const pipeline = createRuntimeEventPipeline({
+    publish: (env) => publishedEnvelopes.push(env),
+    counter: new SequenceCounter(),
+    contextProvider: {
+      getCurrent: () => contextRef.current,
+      update: (next) => {
+        contextRef.current = next
+      },
+    },
+    source: { processKind: 'node', processId: 'test-node', nodeId: createNodeId('node-001') },
+    recoverer: NoopSequenceRecoverer,
+  })
+
+  return {
+    publishedEnvelopes,
+    emitEvent: (event: DomainEvent) => pipeline.emitEvent(event),
+  }
+}
+
+function assertNoSyntheticRunEnvelopes(publishedEnvelopes: DomainEventEnvelope[]): void {
+  const runEnvelopes = publishedEnvelopes.filter((env) => env.aggregateType === 'Run')
+  expect(runEnvelopes.length).toBeGreaterThan(0)
+  expect(runEnvelopes.every((env) => !env.eventId.startsWith('inproc_'))).toBe(true)
+  expect(runEnvelopes.every((env) => !env.eventId.startsWith('acp_'))).toBe(true)
+  expect(runEnvelopes.every((env) => !env.eventId.startsWith('runner_'))).toBe(true)
+  expect(runEnvelopes.every((env) => env.sequence >= 1)).toBe(true)
+
+  const groupedSequences = new Map<string, number[]>()
+  for (const env of runEnvelopes) {
+    const sequences = groupedSequences.get(env.aggregateId) ?? []
+    sequences.push(env.sequence)
+    groupedSequences.set(env.aggregateId, sequences)
+  }
+
+  for (const sequences of groupedSequences.values()) {
+    for (let index = 1; index < sequences.length; index += 1) {
+      expect(sequences[index]).toBeGreaterThanOrEqual(sequences[index - 1])
+    }
   }
 }
 
@@ -169,7 +201,11 @@ describe('TaskExecutorConfig', () => {
 
   it('wraps task execution in a task correlation context', async () => {
     const module = await import('../task-executor.js')
-    const enterCorrelation = vi.fn(async (_correlationId: string, fn: () => Promise<void>) => fn())
+    const enterCorrelationCalls: string[] = []
+    const enterCorrelation: TaskExecutorConfig['enterCorrelation'] = async (_correlationId, fn) => {
+      enterCorrelationCalls.push(_correlationId)
+      return fn()
+    }
 
     const executor = new module.TaskExecutor(
       makeConfig({
@@ -183,8 +219,7 @@ describe('TaskExecutorConfig', () => {
 
     await executor.execute(command)
 
-    expect(enterCorrelation).toHaveBeenCalledTimes(1)
-    expect(enterCorrelation).toHaveBeenCalledWith(String(taskId), expect.any(Function))
+    expect(enterCorrelationCalls).toEqual([String(taskId)])
   })
 
   it('emits TaskStarted then TaskFailed when runner query throws', async () => {
@@ -200,7 +235,13 @@ describe('TaskExecutorConfig', () => {
           connect: async () => undefined,
           disconnect: async () => undefined,
           async *query() {
-            yield undefined as never
+            yield {
+              type: 'RunStarted',
+              runId: 'run-test' as never,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: Date.now(),
+            }
             throw failure
           },
         }),
@@ -217,7 +258,7 @@ describe('TaskExecutorConfig', () => {
 
     // TaskFailed.error 必须携带原始错误消息
     const failedEvent = emitEvent.mock.calls.find(
-      ([e]: [DomainEvent]) => e.type === 'TaskFailed'
+      (call) => (call[0] as DomainEvent).type === 'TaskFailed'
     )?.[0] as Extract<DomainEvent, { type: 'TaskFailed' }> | undefined
     expect(failedEvent?.error).toBeInstanceOf(TianjiError)
     expect(failedEvent?.error.message).toBe('runner exploded')
@@ -235,13 +276,13 @@ describe('TaskExecutorConfig', () => {
           connect: async () => undefined,
           disconnect: async () => undefined,
           async *query() {
-            yield wrap({
+            yield {
               type: 'RunStarted',
               runId: 'run-test' as never,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: Date.now(),
-            })
+            }
           },
         }),
       })
@@ -257,23 +298,29 @@ describe('TaskExecutorConfig', () => {
     expect(emittedTypes).not.toContain('TaskCompleted')
   })
 
-  it('publishes agent envelopes to bus via publishEnvelope', async () => {
+  it('publishes runner output via emitEvent instead of publishEnvelope', async () => {
     const module = await import('../task-executor.js')
-    const publishEnvelope = vi.fn()
+    const emitEvent = vi.fn()
+    const { publishedEnvelopes, emitEvent: emitEnvelopeEvent } = createEnvelopeCollector()
 
     const executor = new module.TaskExecutor(
-      makeConfig({ publishEnvelope, createRunner: async () => createRunnerStub() })
+      makeConfig({
+        emitEvent: async (event) => {
+          emitEvent(event)
+          await emitEnvelopeEvent(event)
+        },
+        createRunner: async () => createRunnerStub(),
+      })
     )
 
     await executor.execute(createCommand(createTaskId('task-001'), 'envelopes'))
 
-    // createRunnerStub yields RunStarted + RunCompleted
-    expect(publishEnvelope).toHaveBeenCalledTimes(2)
-    const types = (publishEnvelope.mock.calls as Array<[DomainEventEnvelope]>).map(
-      ([env]) => env.payload.type
-    )
+    const types = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([event]) => event.type)
+    expect(types).toContain('TaskStarted')
     expect(types).toContain('RunStarted')
     expect(types).toContain('RunCompleted')
+    expect(types).toContain('TaskCompleted')
+    assertNoSyntheticRunEnvelopes(publishedEnvelopes)
   })
 
   it('logs message.completed, tool.completed, and tool.failed events', async () => {
@@ -302,14 +349,14 @@ describe('TaskExecutorConfig', () => {
           connect: async () => undefined,
           disconnect: async () => undefined,
           async *query() {
-            yield wrap({
+            yield {
               type: 'RunStarted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            })
-            yield wrap({
+            }
+            yield {
               type: 'MessageCompleted',
               runId,
               messageId: 'msg-1',
@@ -320,30 +367,30 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            })
-            yield wrap({
+            }
+            yield {
               type: 'ToolCompleted',
               runId,
               toolCallId: 'tc-1',
               invocation: { toolCallId: 'tc-1', toolName: 'read_file', args: { path: '/a.ts' } },
               result: { toolCallId: 'tc-1', result: 'file content' },
               timestamp: now,
-            })
-            yield wrap({
+            }
+            yield {
               type: 'ToolFailed',
               runId,
               toolCallId: 'tc-2',
               invocation: { toolCallId: 'tc-2', toolName: 'write_file', args: { path: '/b.ts' } },
               error: new ToolError('WRITE_DENIED', 'permission denied'),
               timestamp: now,
-            })
-            yield wrap({
+            }
+            yield {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            })
+            }
           },
         }),
       })
@@ -382,7 +429,7 @@ describe('TaskExecutorConfig', () => {
           disconnect: async () => undefined,
           async *query() {
             // 先发 message.completed，此时 turn 为 null，应被忽略
-            yield wrap({
+            yield {
               type: 'MessageCompleted',
               runId,
               messageId: 'msg-orphan',
@@ -393,21 +440,21 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            })
-            yield wrap({
+            }
+            yield {
               type: 'RunStarted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            })
-            yield wrap({
+            }
+            yield {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            })
+            }
           },
         }),
       })
@@ -417,6 +464,189 @@ describe('TaskExecutorConfig', () => {
 
     // orphan message.completed 不应产生 "Message completed" 日志
     expect(written.filter((e) => e.message === 'Message completed')).toHaveLength(0)
+  })
+
+  it('镜像 MessageStarted 为 TaskMessageStarted，保留 messageId 且 role=assistant', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-mirror' as never
+    const now = Date.now()
+    const taskId = createTaskId('task-mirror-1')
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield {
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-mirror' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+            yield {
+              type: 'MessageStarted',
+              runId,
+              messageId: 'msg-mirror-1',
+              message: {
+                id: 'msg-mirror-1',
+                role: 'assistant',
+                content: [],
+                createdAt: now,
+              },
+              timestamp: now,
+            }
+            yield {
+              type: 'RunCompleted',
+              runId,
+              sessionId: 'session-mirror' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+          },
+        }),
+      })
+    )
+
+    await executor.execute(createCommand(taskId, 'mirror started'))
+
+    const events = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e)
+    const runLevel = events.find((e) => e.type === 'MessageStarted')
+    const taskLevel = events.find((e) => e.type === 'TaskMessageStarted')
+    expect(runLevel).toBeDefined()
+    expect(taskLevel).toBeDefined()
+    const mirrored = taskLevel as Extract<DomainEvent, { type: 'TaskMessageStarted' }>
+    expect(mirrored.taskId).toBe(String(taskId))
+    expect(mirrored.messageId).toBe('msg-mirror-1')
+    expect(mirrored.role).toBe('assistant')
+    // task 级事件紧跟 run 级事件
+    const runIdx = events.indexOf(runLevel as DomainEvent)
+    const taskIdx = events.indexOf(taskLevel as DomainEvent)
+    expect(taskIdx).toBe(runIdx + 1)
+  })
+
+  it('镜像 MessageDelta 为 TaskMessageDelta，保留 channel/sequence/payload', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-mirror-delta' as never
+    const now = Date.now()
+    const taskId = createTaskId('task-mirror-2')
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield {
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-mirror-2' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+            yield {
+              type: 'MessageDelta',
+              runId,
+              messageId: 'msg-d-1',
+              sequence: 7,
+              channel: 'thinking',
+              payload: { content: 'pondering…' },
+              timestamp: now,
+            }
+            yield {
+              type: 'RunCompleted',
+              runId,
+              sessionId: 'session-mirror-2' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+          },
+        }),
+      })
+    )
+
+    await executor.execute(createCommand(taskId, 'mirror delta'))
+
+    const events = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e)
+    const taskDelta = events.find((e) => e.type === 'TaskMessageDelta') as
+      | Extract<DomainEvent, { type: 'TaskMessageDelta' }>
+      | undefined
+    expect(taskDelta).toBeDefined()
+    expect(taskDelta?.taskId).toBe(String(taskId))
+    expect(taskDelta?.messageId).toBe('msg-d-1')
+    expect(taskDelta?.channel).toBe('thinking')
+    expect(taskDelta?.sequence).toBe(7)
+    expect(taskDelta?.payload.content).toBe('pondering…')
+  })
+
+  it('镜像 MessageCompleted 为 TaskMessageCompleted，携带完整 message', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-mirror-complete' as never
+    const now = Date.now()
+    const taskId = createTaskId('task-mirror-3')
+    const finalMessage = {
+      id: 'msg-final',
+      role: 'assistant' as const,
+      content: [{ type: 'text' as const, text: 'final answer' }],
+      createdAt: now,
+    }
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield {
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-mirror-3' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+            yield {
+              type: 'MessageCompleted',
+              runId,
+              messageId: 'msg-final',
+              message: finalMessage,
+              timestamp: now,
+            }
+            yield {
+              type: 'RunCompleted',
+              runId,
+              sessionId: 'session-mirror-3' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+          },
+        }),
+      })
+    )
+
+    await executor.execute(createCommand(taskId, 'mirror completed'))
+
+    const events = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e)
+    const taskCompleted = events.find((e) => e.type === 'TaskMessageCompleted') as
+      | Extract<DomainEvent, { type: 'TaskMessageCompleted' }>
+      | undefined
+    expect(taskCompleted).toBeDefined()
+    expect(taskCompleted?.taskId).toBe(String(taskId))
+    expect(taskCompleted?.messageId).toBe('msg-final')
+    expect(taskCompleted?.message).toEqual(finalMessage)
+    const order = events.map((e) => e.type)
+    const runIdx = order.indexOf('MessageCompleted')
+    const taskIdx = order.indexOf('TaskMessageCompleted')
+    expect(taskIdx).toBeGreaterThan(runIdx)
   })
 
   it('logs run.failed and run.cancelled turn summaries', async () => {
@@ -442,21 +672,21 @@ describe('TaskExecutorConfig', () => {
           connect: async () => undefined,
           disconnect: async () => undefined,
           async *query() {
-            yield wrap({
+            yield {
               type: 'RunStarted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            })
-            yield wrap({
+            }
+            yield {
               type: 'RunFailed',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
-              error: { category: 'internal', code: 'FAIL', message: 'failed' },
+              error: new TianjiError('internal', 'FAIL', 'failed'),
               timestamp: now,
-            })
+            }
           },
         }),
       })
@@ -481,20 +711,21 @@ describe('TaskExecutorConfig', () => {
           connect: async () => undefined,
           disconnect: async () => undefined,
           async *query() {
-            yield wrap({
+            yield {
               type: 'RunStarted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            })
-            yield wrap({
+            }
+            yield {
               type: 'RunCancelled',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
+              reason: 'abort',
               timestamp: now,
-            })
+            }
           },
         }),
       })
