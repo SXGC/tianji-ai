@@ -99,6 +99,16 @@ export function createControlPlaneRuntime(
     currentConnection?.setExecutionState(state)
   }
 
+  /**
+   * 处理 long-poll 回调下发的命令（fire-and-forget 路径）。
+   *
+   * 此函数由 ControlPlaneConnection 的轮询循环异步调用，调用方不会 await 其结果，
+   * 因此任何未捕获异常都会变成游离的 rejected Promise，无法向上传播。
+   * 这条路径只能将错误落入日志——这不是"吞异常"的妥协，而是该分发模型的固有限制。
+   *
+   * 真正的 Let-it-crash 语义由 {@link ControlPlaneRuntimeHandle.onCommand} 承担：
+   * 该路径是 await 调用，异常可以正常传播给调用方并触发上层重启/报警机制。
+   */
   const executePolledCommand = (command: PollCommandResponse): void => {
     if (taskExecutorRef === null) {
       return
@@ -134,6 +144,7 @@ export function createControlPlaneRuntime(
         break
       }
       case 'task.cancel': {
+        // fire-and-forget 路径无法向上传播异常，只能记录日志；onCommand 路径直接 throw 实现 Let-it-crash。
         try {
           registry.cancel(String(command.payload.taskId))
         } catch (error) {
@@ -148,11 +159,13 @@ export function createControlPlaneRuntime(
         break
       }
       default: {
-        const unknownCmd = command as unknown as { commandId: string; type: string }
+        // 穷尽断言：若 PollCommandResponse 新增 variant 而此处未处理，TS 编译期会在此行报错。
+        const exhaustive: never = command
+        const fallback = exhaustive as { commandId?: string; type?: string }
         config.logger
           ?.logError(['daemon', 'controlplane'], 'Unsupported command type (dispatch pending)', {
-            commandId: unknownCmd.commandId,
-            type: unknownCmd.type,
+            commandId: fallback.commandId,
+            type: fallback.type,
           })
           ?.catch(() => {})
       }
@@ -264,7 +277,9 @@ export function createControlPlaneRuntime(
           break
         }
         default: {
-          throw new Error(`Unknown command type: ${(command as { type: string }).type}`)
+          // 穷尽断言：若 Command 新增 variant 而此处未处理，TS 编译期会在此行报错。
+          const exhaustive: never = command
+          throw new Error(`Unknown command type: ${(exhaustive as { type: string }).type}`)
         }
       }
     },
