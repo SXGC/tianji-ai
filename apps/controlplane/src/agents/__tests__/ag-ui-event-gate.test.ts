@@ -217,6 +217,49 @@ describe('AgUiEventGate', () => {
     ])
     expect(sink.entries.some((e) => e.level === 'error')).toBe(true)
   })
+
+  it('T5 重复调用 emitTerminal：第二次被忽略并 warn', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    const first = {
+      type: EventType.RUN_FINISHED,
+      threadId: 'thread-1',
+      runId: 'run-1',
+    } as BaseEvent
+    const second = { type: EventType.RUN_ERROR, message: 'late' } as BaseEvent
+
+    gate.emitTerminal(first)
+    gate.emitTerminal(second)
+
+    expect(subscriber.next).toHaveBeenCalledTimes(1)
+    expect(subscriber.next).toHaveBeenCalledWith(first)
+    expect(sink.entries.filter((e) => e.level === 'warn')).toHaveLength(1)
+    expect(gate.alreadyTerminated()).toBe(true)
+  })
+
+  it('T6 终态后 emit 为空操作并 warn', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    gate.emitTerminal({
+      type: EventType.RUN_FINISHED,
+      threadId: 'thread-1',
+      runId: 'run-1',
+    } as BaseEvent)
+    subscriber.next.mockClear()
+
+    gate.emit({
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: 'M1',
+      delta: 'late',
+    } as BaseEvent)
+
+    expect(subscriber.next).not.toHaveBeenCalled()
+    const warnEntries = sink.entries.filter((e) => e.level === 'warn')
+    expect(warnEntries.length).toBeGreaterThanOrEqual(1)
+    expect(warnEntries[warnEntries.length - 1].data).toMatchObject({
+      eventType: 'TEXT_MESSAGE_CONTENT',
+    })
+  })
 })
 
 describe('isTerminalAgUiEvent', () => {
