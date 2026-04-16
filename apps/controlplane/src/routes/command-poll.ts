@@ -1,4 +1,5 @@
 import type { ObserverLogger } from '@tianji/observer'
+import type { PollCommandResponse } from '@tianji/shared'
 import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from '../db/index.js'
@@ -73,10 +74,7 @@ function isNodeBusy(db: ControlPlaneDb, nodeId: string): boolean {
   return node?.execution_state === 'busy'
 }
 
-function tryLeasePendingCommand(
-  db: ControlPlaneDb,
-  nodeId: string
-): { commandId: string; type: string; payload: unknown } | null {
+function tryLeasePendingCommand(db: ControlPlaneDb, nodeId: string): PollCommandResponse | null {
   const row = db.raw
     .prepare(
       `SELECT command_id, type, payload FROM commands
@@ -102,13 +100,37 @@ function tryLeasePendingCommand(
     return null
   }
 
+  // task.run 命令在 commands 表插入时会伴随 tasks 行；task.cancel 没有 tasks 行（UPDATE 0 行 = 无副作用）。
   db.raw
     .prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE command_id = ?')
     .run('running', now, row.command_id)
 
-  return {
-    commandId: row.command_id,
-    type: row.type,
-    payload: JSON.parse(row.payload),
+  return toPollCommandResponse(row.command_id, row.type, JSON.parse(row.payload))
+}
+
+/**
+ * 将 DB 行映射为强类型 PollCommandResponse。
+ * 未知 type 立即抛错（Let it crash）：DB 侧应已由写入端约束有效 type，未知值意味着数据损坏或协议升级未同步。
+ */
+function toPollCommandResponse(
+  commandId: string,
+  type: string,
+  payload: unknown
+): PollCommandResponse {
+  switch (type) {
+    case 'task.run':
+      return {
+        commandId: commandId as PollCommandResponse['commandId'],
+        type: 'task.run',
+        payload: payload as Extract<PollCommandResponse, { type: 'task.run' }>['payload'],
+      }
+    case 'task.cancel':
+      return {
+        commandId: commandId as PollCommandResponse['commandId'],
+        type: 'task.cancel',
+        payload: payload as Extract<PollCommandResponse, { type: 'task.cancel' }>['payload'],
+      }
+    default:
+      throw new Error(`Unknown command type in DB: ${type} (commandId=${commandId})`)
   }
 }
