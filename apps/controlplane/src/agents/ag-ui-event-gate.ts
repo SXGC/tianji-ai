@@ -10,7 +10,7 @@ import { EventType } from '@ag-ui/client'
 import type { BaseEvent } from '@ag-ui/client'
 import type { ObserverLogger } from '@tianji/observer'
 
-export interface Subscriber {
+export interface AgUiGateSubscriber {
   next(event: BaseEvent): void
 }
 
@@ -27,14 +27,18 @@ interface ActiveEntry {
 }
 
 export class AgUiEventGate {
-  readonly #subscriber: Subscriber
+  readonly #subscriber: AgUiGateSubscriber
   readonly #context: AgUiEventGateContext
   readonly #logger: ObserverLogger
   readonly #active = new Map<string, ActiveEntry>()
   #terminated = false
   #disposed = false
 
-  constructor(subscriber: Subscriber, context: AgUiEventGateContext, logger: ObserverLogger) {
+  constructor(
+    subscriber: AgUiGateSubscriber,
+    context: AgUiEventGateContext,
+    logger: ObserverLogger
+  ) {
     this.#subscriber = subscriber
     this.#context = context
     this.#logger = logger
