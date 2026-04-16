@@ -13,6 +13,7 @@
  */
 import {
   ProviderError,
+  type RunCancelledEvent,
   type RunFailedEvent,
   type RunSnapshot,
   TianjiError,
@@ -22,7 +23,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ReplayableEventStream } from '../event-stream.js'
-import { handleRunFailure } from '../runtime/run-lifecycle.js'
+import { handleRunCancellation, handleRunFailure } from '../runtime/run-lifecycle.js'
 import type {
   ActiveRun,
   RunExecutionContext,
@@ -194,5 +195,40 @@ describe('handleRunFailure — error 透传语义', () => {
     const runFailed = findRunFailed(pushedEvents)
     expect(runFailed.error.category).toBe('tool')
     expect(runFailed.error.code).toBe('TOOL_TIMEOUT')
+  })
+})
+
+/**
+ * handleRunCancellation 取消路径保护性测试。
+ *
+ * 业务职责：
+ * - session-runtime catch 分支通过 isCancellationError 将 AbortError 路由至
+ *   handleRunCancellation；该函数必须发出 `RunCancelled(reason='abort')`，
+ *   不能降级为 RunFailed。前端按 reason 区分显示。
+ * - 同时保存 status='cancelled' 的快照，供后续 resume 使用。
+ */
+describe('handleRunCancellation — abort 路径事件', () => {
+  it('发出 RunCancelled(reason=abort)，保存 cancelled 快照', async () => {
+    const { deps, store } = makeDeps()
+    const { activeRun, pushedEvents } = makeActiveRun()
+    const lineage = makeLineage()
+    const runSnapshot = makeRunSnapshot()
+    const context = makeContext()
+
+    await handleRunCancellation(deps, activeRun, runSnapshot, context, lineage, undefined)
+
+    const cancelled = pushedEvents.find(
+      (e): e is RunCancelledEvent =>
+        typeof e === 'object' && e !== null && (e as RunCancelledEvent).type === 'RunCancelled'
+    )
+    expect(cancelled).toBeDefined()
+    expect(cancelled?.reason).toBe('abort')
+
+    const runFailed = pushedEvents.find(
+      (e) => typeof e === 'object' && e !== null && (e as { type: string }).type === 'RunFailed'
+    )
+    expect(runFailed).toBeUndefined()
+
+    expect(store.savedRun?.status).toBe('cancelled')
   })
 })
