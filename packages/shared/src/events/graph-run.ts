@@ -29,6 +29,15 @@ export interface GraphRunFailedEvent extends GraphRunFields {
   readonly error: TianjiError
 }
 
+/**
+ * Graph 因外部 AbortSignal 取消而终止。
+ * 语义上与 `GraphRunFailed` 区分：`reason` 标识触发源；当前仅 'abort'。
+ */
+export interface GraphRunCancelledEvent extends GraphRunFields {
+  readonly type: 'GraphRunCancelled'
+  readonly reason: 'abort'
+}
+
 interface GraphNodeFields {
   readonly runId: RunId
   readonly graphId: string
@@ -55,6 +64,7 @@ export type GraphRunDomainEvent =
   | GraphRunStartedEvent
   | GraphRunCompletedEvent
   | GraphRunFailedEvent
+  | GraphRunCancelledEvent
   | GraphNodeStartedEvent
   | GraphNodeCompletedEvent
   | GraphNodeFailedEvent

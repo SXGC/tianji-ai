@@ -31,6 +31,20 @@ describe('resolveTarget', () => {
     expect(target.aggregateId).toBe('gr_1')
   })
 
+  it('GraphRun 聚合：GraphRunCancelled → aggregateType=GraphRun, aggregateId=runId', () => {
+    const event: DomainEvent = {
+      type: 'GraphRunCancelled',
+      runId: 'gr_1',
+      graphId: 'g1',
+      graphVersion: 1,
+      reason: 'abort',
+      timestamp: 0,
+    }
+    const target = resolveTarget(event)
+    expect(target.aggregateType).toBe('GraphRun')
+    expect(target.aggregateId).toBe('gr_1')
+  })
+
   it('Run 聚合：RunStarted → aggregateType=Run, aggregateId=runId', () => {
     const event: DomainEvent = {
       type: 'RunStarted',

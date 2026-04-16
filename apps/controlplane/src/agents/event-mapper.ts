@@ -333,7 +333,7 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
     }
 
     // ── 以下事件不映射到 AG-UI ────────────────────────────────────────────────
-    // GraphRunFailed、Session* 、Node*、TaskObservationLost 暂无 AG-UI 映射
+    // GraphRunFailed/GraphRunCancelled、Session* 、Node*、TaskObservationLost 暂无 AG-UI 映射
     default:
       return []
   }

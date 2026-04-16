@@ -91,6 +91,7 @@ export function mapRuntimeEventToSessionUpdate(
     case 'GraphNodeFailed':
     case 'GraphRunCompleted':
     case 'GraphRunFailed':
+    case 'GraphRunCancelled':
     // Session / Node / Task 事件不映射为 ACP session update。
     case 'SessionCreated':
     case 'SessionResumed':

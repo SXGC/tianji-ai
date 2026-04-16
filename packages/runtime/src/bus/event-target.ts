@@ -1,7 +1,7 @@
 /**
  * 根据 DomainEvent 推导 envelope 的 aggregateType 与 aggregateId。
  * 纯函数，无副作用，便于单测。
- * switch 覆盖全部 25 个事件类型；TypeScript strict 模式下遗漏会编译报错。
+ * switch 覆盖全部 26 个事件类型；TypeScript strict 模式下遗漏会编译报错。
  * @module bus/event-target
  */
 
@@ -28,6 +28,7 @@ export function resolveTarget(event: DomainEvent): EventTarget {
     case 'GraphRunStarted':
     case 'GraphRunCompleted':
     case 'GraphRunFailed':
+    case 'GraphRunCancelled':
     case 'GraphNodeStarted':
     case 'GraphNodeCompleted':
     case 'GraphNodeFailed':
