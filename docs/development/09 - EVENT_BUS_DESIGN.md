@@ -469,7 +469,63 @@ Runtime / Node / Controlplane 业务代码
 
 ---
 
-## 11. 与其他文档的关系
+## 11. 终端事件矩阵与取消路径
+
+### 11.1 三层聚合 × 三条路径
+
+`GraphRun` / `Run` / `Task` 三个聚合都有成功、失败、取消三种终态，共九个终端事件。任一路径的缺失都会让上层检测到"run 没有正常结束"而抛错。
+
+| 聚合 | 成功 | 失败 | 取消 |
+|---|---|---|---|
+| GraphRun | `GraphRunCompleted` | `GraphRunFailed` | `GraphRunCancelled` |
+| Run | `RunCompleted` | `RunFailed` | `RunCancelled` |
+| Task | `TaskCompleted` | `TaskFailed` | `TaskCancelled` |
+
+`GraphRunCancelled` 在 Phase 2 新增，定义见 `packages/shared/src/events/graph-run.ts`。graph-runner 在 `catch` 分支上通过 `isAbortError(error)` 区分取消和真实失败，run-lifecycle 再把 `GraphRunCancelled` 向上映射为 `RunCancelled`，task-executor 最终根据 `lastRunTerminal` 为 `RunCancelled` 时 emit `TaskCancelled`。
+
+### 11.2 cancel 的命令下行与事件回传
+
+cancel 是唯一一条要求命令下行 + 事件回传的双向链路。其他业务事件只有回传方向。
+
+```text
+命令下行（命令经 commands 表长轮询到 node）:
+
+  浏览器
+    -> POST /api/copilot/cancel { taskId }
+    -> TianjiAgent.cancelTask(taskId)
+    -> tasks 表反查 node_id
+    -> commands 表 insert(type='task.cancel', state='pending')
+    -> 节点长轮询（tryLeasePendingCancelCommand 绕过 busy 门控）
+    -> node daemon executePolledCommand
+    -> ActiveExecutorRegistry.cancel(taskId)
+    -> TaskExecutor.cancel()（#cancelled 幂等）
+    -> runner.disconnect()（AgentRunner: AbortController / InProcessRunner: session.abort）
+
+事件回传（envelope 经 forwarder → cp → event_log → subscribers）:
+
+  graph-runner catch(AbortError)
+    -> emit GraphRunCancelled
+    -> run-lifecycle 映射
+    -> emit RunCancelled
+    -> task-executor lastRunTerminal 分发
+    -> emit TaskCancelled
+    -> node pipeline 包成 envelope
+    -> forwarder.postDomainEvents
+    -> cp ingest 写 event_log
+    -> subscribeEventLog 通知订阅者
+       -> event-mapper: TaskCancelled -> STATE_DELTA
+       -> tianji-agent: TaskCancelled -> RUN_FINISHED{reason: 'cancelled'}
+    -> AG-UI 前端收到取消终态
+```
+
+两条关键设计约束：
+
+- **busy 门控对 cancel 失效**：`tryLeasePendingCancelCommand` 独立于普通命令的 busy 检查，因为取消在节点 busy 时才有意义。
+- **RUN_FINISHED 由 tianji-agent 发，不由 event-mapper 发**：event-mapper 没有 `threadId` / `runId` 上下文，只能发 `STATE_DELTA`；`RUN_FINISHED` 需要 run 维度信息，由 tianji-agent 在 `TaskCancelled` / `TaskCompleted` 时统一兜底。
+
+---
+
+## 12. 与其他文档的关系
 
 | 文档 | 关系 |
 |------|------|
@@ -478,5 +534,6 @@ Runtime / Node / Controlplane 业务代码
 | `04 - OBSERVER_DESIGN.md` | 解释日志与 tracing，这篇文档说明它们如何订阅事件总线 |
 | `docs/superpowers/specs/2026-04-14-event-bus-design.md` | 更偏设计推导和规则细节 |
 | `docs/superpowers/plans/2026-04-14-event-bus/` | 更偏实施步骤，不应替代正式开发文档 |
+| `docs/superpowers/plans/2026-04-16-task-lifecycle-events-and-cancel-command.md` | Task 生命周期事件对齐与取消命令的实施计划 |
 
 正式开发文档优先回答“系统现在是什么”，而 superpowers 下的设计/计划文档更适合回答“这套东西是怎么设计出来的、分几步落地的”。

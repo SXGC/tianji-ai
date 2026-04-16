@@ -168,6 +168,52 @@ src/web/
 
 ---
 
+## 取消命令路由
+
+### POST /api/copilot/cancel
+
+浏览器触发取消时，向此端点发送请求：
+
+```
+POST /api/copilot/cancel
+Content-Type: application/json
+
+{ "taskId": "<uuid>" }
+```
+
+响应码语义：
+
+| 状态码 | 含义 |
+|---|---|
+| 202 Accepted | 命令已写入 commands 表，异步处理 |
+| 400 Bad Request | body 格式非法或 taskId 缺失/非字符串 |
+| 404 Not Found | taskId 在 tasks 表不存在 |
+| 500 Internal Server Error | 未预期异常，由 Hono 默认错误处理接管 |
+
+端点不需要 `x-node-id` / `x-agent-id` 请求头，因为 `cancelTask` 内部从 `tasks` 表反查 `node_id`。实现位于 `apps/controlplane/src/routes/copilot.ts`。
+
+### TianjiAgent.cancelTask
+
+`cancelTask(taskId)` 是取消命令的核心写入方法，位于 `apps/controlplane/src/agents/tianji-agent.ts`。
+
+执行逻辑：
+1. 从 `tasks` 表查 `node_id`（找不到则抛错，Let it crash）。
+2. 向 `commands` 表插入一条 `type = 'task.cancel'` 命令，`payload` 包含 `{ taskId, reason: 'user' }`，`state = 'pending'`。
+3. 返回，不等待 node 执行结果。
+
+为什么 nodeId 从 tasks 表反查而不是用构造时的 `this.#nodeId`：cancel 请求可能由任意上下文发起（包括为 cancel 专门创建的临时 agent 实例），而持有 task 的 node 未必是当前实例绑定的 node。反查保证命令总被路由到正确的节点。
+
+### 命令轮询中的 busy 门控绕过
+
+Node 正在执行任务时处于 `busy` 状态，`tryLeasePendingCommand` 对 busy 节点不下发 `task.run` 命令。但 `task.cancel` 命令必须在 busy 时也能下发，否则取消永远等到任务跑完才生效。
+
+`apps/controlplane/src/routes/command-poll.ts` 用两个独立函数处理这两类情况：
+
+- `tryLeasePendingCancelCommand`：专门取 `type = 'task.cancel'` 命令，**跳过 busy 检查**，在轮询开始时和 wait 循环内优先执行。
+- `tryLeasePendingCommand`：取其他类型命令，仅在 `!isNodeBusy` 时执行。
+
+轮询的优先级顺序：cancel 命令 > busy 检查 > 普通命令。这个设计的意义是：取消是用户意图，不应被节点当前状态阻塞。
+
 ## 事件系统
 
 tianji-ai 使用 Core / Integration / Protocol 三层事件架构：

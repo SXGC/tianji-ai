@@ -257,6 +257,52 @@ pnpm --filter @tianji/node clean
 - `@tianji/runtime`：会话执行、事件流、快照与工具目录。
 - `@tianji/shared`：运行时协议类型与配置 schema。
 
+## 活跃任务注册表
+
+`ActiveExecutorRegistry`（`apps/node/src/task/active-executor-registry.ts`）是一个进程级的 `taskId → CancellableExecutor` 映射表，专门为 `task.cancel` 命令提供路由入口。
+
+### 为什么这样设计
+
+系统约束：同一时刻每个 `taskId` 最多只有一个活跃 executor。这个约束由注册表的三个操作共同保证：
+
+| 操作 | 行为 | 原因 |
+|---|---|---|
+| `register(taskId, executor)` | 重复注册立即抛错 | 若 taskId 已存在，说明上层状态机出错（未先 unregister），必须暴露而不是覆盖 |
+| `cancel(taskId)` | 找不到 taskId 抛错 | 调用方在发 cancel 前应确认 task 处于活跃状态，找不到意味着 task 已结束或从未存在，静默继续会掩盖上层逻辑缺陷 |
+| `unregister(taskId)` | 找不到静默返回 | `unregister` 通常在 finally 块中调用，即使注册失败也会触发；`Map.delete` 语义本身幂等，无需抛错 |
+
+这三个操作的不对称行为不是随意取舍，而是对"什么时候沉默是安全的"做了精确区分：写操作出现重复是脏状态，必须暴露；读-删除操作找不到是幂等安全的，沉默才正确。
+
+## 取消任务
+
+### 命令下行链路
+
+取消命令的下行路径有两个入口：
+
+1. **`executePolledCommand` 主路径**：node daemon 长轮询到 `task.cancel` 命令后，调用 `ActiveExecutorRegistry.cancel(taskId)`，注册表找到对应 executor 后调用 `executor.cancel()`。
+2. **`onCommand` 回调路径**（ACP 兼容）：部分运行模式通过命令回调触发，最终同样路由到 `ActiveExecutorRegistry.cancel`。
+
+两条路径的汇合点都是 `ActiveExecutorRegistry`，executor 本身不感知命令来源。
+
+### TaskExecutor.cancel() 的幂等机制
+
+`TaskExecutor.cancel()` 内部用 `#cancelled` 布尔标志保证幂等：
+
+- 首次调用：把 `#cancelled` 置 true，然后调用 `this.#currentRunner?.disconnect()`。
+- 重复调用：检测到 `#cancelled` 已为 true，直接返回，不重复 disconnect。
+- finally 块：检查 `#cancelled` 标志，若为 true 则跳过 disconnect，避免 disconnect 被执行两次。
+
+这个机制确保：无论 cancel 被调用多少次，runner 的 disconnect 只会精确执行一次。
+
+### AgentRunner / InProcessRunner 的 disconnect 语义
+
+两种 runner 在 disconnect 时都必须发出 `RunCancelled` 终端事件，但实现机制不同：
+
+- **`AgentRunner`**（ACP 子进程外部 agent，`apps/node/src/acp/agent-runner.ts`）：持有 `#disconnectController: AbortController`。`disconnect()` 时调用 `controller.abort()` 并 kill 子进程。query while-loop 用 `Promise.race(newEventPromise, promptDonePromise, abortPromise)` 等待三者之一；`abort` 触发时 abortPromise 立刻 resolve，循环进入下一轮检测到 `signal.aborted` 后退出，yield `RunCancelled{reason: 'abort'}` 并 return。ACP SDK 自身不会 reject `#pendingResponses`，这个 AbortController 是绕过 ACP 限制的关键。
+- **`InProcessRunner`**（native 内置 runtime，`apps/node/src/acp/in-process-runner.ts`）：`disconnect()` 时调用 `session.abort()`，触发内部 `queryWithGraph` 抛出 AbortError。query generator catch 到断开信号后显式 yield `RunCancelled{reason: 'abort'}` 再 return。早期版本这里只 return 不 emit，导致 TaskExecutor 的 `lastRunTerminal === null` 检查触发错误路径。
+
+`RunCancelled` → `TaskCancelled` 是严格的终端事件链，缺少任何一环都会让 TaskExecutor 认为 run 没有正常结束而抛错。
+
 ## 事件系统
 
 ## 事件边界约束
