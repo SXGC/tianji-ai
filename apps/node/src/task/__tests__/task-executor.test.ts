@@ -1169,3 +1169,121 @@ describe('TaskExecutorConfig', () => {
     expect(emittedTypes).not.toContain('TaskCompleted')
   })
 })
+
+// ── Task 3.4：TaskExecutor.cancel ──────────────────────────────────────────────
+
+describe('TaskExecutor.cancel', () => {
+  /**
+   * 构造一个"永不结束"的 fake runner：
+   * - connect 立即 resolve
+   * - query 返回一个挂起的 async generator，直到 disconnect 被调用才通过 abortController 信号退出
+   * - disconnect 会触发 abort 信号并被 vi.spyOn 监视
+   */
+  function createHangingRunner(): {
+    runner: IAgentRunner
+    disconnectSpy: ReturnType<typeof vi.fn>
+    triggerDisconnect: () => void
+  } {
+    let resolveDisconnect!: () => void
+    const disconnectPromise = new Promise<void>((resolve) => {
+      resolveDisconnect = resolve
+    })
+
+    const disconnectSpy = vi.fn(async () => {
+      resolveDisconnect()
+    })
+
+    const runner: IAgentRunner = {
+      agentId: 'default',
+      connect: async () => undefined,
+      disconnect: disconnectSpy,
+      async *query() {
+        yield {
+          type: 'RunStarted' as const,
+          runId: 'run-cancel-test' as never,
+          sessionId: 'session-cancel' as never,
+          triggerType: 'new' as const,
+          timestamp: Date.now(),
+        }
+
+        // 挂起，直到 disconnect 被调用
+        await disconnectPromise
+        // disconnect 触发后抛出错误，让 for-await 循环退出
+        throw new Error('runner disconnected by cancel')
+      },
+    }
+
+    return { runner, disconnectSpy, triggerDisconnect: resolveDisconnect }
+  }
+
+  it('在 busy 状态下 cancel 触发 runner.disconnect', async () => {
+    const { TaskExecutor } = await import('../task-executor.js')
+    const taskId = createTaskId('task-cancel-busy')
+    const { runner, disconnectSpy } = createHangingRunner()
+
+    const executor = new TaskExecutor(
+      makeConfig({
+        createRunner: async () => runner,
+      })
+    )
+
+    // 启动 execute，不 await，让状态机进入 busy
+    const running = executor.execute(createCommand(taskId, 'cancel test'))
+
+    // 通过 setImmediate 推进微任务，让 execute 进入 for-await 循环
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    // 此时 executor 应处于 busy 状态
+    expect(executor.executionState).toBe('busy')
+
+    // 调用 cancel，应触发 runner.disconnect
+    executor.cancel()
+
+    // 断言 disconnect 被调用一次
+    expect(disconnectSpy).toHaveBeenCalledTimes(1)
+
+    // 清理：等待 execute 完成（因错误 reject，忽略）
+    await running.catch(() => undefined)
+  })
+
+  it('在 idle 状态下调 cancel 抛错（Let it crash）', async () => {
+    const { TaskExecutor } = await import('../task-executor.js')
+
+    const executor = new TaskExecutor(makeConfig())
+
+    expect(() => executor.cancel()).toThrow(/idle/i)
+  })
+
+  it('重复 cancel 幂等：第二次调用不触发额外的 disconnect', async () => {
+    const { TaskExecutor } = await import('../task-executor.js')
+    const taskId = createTaskId('task-cancel-idempotent')
+
+    const { runner, disconnectSpy } = createHangingRunner()
+
+    const executor = new TaskExecutor(
+      makeConfig({
+        createRunner: async () => runner,
+      })
+    )
+
+    // 启动执行
+    const running = executor.execute(createCommand(taskId, 'idempotent cancel'))
+
+    // 等待进入 busy 状态
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(executor.executionState).toBe('busy')
+
+    // 连续调用两次 cancel
+    executor.cancel()
+    executor.cancel()
+
+    // disconnect 只应被调用一次
+    expect(disconnectSpy).toHaveBeenCalledTimes(1)
+
+    // 清理
+    await running.catch(() => undefined)
+  })
+})

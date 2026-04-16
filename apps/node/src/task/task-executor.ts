@@ -52,6 +52,13 @@ export class TaskExecutor {
   readonly #scope = ['daemon', 'task'] as const
   #executionState: NodeExecutionState = 'idle'
   #currentTaskId: string | null = null
+  /** 当前正在运行的 runner 实例，idle 时为 null。 */
+  #currentRunner: IAgentRunner | null = null
+  /**
+   * cancel 幂等标志：首次 cancel 后置 true，防止重复触发 disconnect。
+   * finally 块读取此标志决定是否需要执行 disconnect。
+   */
+  #cancelled = false
 
   constructor(config: TaskExecutorConfig) {
     this.#config = config
@@ -63,6 +70,25 @@ export class TaskExecutor {
 
   get currentTaskId(): string | null {
     return this.#currentTaskId
+  }
+
+  /**
+   * 向当前正在运行的 runner 发送取消信号。
+   *
+   * @throws 若 executor 处于 idle 状态（调用方状态机出错，Let it crash）
+   * @remarks
+   * - 幂等：重复调用静默返回，disconnect 只触发一次。
+   * - finally 块中判断 `#cancelled` 标志，避免 disconnect 被调两次。
+   */
+  cancel(): void {
+    if (this.#executionState !== 'busy') {
+      throw new Error('Cannot cancel: TaskExecutor is idle')
+    }
+    if (this.#cancelled) {
+      return
+    }
+    this.#cancelled = true
+    void this.#currentRunner?.disconnect()
   }
 
   async execute(command: TaskRunCommand): Promise<void> {
@@ -86,7 +112,7 @@ export class TaskExecutor {
         command,
       })
 
-      const runner = await this.#config.createRunner(command)
+      this.#currentRunner = await this.#config.createRunner(command)
       await this.#config.logger?.logDebug(this.#scope, 'Created task runner', {
         taskId,
         agentId: command.payload.agentId,
@@ -100,7 +126,7 @@ export class TaskExecutor {
         })
         this.#config.emitEvent({ type: 'TaskStarted', taskId, timestamp: now() })
 
-        await runner.connect()
+        await this.#currentRunner.connect()
         await this.#config.logger?.logDebug(this.#scope, 'Connected task runner', {
           taskId,
         })
@@ -108,7 +134,7 @@ export class TaskExecutor {
         let turn: TurnSummary | null = null
         let lastRunTerminal: RunFailedEvent | RunCancelledEvent | RunCompletedEvent | null = null
 
-        for await (const event of runner.query(command.payload.goal)) {
+        for await (const event of this.#currentRunner.query(command.payload.goal)) {
           turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
           if (
             event.type === 'RunCompleted' ||
@@ -188,7 +214,13 @@ export class TaskExecutor {
         await this.#config.logger?.logDebug(this.#scope, 'Cleaning up task execution resources', {
           taskId,
         })
-        await runner.disconnect()
+        // cancel 路径已经在 cancel() 中调用了 disconnect，此处不重复调用。
+        // 非 cancel 路径（正常结束或异常）才需要在 finally 中 disconnect。
+        if (!this.#cancelled) {
+          await this.#currentRunner?.disconnect()
+        }
+        this.#currentRunner = null
+        this.#cancelled = false
         this.#executionState = 'idle'
         this.#currentTaskId = null
         this.#config.onExecutionStateChange(this.#executionState)
