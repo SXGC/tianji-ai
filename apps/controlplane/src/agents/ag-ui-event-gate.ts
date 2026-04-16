@@ -63,6 +63,7 @@ export class AgUiEventGate {
   }
 
   #trackEvent(event: BaseEvent): void {
+    // gate 入参保持 BaseEvent 兼容，避免和 event-mapper 的 union 类型强耦合
     const e = event as BaseEvent & { messageId?: string }
     const mid = typeof e.messageId === 'string' ? e.messageId : undefined
     if (mid === undefined) return
@@ -86,6 +87,7 @@ export class AgUiEventGate {
         return
       }
       case EventType.TEXT_MESSAGE_END:
+        // 依赖 event-mapper 保证 REASONING 在 TEXT_MESSAGE_END 前已闭合
         this.#active.delete(mid)
         return
       default:
@@ -93,8 +95,54 @@ export class AgUiEventGate {
     }
   }
 
-  emitTerminal(_event: BaseEvent): void {
-    throw new Error('Not implemented')
+  emitTerminal(event: BaseEvent): void {
+    if (this.#terminated) {
+      void this.#logger.warn(SCOPE_AG_UI_GATE, 'emitTerminal called more than once, ignored', {
+        runId: this.#context.runId,
+        threadId: this.#context.threadId,
+        eventType: event.type,
+      })
+      return
+    }
+
+    if (this.#active.size > 0) {
+      this.#flushActive('terminal')
+    }
+
+    this.#subscriber.next(event)
+    this.#terminated = true
+  }
+
+  #flushActive(reason: 'terminal' | 'dispose'): void {
+    const leakedIds: string[] = []
+    const leakedState: Record<string, { inThinking: boolean; hasText: boolean }> = {}
+
+    for (const [messageId, entry] of this.#active) {
+      leakedIds.push(messageId)
+      leakedState[messageId] = { inThinking: entry.inThinking, hasText: entry.hasText }
+
+      if (entry.inThinking) {
+        this.#subscriber.next({ type: EventType.REASONING_MESSAGE_END, messageId } as BaseEvent)
+        this.#subscriber.next({ type: EventType.REASONING_END, messageId } as BaseEvent)
+      }
+      if (entry.hasText) {
+        this.#subscriber.next({ type: EventType.TEXT_MESSAGE_END, messageId } as BaseEvent)
+      }
+    }
+    this.#active.clear()
+
+    void this.#logger.error(
+      SCOPE_AG_UI_GATE,
+      reason === 'terminal'
+        ? 'active text messages on terminal, flushed'
+        : 'active text messages on dispose without terminal, flushed',
+      {
+        runId: this.#context.runId,
+        threadId: this.#context.threadId,
+        messageIds: leakedIds,
+        leakedState,
+      }
+    )
   }
 
   dispose(): void {

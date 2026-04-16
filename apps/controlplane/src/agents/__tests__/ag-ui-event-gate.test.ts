@@ -15,6 +15,82 @@ function makeGate() {
 }
 
 describe('AgUiEventGate', () => {
+  it('T1 正常路径：START → CONTENT → END → RUN_FINISHED，无 flush 无 error 日志', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    gate.emit({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 'M1',
+      role: 'assistant',
+    } as BaseEvent)
+    gate.emit({ type: EventType.TEXT_MESSAGE_CONTENT, messageId: 'M1', delta: 'hi' } as BaseEvent)
+    gate.emit({ type: EventType.TEXT_MESSAGE_END, messageId: 'M1' } as BaseEvent)
+
+    const finishEv = {
+      type: EventType.RUN_FINISHED,
+      threadId: 'thread-1',
+      runId: 'run-1',
+    } as BaseEvent
+    gate.emitTerminal(finishEv)
+
+    expect(subscriber.next).toHaveBeenCalledTimes(4)
+    expect(subscriber.next).toHaveBeenLastCalledWith(finishEv)
+    expect(sink.entries.some((e) => e.level === 'error')).toBe(false)
+    expect(gate.alreadyTerminated()).toBe(true)
+  })
+
+  it('T2 失败路径：活跃消息在 RUN_ERROR 前被 flush，error 日志列出泄漏 id', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    gate.emit({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 'M1',
+      role: 'assistant',
+    } as BaseEvent)
+    gate.emitTerminal({ type: EventType.RUN_ERROR, message: 'boom' } as BaseEvent)
+
+    const types = subscriber.next.mock.calls.map((c) => (c[0] as BaseEvent).type)
+    expect(types).toEqual(['TEXT_MESSAGE_START', 'TEXT_MESSAGE_END', 'RUN_ERROR'])
+
+    const errorEntries = sink.entries.filter((e) => e.level === 'error')
+    expect(errorEntries).toHaveLength(1)
+    expect(errorEntries[0].scope).toEqual(['controlplane', 'agents', 'ag-ui-gate'])
+    expect(errorEntries[0].data).toMatchObject({
+      runId: 'run-1',
+      threadId: 'thread-1',
+      messageIds: ['M1'],
+    })
+  })
+
+  it('T4 多活跃消息按 Map 插入顺序 flush', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    gate.emit({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 'M1',
+      role: 'assistant',
+    } as BaseEvent)
+    gate.emit({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 'M2',
+      role: 'assistant',
+    } as BaseEvent)
+
+    gate.emitTerminal({
+      type: EventType.RUN_FINISHED,
+      threadId: 'thread-1',
+      runId: 'run-1',
+    } as BaseEvent)
+
+    const endMessageIds = subscriber.next.mock.calls
+      .filter((c) => (c[0] as BaseEvent).type === 'TEXT_MESSAGE_END')
+      .map((c) => (c[0] as BaseEvent & { messageId: string }).messageId)
+    expect(endMessageIds).toEqual(['M1', 'M2'])
+
+    const errorEntries = sink.entries.filter((e) => e.level === 'error')
+    expect(errorEntries[0].data).toMatchObject({ messageIds: ['M1', 'M2'] })
+  })
+
   it('新建时 alreadyTerminated 为 false，未向下游发任何事件', () => {
     const { subscriber, gate } = makeGate()
 
