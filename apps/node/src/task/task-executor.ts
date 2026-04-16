@@ -9,7 +9,6 @@ import type { RuntimeLogger } from '../logger.js'
 
 import type { ObserverLogScope } from '@tianji/observer'
 import type {
-  Command,
   DomainEvent,
   MessageCompletedEvent,
   NodeExecutionState,
@@ -20,6 +19,7 @@ import type {
   TaskMessageCompletedEvent,
   TaskMessageDeltaEvent,
   TaskMessageStartedEvent,
+  TaskRunCommand,
   ToolCompletedEvent,
   ToolFailedEvent,
 } from '@tianji/shared'
@@ -36,7 +36,7 @@ interface TurnSummary {
 export interface TaskExecutorConfig {
   readonly nodeId: NodeId
   readonly onExecutionStateChange: (state: NodeExecutionState) => void
-  readonly createRunner: (command: Command) => Promise<IAgentRunner>
+  readonly createRunner: (command: TaskRunCommand) => Promise<IAgentRunner>
   /** 在任务级入口建立独立因果链上下文。 */
   readonly enterCorrelation: <T>(correlationId: string, fn: () => Promise<T>) => Promise<T>
   /**
@@ -65,7 +65,7 @@ export class TaskExecutor {
     return this.#currentTaskId
   }
 
-  async execute(command: Command): Promise<void> {
+  async execute(command: TaskRunCommand): Promise<void> {
     if (this.#executionState === 'busy') {
       throw new Error('Node is already executing a task')
     }

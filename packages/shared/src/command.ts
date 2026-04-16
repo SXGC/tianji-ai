@@ -39,21 +39,45 @@ export interface TaskRunPayload {
   readonly sessionIds?: readonly SessionId[]
 }
 
-/** 控制平面下发给 node 的指令 */
-export interface Command {
+/**
+ * task.cancel 指令的 payload。
+ * 目前只支持用户主动取消一个方向；reason 留扩展空间，未来可补 'timeout' / 'admin' 等。
+ */
+export interface TaskCancelPayload {
+  readonly taskId: TaskId
+  readonly reason: 'user'
+}
+
+/** Command 的共享字段，所有命令子类型都继承这里的元数据。 */
+interface CommandBase {
   readonly commandId: CommandId
   readonly nodeId: NodeId
-  readonly type: 'task.run'
-  readonly payload: TaskRunPayload
   readonly state: CommandState
   readonly leasedAt?: number
   readonly completedAt?: number
   readonly createdAt: number
 }
 
-/** 长轮询返回给 node 的指令（精简版，不含内部状态字段） */
-export interface PollCommandResponse {
-  readonly commandId: CommandId
+/** task.run：请求在目标 node 上启动一个新任务。 */
+export interface TaskRunCommand extends CommandBase {
   readonly type: 'task.run'
   readonly payload: TaskRunPayload
 }
+
+/** task.cancel：请求目标 node 取消正在执行的任务。 */
+export interface TaskCancelCommand extends CommandBase {
+  readonly type: 'task.cancel'
+  readonly payload: TaskCancelPayload
+}
+
+/** 控制平面下发给 node 的指令（discriminated union：按 `type` 收缩到具体 payload 形状）。 */
+export type Command = TaskRunCommand | TaskCancelCommand
+
+/** 长轮询返回给 node 的指令（精简版，不含内部状态字段）。 */
+export type PollCommandResponse =
+  | { readonly commandId: CommandId; readonly type: 'task.run'; readonly payload: TaskRunPayload }
+  | {
+      readonly commandId: CommandId
+      readonly type: 'task.cancel'
+      readonly payload: TaskCancelPayload
+    }

@@ -174,7 +174,7 @@ export class ControlPlaneConnection {
             commandId: command.commandId,
             taskId: command.payload.taskId,
             type: command.type,
-            agentId: command.payload.agentId,
+            ...(command.type === 'task.run' ? { agentId: command.payload.agentId } : {}),
           })
           await this.#config.logger?.logDebug(this.#scope, 'Received control plane task detail', {
             command,

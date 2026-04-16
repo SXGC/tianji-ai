@@ -7,6 +7,7 @@ import type {
   NodeExecutionState,
   NodeId,
   PollCommandResponse,
+  TaskRunCommand,
   TianjiAgentConfig,
 } from '@tianji/shared'
 
@@ -75,7 +76,7 @@ export interface ControlPlaneConnectionLike {
 export interface TaskExecutorLike {
   readonly executionState: NodeExecutionState
   readonly currentTaskId: string | null
-  execute(command: Command): Promise<void>
+  execute(command: TaskRunCommand): Promise<void>
 }
 
 export interface ControlPlaneRuntimeHandle {
@@ -95,21 +96,30 @@ export function createControlPlaneRuntime(
     currentConnection?.setExecutionState(state)
   }
 
-  const toCommand = (command: PollCommandResponse): Command => ({
-    commandId: command.commandId,
-    nodeId: config.nodeId,
-    type: command.type,
-    payload: command.payload,
-    state: 'pending',
-    createdAt: Date.now(),
-  })
-
   const executePolledCommand = (command: PollCommandResponse): void => {
     if (taskExecutorRef === null) {
       return
     }
 
-    const taskCommand = toCommand(command)
+    if (command.type !== 'task.run') {
+      // task.cancel 分发路径由后续 Task 3.5 接入 ActiveExecutorRegistry 实现。
+      config.logger
+        ?.logError(['daemon', 'controlplane'], 'Unsupported command type (dispatch pending)', {
+          commandId: command.commandId,
+          type: command.type,
+        })
+        ?.catch(() => {})
+      return
+    }
+
+    const taskCommand: TaskRunCommand = {
+      commandId: command.commandId,
+      nodeId: config.nodeId,
+      type: 'task.run',
+      payload: command.payload,
+      state: 'pending',
+      createdAt: Date.now(),
+    }
     taskExecutorRef.execute(taskCommand).catch((error) => {
       config.logger
         ?.logError(['daemon', 'controlplane'], 'Failed to execute task command', {
@@ -211,6 +221,10 @@ export function createControlPlaneRuntime(
     connection,
     taskExecutor,
     async onCommand(command: Command): Promise<void> {
+      if (command.type !== 'task.run') {
+        // task.cancel 分发路径由后续 Task 3.5 接入 ActiveExecutorRegistry 实现。
+        throw new Error(`Unsupported command type: ${command.type}`)
+      }
       await taskExecutor.execute(command)
     },
   }
