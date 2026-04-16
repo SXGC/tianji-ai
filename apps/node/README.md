@@ -259,6 +259,12 @@ pnpm --filter @tianji/node clean
 
 ## 事件系统
 
+## 事件边界约束
+
+- runner / ACP adapter 只允许产出 `DomainEvent`。
+- `DomainEventEnvelope` 只能由 node runtime pipeline 统一生成。
+- 生产代码禁止手工构造带 `eventId`、`sequence`、`aggregateType`、`source` 的 envelope。
+
 tianji-ai 使用 Core / Integration / Protocol 三层事件架构：
 - Core：聚合根发射纯 DomainEvent（PascalCase，如 `RunStarted`）。
 - Integration：统一 `DomainEventEnvelope` 信封，`correlationId + causationId + sequence` 三件套。

@@ -3,6 +3,7 @@
  * 覆盖：bus → subscriber → committer → SQLite in-memory 全链路。
  */
 
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import type { DomainEventEnvelope, ErrorSink } from '@tianji/shared'
 import { createEventBus } from '@tianji/shared'
 import Database from 'better-sqlite3'
@@ -82,7 +83,7 @@ describe('subscribeEventLog', () => {
     bus.publish(makeEnv(2))
 
     // 等待 bus microtask 把事件推入 committer buffer
-    await new Promise((resolve) => queueMicrotask(resolve))
+    await new Promise<void>((resolve) => queueMicrotask(() => resolve()))
     // 此时 flush 定时器还没触发，buffer 中有 2 条
     await handle.close()
 
@@ -116,6 +117,74 @@ describe('subscribeEventLog', () => {
     const call = (errorSink as ReturnType<typeof vi.fn>).mock.calls[0][0]
     expect(call.error).toBe(flushError)
     expect(call.envelope.eventId).toBe('e1')
+  })
+
+  it('非 MessageDelta 的 flush 失败会记录诊断字段', async () => {
+    const flushError = new Error('db write failed')
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const store: InstanceType<typeof SqliteEventLogStore> = {
+      append: vi.fn().mockRejectedValue(flushError),
+      maxSequence: vi.fn(),
+      queryByAggregate: vi.fn(),
+      queryByCorrelation: vi.fn(),
+    } as never
+
+    const bus = createEventBus({ lagSink })
+    const handle = subscribeEventLog(bus, store, {
+      flushIntervalMs: 10,
+      logger,
+    })
+
+    bus.publish(makeEnv(5, { eventId: 'flush-diag' }))
+    await drain(50)
+    await handle.close().catch(() => {})
+
+    expect(sink.entries).toContainEqual(
+      expect.objectContaining({
+        message: 'batch flush failed',
+        data: expect.objectContaining({
+          eventId: 'flush-diag',
+          eventType: 'RunStarted',
+          aggregateType: 'Run',
+          aggregateId: 'r1',
+          sequence: 5,
+          itemCount: 1,
+          error: 'db write failed',
+        }),
+      })
+    )
+  })
+
+  it('MessageDelta 的 flush 失败不记录诊断字段', async () => {
+    const flushError = new Error('db write failed')
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const store: InstanceType<typeof SqliteEventLogStore> = {
+      append: vi.fn().mockRejectedValue(flushError),
+      maxSequence: vi.fn(),
+      queryByAggregate: vi.fn(),
+      queryByCorrelation: vi.fn(),
+    } as never
+
+    const bus = createEventBus({ lagSink })
+    const handle = subscribeEventLog(bus, store, {
+      flushIntervalMs: 10,
+      logger,
+    })
+
+    bus.publish(
+      makeEnv(6, {
+        eventId: 'flush-message-delta',
+        type: 'MessageDelta',
+        payload: { type: 'MessageDelta', content: 'x' } as never,
+      })
+    )
+    await drain(50)
+    await handle.close().catch(() => {})
+
+    const entry = sink.entries.find((item) => item.message === 'batch flush failed')
+    expect(entry?.data).not.toMatchObject({ eventId: 'flush-message-delta' })
   })
 
   it('close() 调用后不再处理新事件', async () => {

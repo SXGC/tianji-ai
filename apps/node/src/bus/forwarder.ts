@@ -10,8 +10,33 @@
  * @module bus/forwarder
  */
 
+import type { ObserverLogger } from '@tianji/observer'
 import type { DomainEventEnvelope, EventBus, SubscriptionHandle } from '@tianji/shared'
 import { BatchCommitter } from '@tianji/shared'
+import { buildEventDiagnosticFields, shouldLogEventDiagnostics } from '@tianji/shared'
+
+/**
+ * 仅转发 cp ingest writer-rules 会接受的 envelope。
+ * 不改写 source，只在 node 侧提前拦掉必然会被 cp 拒绝的事件。
+ */
+function shouldForwardEnvelope(env: DomainEventEnvelope): boolean {
+  const kind = env.source.processKind
+
+  switch (env.aggregateType) {
+    case 'Session':
+      return kind === 'daemon'
+    case 'GraphRun':
+    case 'Run':
+      return kind === 'daemon' || kind === 'node'
+    case 'Task':
+      if (env.type === 'TaskObservationLost') {
+        return kind === 'cp'
+      }
+      return kind === 'node'
+    case 'Node':
+      return kind === 'cp'
+  }
+}
 
 /** POST 函数签名：接受 envelope 数组，返回 Promise<void>。 */
 export type ForwarderPost = (body: {
@@ -31,9 +56,10 @@ export interface ForwarderDeps {
   /**
    * 动态获取当前执行任务 ID 的 getter。
    * daemon 是长进程，每次执行不同任务；通过 getter 动态获取当前 taskId。
-   * 返回 null 时 flush 将跳过（无任务执行中）。
+   * 返回 null 时事件跳过入队（无任务执行中，避免启动阶段背景噪音入缓冲区）。
    */
   readonly getCurrentTaskId: () => string | null
+  readonly logger?: ObserverLogger
 }
 
 /** createForwarder 返回的句柄，含 subscription 与 dispose。 */
@@ -53,10 +79,6 @@ export function createForwarder(deps: ForwarderDeps): ForwarderHandle {
     maxItems: deps.maxItems,
     flushIntervalMs: deps.flushIntervalMs,
     flush: async (events) => {
-      // 无任务执行中，丢弃（daemon 启动阶段的背景噪音事件无需转发）
-      if (deps.getCurrentTaskId() === null) {
-        return
-      }
       await deps.post({ events })
     },
   })
@@ -65,6 +87,19 @@ export function createForwarder(deps: ForwarderDeps): ForwarderHandle {
   const subscription = deps.bus.subscribe(
     {},
     (env) => {
+      if (!shouldForwardEnvelope(env)) {
+        return
+      }
+      if (deps.getCurrentTaskId() === null) {
+        return
+      }
+      if (shouldLogEventDiagnostics(env)) {
+        void deps.logger?.info(
+          ['daemon', 'controlplane', 'forwarder'],
+          'forwarding envelope to controlplane',
+          buildEventDiagnosticFields(env)
+        )
+      }
       committer.push(env)
     },
     { name: 'cp-forwarder', queueSize: 10_000 }

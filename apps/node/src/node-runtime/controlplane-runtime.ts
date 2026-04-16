@@ -4,7 +4,6 @@ import type {
   AgentInfo,
   Command,
   DomainEvent,
-  DomainEventEnvelope,
   NodeExecutionState,
   NodeId,
   PollCommandResponse,
@@ -45,13 +44,9 @@ export interface ControlPlaneRuntimeConfig {
   /** 在任务执行入口建立独立因果链上下文。 */
   readonly enterCorrelation: <T>(correlationId: string, fn: () => Promise<T>) => Promise<T>
   /**
-   * 发射 Task 生命周期领域事件，由 daemon-entry 注入 node 身份的 pipeline。
+   * 发射 Task 生命周期领域事件与 runner 事件，由 daemon-entry 注入 node 身份的 pipeline。
    */
   readonly emitTaskEvent: (event: DomainEvent) => void
-  /**
-   * 将 agent runner 产生的 DomainEventEnvelope publish 到 bus，由 daemon-entry 注入。
-   */
-  readonly publishEnvelope: (envelope: DomainEventEnvelope) => void
 }
 
 export interface ControlPlaneCallbacks {
@@ -190,6 +185,8 @@ export function createControlPlaneRuntime(
         if (useInProcessRunner) {
           return new InProcessAgentRunner({
             agentId: command.payload.agentId,
+            taskId: String(command.payload.taskId),
+            emitEvent: config.emitTaskEvent,
             nativeAgentContext: config.nativeAgentContext,
             runtimeOptions: config.observerLogger ? { logger: config.observerLogger } : undefined,
             defaultGraph: config.defaultGraph,
@@ -206,7 +203,6 @@ export function createControlPlaneRuntime(
         })
       },
       emitEvent: config.emitTaskEvent,
-      publishEnvelope: config.publishEnvelope,
     } satisfies TaskExecutorConfig)
 
   taskExecutorRef = taskExecutor

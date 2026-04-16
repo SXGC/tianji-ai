@@ -17,7 +17,8 @@ import {
   DaemonServer,
   type OrchestrationGraph,
 } from '@tianji/agent'
-import type { DomainEvent, RunId, SessionId } from '@tianji/shared'
+import { createEventBus } from '@tianji/shared'
+import type { DomainEvent, DomainEventEnvelope, EventBus, RunId, SessionId } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { UserConfigPaths } from '../config.js'
@@ -25,7 +26,11 @@ import type { RunCommandDependencies } from '../main.js'
 import { runCli } from '../main.js'
 
 import { captureStdout, createTempCliPaths } from './helpers/cli-test-utils.js'
-import { createStubSession, setupSubprocessDaemon } from './helpers/daemon-subprocess.js'
+import {
+  createStubSession,
+  setupSubprocessDaemon,
+  wrapRunEnvelope,
+} from './helpers/daemon-subprocess.js'
 
 const testDefaultGraph: OrchestrationGraph = {
   id: 'test',
@@ -46,16 +51,22 @@ interface LiveDaemonHandle {
   readonly cleanup: () => Promise<void>
 }
 
+interface LiveDaemonSessionFactory {
+  readonly session: AgentSession
+  readonly bus: EventBus
+}
+
 async function setupLiveDaemon(
-  session: AgentSession,
+  live: LiveDaemonSessionFactory,
   providedPaths?: UserConfigPaths
 ): Promise<LiveDaemonHandle> {
   const temp = providedPaths === undefined ? await createTempCliPaths() : undefined
   const paths = providedPaths ?? temp!.paths
   const server = new DaemonServer({
-    session,
+    session: live.session,
     defaultGraph: testDefaultGraph,
     executorFactory: testExecutorFactory,
+    bus: live.bus,
     paths: {
       daemonPortPath: paths.daemonPortPath,
       daemonPidPath: paths.daemonPidPath,
@@ -76,32 +87,49 @@ async function setupLiveDaemon(
   }
 }
 
-function createRecordingSession(prompts: string[]): AgentSession {
+function createTestBus(): EventBus {
+  return createEventBus({ lagSink: vi.fn() })
+}
+
+function createRecordingSession(prompts: string[]): LiveDaemonSessionFactory {
   const sessionId = `session_recording_${Date.now()}` as SessionId
+  const bus = createTestBus()
 
   return {
-    sessionId,
-    abort: () => undefined,
-    async *queryWithGraph(_graph, options): AsyncIterable<DomainEvent> {
-      const prompt = String(options.initialState?.input ?? '')
-      prompts.push(prompt)
-      const runId = `run_${Date.now()}` as RunId
-      yield {
-        type: 'MessageDelta',
-        runId,
-        messageId: `msg_${Date.now()}`,
-        sequence: 0,
-        channel: 'text',
-        payload: { content: prompt },
-        timestamp: Date.now(),
-      }
-      yield {
-        type: 'RunCompleted',
-        runId,
-        sessionId,
-        triggerType: 'new',
-        timestamp: Date.now(),
-      }
+    bus,
+    session: {
+      sessionId,
+      abort: () => undefined,
+      close: () => undefined,
+      async *queryWithGraph(_graph, options): AsyncIterable<DomainEvent> {
+        const prompt = String(options.initialState?.input ?? '')
+        prompts.push(prompt)
+        const runId = `run_${Date.now()}` as RunId
+        const events: DomainEvent[] = [
+          {
+            type: 'MessageDelta',
+            runId,
+            messageId: `msg_${Date.now()}`,
+            sequence: 0,
+            channel: 'text',
+            payload: { content: prompt },
+            timestamp: Date.now(),
+          },
+          {
+            type: 'RunCompleted',
+            runId,
+            sessionId,
+            triggerType: 'new',
+            timestamp: Date.now(),
+          },
+        ]
+
+        for (const event of events) {
+          bus.publish(wrapRunEnvelope(event))
+          await new Promise<void>((resolve) => queueMicrotask(resolve))
+          yield event
+        }
+      },
     },
   }
 }
@@ -120,6 +148,16 @@ async function collectEvents(stream: AsyncIterable<DomainEvent>): Promise<Domain
     events.push(event)
   }
   return events
+}
+
+async function collectEnvelopes(
+  stream: AsyncIterable<DomainEventEnvelope>
+): Promise<DomainEventEnvelope[]> {
+  const envelopes: DomainEventEnvelope[] = []
+  for await (const envelope of stream) {
+    envelopes.push(envelope)
+  }
+  return envelopes
 }
 
 async function expectDaemonFilesRemoved(paths: UserConfigPaths, timeoutMs = 5_000): Promise<void> {
@@ -152,7 +190,8 @@ const execFileAsync = promisify(execFile)
 
 describe('daemon e2e', () => {
   it('boots a live daemon and responds to ping', async () => {
-    const live = await setupLiveDaemon(createStubSession(['hello']))
+    const liveSession = createStubSession(['hello'])
+    const live = await setupLiveDaemon(liveSession)
 
     try {
       const ping = await live.client.ping()
@@ -166,13 +205,14 @@ describe('daemon e2e', () => {
 
 describe('daemon start/status/stop', () => {
   it('completes foreground daemon lifecycle', async () => {
-    const live = await setupLiveDaemon(createStubSession(['hello from daemon']))
+    const liveSession = createStubSession(['hello from daemon'])
+    const live = await setupLiveDaemon(liveSession)
 
     try {
       const ping = await live.client.ping()
       expect(ping.sessionId).toBeTruthy()
 
-      const events = await collectEvents(live.client.sendChat('hello'))
+      const events = await collectEnvelopes(live.client.sendChat('hello'))
       expect(events.some((event) => event.type === 'MessageDelta')).toBe(true)
     } finally {
       await live.cleanup()
@@ -180,7 +220,8 @@ describe('daemon start/status/stop', () => {
   }, 15_000)
 
   it('prints daemon running info for daemon status', async () => {
-    const live = await setupLiveDaemon(createStubSession(['status ok']))
+    const liveSession = createStubSession(['status ok'])
+    const live = await setupLiveDaemon(liveSession)
     try {
       const result = await runCommand(['daemon', 'status'], {
         getUserConfigPaths: () => live.paths,
@@ -216,7 +257,8 @@ describe('daemon start/status/stop', () => {
   }, 15_000)
 
   it('reports already running when daemon start is called with daemon active', async () => {
-    const live = await setupLiveDaemon(createStubSession(['already']))
+    const liveSession = createStubSession(['already'])
+    const live = await setupLiveDaemon(liveSession)
     try {
       const result = await runCommand(['daemon', 'start', '--fg'], {
         getUserConfigPaths: () => live.paths,
@@ -422,9 +464,10 @@ describe('chat and end-to-end flow', () => {
   })
 
   it('streams one chat turn through the live daemon client', async () => {
-    const live = await setupLiveDaemon(createStubSession(['hello', ' world']))
+    const liveSession = createStubSession(['hello', ' world'])
+    const live = await setupLiveDaemon(liveSession)
     try {
-      const events = await collectEvents(live.client.sendChat('hello'))
+      const events = await collectEnvelopes(live.client.sendChat('hello'))
       const deltas = events.filter((event) => event.type === 'MessageDelta')
       expect(deltas).toHaveLength(2)
     } finally {
@@ -436,8 +479,8 @@ describe('chat and end-to-end flow', () => {
     const prompts: string[] = []
     const live = await setupLiveDaemon(createRecordingSession(prompts))
     try {
-      await collectEvents(live.client.sendChat('first'))
-      await collectEvents(live.client.sendChat('second'))
+      await collectEnvelopes(live.client.sendChat('first'))
+      await collectEnvelopes(live.client.sendChat('second'))
       expect(prompts).toEqual(['first', 'second'])
     } finally {
       await live.cleanup()
@@ -454,7 +497,7 @@ describe('chat and end-to-end flow', () => {
         })
         expect(status1.exitCode).toBe(0)
 
-        const events = await collectEvents(live.client.sendChat('hello'))
+        const events = await collectEnvelopes(live.client.sendChat('hello'))
         expect(events.some((event) => event.type === 'RunCompleted')).toBe(true)
 
         const stop = await runCommand(['daemon', 'stop'], {

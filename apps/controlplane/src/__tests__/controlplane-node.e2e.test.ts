@@ -69,26 +69,46 @@ describe('controlplane <-> node e2e', () => {
       nodeProcess = env.nodeProcess
       await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-002')
 
-      const createTaskResponse = await fetch(`${env.baseUrl}/api/ui/tasks`, {
+      const createTaskResponse = await fetch(`${env.baseUrl}/api/copilot`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-node-id': 'node-e2e-002',
+          'x-agent-id': 'default',
+        },
         body: JSON.stringify({
-          nodeId: 'node-e2e-002',
-          agentId: 'default',
-          goal: 'run integration task',
+          method: 'agent/run',
+          params: {
+            agentId: 'default',
+          },
+          body: {
+            threadId: 'thread-node-e2e-002',
+            runId: 'run-node-e2e-002',
+            messages: [{ id: 'msg-1', role: 'user', content: 'run integration task' }],
+            tools: [],
+            context: [],
+            forwardedProps: {},
+            state: {},
+          },
         }),
       })
 
-      expect(createTaskResponse.status).toBe(201)
-      const createdTask = (await createTaskResponse.json()) as { taskId: string }
+      expect(createTaskResponse.status).toBe(200)
+
+      const createdTask = env.db.raw
+        .prepare('SELECT task_id FROM tasks ORDER BY created_at DESC LIMIT 1')
+        .get() as { task_id: string } | undefined
+
+      expect(createdTask).toBeDefined()
 
       const deadline = Date.now() + 8000
       let taskStatus = 'pending'
 
       while (Date.now() < deadline) {
-        const taskResponse = await fetch(`${env.baseUrl}/api/ui/tasks/${createdTask.taskId}`)
-        const task = (await taskResponse.json()) as { status: string }
-        taskStatus = task.status
+        const taskRow = env.db.raw
+          .prepare('SELECT status FROM tasks WHERE task_id = ?')
+          .get(createdTask!.task_id) as { status: string } | undefined
+        taskStatus = taskRow?.status ?? 'pending'
         if (taskStatus !== 'pending') {
           break
         }

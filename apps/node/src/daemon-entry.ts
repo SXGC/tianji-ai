@@ -202,7 +202,6 @@ export async function runDaemonEntry(): Promise<void> {
         }
         return nodePipeline.emitEvent(ev)
       },
-      publishEnvelope: (env) => bus.publish(env),
       onConnectionStateChange: (event) => {
         if (event.status === 'connecting') {
           updateControlPlaneStatus({
@@ -285,6 +284,7 @@ export async function runDaemonEntry(): Promise<void> {
           },
           maxItems: 500,
           flushIntervalMs: 50,
+          logger: logger.observerLogger,
           // 动态获取当前执行任务的 taskId，null 时 flush 跳过
           getCurrentTaskId: () => runtime.taskExecutor.currentTaskId,
         })

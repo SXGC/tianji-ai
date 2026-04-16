@@ -4,11 +4,15 @@
  * @module ingest/events
  */
 
+import type { ObserverLogger } from '@tianji/observer'
 import type { DomainEventEnvelope } from '@tianji/shared'
+
+import { buildEventDiagnosticFields, shouldLogEventDiagnostics } from '@tianji/shared'
 import { validateWriter } from './writer-rules.js'
 
 export interface EventIngestDeps {
   readonly publish: (env: DomainEventEnvelope) => void
+  readonly logger?: ObserverLogger
 }
 
 export interface EventIngest {
@@ -24,6 +28,13 @@ export interface EventIngest {
 export function createEventIngest(deps: EventIngestDeps): EventIngest {
   return {
     async ingest(env) {
+      if (shouldLogEventDiagnostics(env)) {
+        void deps.logger?.info(
+          ['cp', 'ingest'],
+          'accepted envelope for cp ingest',
+          buildEventDiagnosticFields(env)
+        )
+      }
       validateWriter(env)
       deps.publish(env)
     },

@@ -1,23 +1,21 @@
 /**
- * Maps ACP SessionUpdate notifications to DomainEventEnvelope.
+ * Maps ACP SessionUpdate notifications to DomainEvent.
  *
  * @module acp/event-adapter
  */
 
 import type { SessionNotification } from '@agentclientprotocol/sdk'
-import type { DomainEvent, DomainEventEnvelope, RunId } from '@tianji/shared'
+import type { DomainEvent, RunId } from '@tianji/shared'
 
 let deltaSequence = 0
 
 /**
- * 将 ACP SessionUpdate 通知映射为 DomainEventEnvelope。不可映射时返回 null。
- *
- * 生成的 envelope aggregateType 固定为 'Run'，aggregateId 为传入的 runId。
+ * 将 ACP SessionUpdate 通知映射为 DomainEvent。不可映射时返回 null。
  */
 export function mapSessionUpdateToRuntimeEvent(
   notification: SessionNotification,
   runId: RunId
-): DomainEventEnvelope | null {
+): DomainEvent | null {
   const update = notification.update
   const now = Date.now()
 
@@ -32,7 +30,7 @@ export function mapSessionUpdateToRuntimeEvent(
         payload: { content: extractText(update.content) },
         timestamp: now,
       }
-      return wrapRunEvent(event, runId, now)
+      return event
     }
 
     case 'agent_thought_chunk': {
@@ -45,7 +43,7 @@ export function mapSessionUpdateToRuntimeEvent(
         payload: { content: extractText(update.content) },
         timestamp: now,
       }
-      return wrapRunEvent(event, runId, now)
+      return event
     }
 
     case 'tool_call': {
@@ -60,7 +58,7 @@ export function mapSessionUpdateToRuntimeEvent(
         },
         timestamp: now,
       }
-      return wrapRunEvent(event, runId, now)
+      return event
     }
 
     case 'tool_call_update': {
@@ -80,32 +78,13 @@ export function mapSessionUpdateToRuntimeEvent(
           },
           timestamp: now,
         }
-        return wrapRunEvent(event, runId, now)
+        return event
       }
       return null
     }
 
     default:
       return null
-  }
-}
-
-/**
- * 将 DomainEvent 包装为 Run 聚合的 DomainEventEnvelope。
- * source.processKind 固定为 'node'，表示 node 进程侧。
- */
-function wrapRunEvent(event: DomainEvent, runId: RunId, now: number): DomainEventEnvelope {
-  return {
-    eventId: `acp_${event.type}_${now}`,
-    type: event.type,
-    occurredAt: new Date(now).toISOString(),
-    correlationId: String(runId),
-    causationId: null,
-    sequence: 0,
-    aggregateType: 'Run',
-    aggregateId: String(runId),
-    source: { processKind: 'node', processId: String(process.pid) },
-    payload: event,
   }
 }
 

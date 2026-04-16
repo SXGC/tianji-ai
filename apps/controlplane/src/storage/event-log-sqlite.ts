@@ -69,6 +69,7 @@ function rowToEnvelope(row: ValidatedRow): DomainEventEnvelope {
 
 export class SqliteEventLogStore implements EventLogStore {
   private readonly insertStmt: Database.Statement
+  private readonly existsByEventIdStmt: Database.Statement
   private readonly maxStmt: Database.Statement
   private readonly byAggStmt: Database.Statement
   private readonly byCorrStmt: Database.Statement
@@ -82,6 +83,7 @@ export class SqliteEventLogStore implements EventLogStore {
         (@event_id, @type, @occurred_at, @correlation_id, @causation_id,
          @sequence, @aggregate_type, @aggregate_id, @source_json, @payload_json)
     `)
+    this.existsByEventIdStmt = db.prepare('SELECT 1 FROM event_log WHERE event_id = ? LIMIT 1')
     this.maxStmt = db.prepare(
       'SELECT MAX(sequence) as max_seq FROM event_log WHERE aggregate_type = ? AND aggregate_id = ?'
     )
@@ -96,7 +98,12 @@ export class SqliteEventLogStore implements EventLogStore {
   async append(events: readonly DomainEventEnvelope[]): Promise<EventLogAppendResult> {
     if (events.length === 0) return { written: 0 }
     const tx = this.db.transaction((items: readonly DomainEventEnvelope[]) => {
+      let written = 0
       for (const e of items) {
+        const existing = this.existsByEventIdStmt.get(e.eventId) as { 1: number } | undefined
+        if (existing !== undefined) {
+          continue
+        }
         this.insertStmt.run({
           event_id: e.eventId,
           type: e.type,
@@ -109,10 +116,11 @@ export class SqliteEventLogStore implements EventLogStore {
           source_json: JSON.stringify(e.source),
           payload_json: JSON.stringify(e.payload),
         })
+        written += 1
       }
+      return written
     })
-    tx(events)
-    return { written: events.length }
+    return { written: tx(events) }
   }
 
   async maxSequence(aggregateType: AggregateType, aggregateId: string): Promise<number | null> {

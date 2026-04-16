@@ -1,10 +1,4 @@
-import {
-  type Command,
-  type DomainEvent,
-  type DomainEventEnvelope,
-  createNodeId,
-  createTaskId,
-} from '@tianji/shared'
+import { type Command, type DomainEvent, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -15,23 +9,6 @@ import type {
   TaskExecutorLike,
 } from '../node-runtime/controlplane-runtime.js'
 import { createControlPlaneRuntime } from '../node-runtime/controlplane-runtime.js'
-
-/** 将裸 DomainEvent 包装为最小化 DomainEventEnvelope，专用于测试。 */
-function wrap(event: DomainEvent): DomainEventEnvelope {
-  const runId = 'runId' in event ? String(event.runId) : 'test'
-  return {
-    eventId: `test_${event.type}`,
-    type: event.type,
-    occurredAt: new Date().toISOString(),
-    correlationId: runId,
-    causationId: null,
-    sequence: 0,
-    aggregateType: 'Run',
-    aggregateId: runId,
-    source: { processKind: 'node', processId: 'test' },
-    payload: event,
-  }
-}
 
 const { agentRunnerMock, inProcessRunnerMock } = vi.hoisted(() => ({
   agentRunnerMock: vi.fn(),
@@ -49,13 +26,13 @@ function createRunnerDouble() {
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     async *query() {
-      yield wrap({
+      yield {
         type: 'RunCompleted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
-      })
+      }
     },
   }
 }
@@ -93,7 +70,6 @@ function createTestConfig(
     agentConfigs: {},
     enterCorrelation: async (_correlationId, fn) => fn(),
     emitTaskEvent: vi.fn(),
-    publishEnvelope: vi.fn(),
     ...overrides,
   }
 }
@@ -258,6 +234,40 @@ describe('createControlPlaneRuntime with custom deps', () => {
     await runtime.onCommand(cmd)
 
     expect(execute).toHaveBeenCalledWith(cmd)
+  })
+
+  it('passes task session attachment dependencies into in-process runner', async () => {
+    setupRunnerMocks()
+
+    const emitTaskEvent = vi.fn()
+    const logger = createLoggerDouble()
+    const runtime = createControlPlaneRuntime(
+      createTestConfig({
+        emitTaskEvent,
+        logger,
+        agentConfigs: {
+          default: {
+            type: 'native',
+          } as never,
+        },
+        nativeAgentContext: {} as never,
+        defaultGraph: {} as never,
+        executorFactory: {} as never,
+      }),
+      {
+        createConnection: () => createConnectionDouble(),
+      }
+    )
+
+    await runtime.onCommand(createTestCommand())
+
+    expect(inProcessRunnerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'default',
+        taskId: createTaskId('task-001'),
+        emitEvent: emitTaskEvent,
+      })
+    )
   })
 
   it('does not call execute when taskExecutorRef is null at command time', async () => {

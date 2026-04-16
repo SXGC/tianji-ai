@@ -94,8 +94,7 @@ src/
 │  ├─ register / heartbeat / poll   # node 侧 REST
 │  ├─ events                        # 任务事件写入
 │  ├─ ui-nodes                      # UI 读取节点列表
-│  ├─ ui-tasks(-stream)             # UI 创建任务 / SSE 订阅
-│  └─ copilot                       # CopilotKit 运行时代理
+│  └─ copilot                       # CopilotKit 运行时代理与任务创建入口
 ├─ middleware/        # Access Token 校验、请求日志
 ├─ services/          # EventStore、ObservationMonitor、Auth
 └─ agents/            # TianjiAgent：把 node 任务事件桥接到 CopilotKit
@@ -106,10 +105,10 @@ migrations/           # 手写 SQL migration 文件，按序执行
 
 1. Node 使用一次性 Enrollment Token 调用注册接口，换取专属 Access Token。
 2. Node 周期性上报心跳，同步在线状态与本机可用 agent 列表。
-3. 浏览器选择 node + agent，提交任务；controlplane 写入 `commands` / `tasks`。
+3. 浏览器选择 node + agent，通过 `/api/copilot` 发起一次 Copilot 运行；`TianjiAgent.run()` 在 controlplane 内部写入 `commands` / `tasks`。
 4. Node 轮询命令接口，拿到任务后本地执行。
-5. Node 把执行过程以事件流回传到事件接口，controlplane 持久化到 `task_events`。
-6. 浏览器通过 SSE 订阅同一任务，实时渲染；刷新后仍可回放。
+5. Node 把执行过程以事件流回传到事件接口，controlplane 持久化到 `event_log`。
+6. CopilotRuntime 消费同一条事件流并把任务过程推送回前端；刷新后仍可基于事件重放。
 
 ---
 
@@ -154,7 +153,7 @@ src/web/
 ├─ router/            # TanStack Router 路由定义与页面
 ├─ components/        # 展示与交互组件，包含 CopilotKit 封装
 ├─ stores/            # Zustand store：节点列表、当前任务等
-├─ services/          # 对 /api/ui/* 的调用封装
+├─ services/          # 对节点列表等 /api/* 接口的调用封装
 └─ styles/            # 样式
 ```
 
@@ -163,8 +162,8 @@ src/web/
 | 模块 | 职责 |
 |---|---|
 | 节点视图 | 从 `/api/ui/nodes` 拉取在线节点与其 agent 列表 |
-| 任务创建 | 选择 node + agent，提交任务 |
-| 任务流 | 通过 SSE 订阅任务事件，实时渲染执行过程，支持重放 |
+| 任务创建 | 选择 node + agent，通过 `/api/copilot` 发起 Copilot 运行，由后端内部创建 task / command |
+| 任务流 | 通过 CopilotRuntime 返回的事件流实时渲染执行过程，支持基于事件重放 |
 | CopilotKit 集成 | 把 controlplane 暴露的 `/api/copilot` 作为 CopilotKit 后端，TianjiAgent 负责把 node 任务适配成 CopilotKit 能理解的事件流 |
 
 ---

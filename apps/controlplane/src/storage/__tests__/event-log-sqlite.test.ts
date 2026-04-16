@@ -34,6 +34,15 @@ describe('SqliteEventLogStore', () => {
     expect(await store.maxSequence('Run', 'rX')).toBeNull()
   })
 
+  it('重复写入同一 eventId 时幂等忽略，不重复占用 sequence', async () => {
+    const store = new SqliteEventLogStore(freshDb())
+    const duplicate = env(1)
+
+    await store.append([duplicate])
+    await expect(store.append([duplicate])).resolves.toEqual({ written: 0 })
+    expect(await store.maxSequence('Run', 'r1')).toBe(1)
+  })
+
   it('UNIQUE(aggregate_type, aggregate_id, sequence) 冲突直接 throw', async () => {
     const store = new SqliteEventLogStore(freshDb())
     await store.append([env(1)])

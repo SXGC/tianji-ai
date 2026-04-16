@@ -51,7 +51,6 @@ describe('createControlPlaneRuntime', () => {
         agentList: [],
         agentConfigs: {},
         emitTaskEvent: vi.fn(),
-        publishEnvelope: vi.fn(),
         enterCorrelation: async (_correlationId, fn) => fn(),
       },
       deps

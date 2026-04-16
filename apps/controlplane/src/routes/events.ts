@@ -42,7 +42,10 @@ export function createEventsRoute(deps: EventsRouteDeps): Hono<AuthVariables> {
   const app = new Hono<AuthVariables>()
   const auth = createAuthMiddleware(db, logger)
 
-  const ingest = createEventIngest({ publish: (env) => bus.publish(env) })
+  const ingest = createEventIngest({
+    publish: (env) => bus.publish(env),
+    logger,
+  })
 
   app.post('/api/events', auth, async (c) => {
     const body = c.req.raw.body

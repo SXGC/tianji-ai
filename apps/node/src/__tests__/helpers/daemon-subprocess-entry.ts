@@ -32,12 +32,14 @@ async function main(): Promise<void> {
 
   const paths = JSON.parse(pathsRaw) as UserConfigPaths
   const chunks = chunksRaw === undefined ? [] : (JSON.parse(chunksRaw) as readonly string[])
-  const session: AgentSession = createStubSession(chunks)
+  const live = createStubSession(chunks)
+  const session: AgentSession = live.session
 
   const server = new DaemonServer({
     session,
     defaultGraph: testDefaultGraph,
     executorFactory: testExecutorFactory,
+    bus: live.bus,
     paths: {
       daemonPortPath: paths.daemonPortPath,
       daemonPidPath: paths.daemonPidPath,
