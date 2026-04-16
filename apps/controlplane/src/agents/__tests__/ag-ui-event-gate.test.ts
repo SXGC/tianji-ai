@@ -131,6 +131,92 @@ describe('AgUiEventGate', () => {
 
     expect(subscriber.next).toHaveBeenCalledWith(stateDelta)
   })
+
+  it('T3 取消路径含 thinking：flush 发 REASONING_MESSAGE_END → REASONING_END → TEXT_MESSAGE_END', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    gate.emit({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 'M1',
+      role: 'assistant',
+    } as BaseEvent)
+    gate.emit({ type: EventType.REASONING_START, messageId: 'M1' } as BaseEvent)
+    gate.emit({ type: EventType.REASONING_MESSAGE_START, messageId: 'M1' } as BaseEvent)
+    gate.emit({
+      type: EventType.REASONING_MESSAGE_CONTENT,
+      messageId: 'M1',
+      delta: '...',
+    } as BaseEvent)
+
+    gate.emitTerminal({
+      type: EventType.RUN_FINISHED,
+      threadId: 'thread-1',
+      runId: 'run-1',
+      reason: 'cancelled',
+    } as BaseEvent)
+
+    const types = subscriber.next.mock.calls.map((c) => (c[0] as BaseEvent).type)
+    expect(types).toEqual([
+      'TEXT_MESSAGE_START',
+      'REASONING_START',
+      'REASONING_MESSAGE_START',
+      'REASONING_MESSAGE_CONTENT',
+      'REASONING_MESSAGE_END',
+      'REASONING_END',
+      'TEXT_MESSAGE_END',
+      'RUN_FINISHED',
+    ])
+    expect(sink.entries.some((e) => e.level === 'error')).toBe(true)
+  })
+
+  it('REASONING_END 先到则清除 inThinking，后续 TEXT_MESSAGE_END 从 active 删除，无 flush', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    gate.emit({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 'M1',
+      role: 'assistant',
+    } as BaseEvent)
+    gate.emit({ type: EventType.REASONING_START, messageId: 'M1' } as BaseEvent)
+    gate.emit({ type: EventType.REASONING_END, messageId: 'M1' } as BaseEvent)
+    gate.emit({ type: EventType.TEXT_MESSAGE_END, messageId: 'M1' } as BaseEvent)
+
+    gate.emitTerminal({
+      type: EventType.RUN_FINISHED,
+      threadId: 'thread-1',
+      runId: 'run-1',
+    } as BaseEvent)
+
+    expect(sink.entries.some((e) => e.level === 'error')).toBe(false)
+    const types = subscriber.next.mock.calls.map((c) => (c[0] as BaseEvent).type)
+    expect(types).toEqual([
+      'TEXT_MESSAGE_START',
+      'REASONING_START',
+      'REASONING_END',
+      'TEXT_MESSAGE_END',
+      'RUN_FINISHED',
+    ])
+  })
+
+  it('T8 REASONING_START 先到、TEXT_MESSAGE_START 从未到：flush 只发 REASONING 序列，不补 TEXT_MESSAGE_END', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    gate.emit({ type: EventType.REASONING_START, messageId: 'M1' } as BaseEvent)
+    gate.emitTerminal({
+      type: EventType.RUN_FINISHED,
+      threadId: 'thread-1',
+      runId: 'run-1',
+    } as BaseEvent)
+
+    const types = subscriber.next.mock.calls.map((c) => (c[0] as BaseEvent).type)
+    expect(types).toEqual([
+      'REASONING_START',
+      'REASONING_MESSAGE_END',
+      'REASONING_END',
+      'RUN_FINISHED',
+    ])
+    expect(sink.entries.some((e) => e.level === 'error')).toBe(true)
+  })
 })
 
 describe('isTerminalAgUiEvent', () => {
