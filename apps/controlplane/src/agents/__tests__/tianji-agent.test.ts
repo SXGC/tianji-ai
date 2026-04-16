@@ -179,6 +179,23 @@ describe('TianjiAgent', () => {
     expect(runEvents[1]).toMatchObject({ type: 'RUN_ERROR', message: 'Node is offline' })
   })
 
+  function setupRunningTask(nodeId: string, taskId: string, agentId = 'agent-1') {
+    const now = Date.now()
+    const commandId = `cmd-${taskId}`
+    db.raw
+      .prepare(
+        `INSERT INTO commands (command_id, node_id, type, payload, state, created_at)
+         VALUES (?, ?, 'task.run', '{}', 'leased', ?)`
+      )
+      .run(commandId, nodeId, now)
+    db.raw
+      .prepare(
+        `INSERT INTO tasks (task_id, command_id, node_id, agent_id, goal, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'test', 'running', ?, ?)`
+      )
+      .run(taskId, commandId, nodeId, agentId, now, now)
+  }
+
   it('结构化用户消息会被提取为发送给节点的纯文本 goal', async () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
@@ -212,5 +229,95 @@ describe('TianjiAgent', () => {
     expect(JSON.parse(commandRow!.payload)).toMatchObject({
       goal: '第一段输入\n第二段输入',
     })
+  })
+})
+
+describe('TianjiAgent.cancelTask', () => {
+  let db: ControlPlaneDb
+
+  afterEach(() => {
+    db?.close()
+  })
+
+  function setupOnlineNode(nodeId: string) {
+    db.raw
+      .prepare(
+        `INSERT INTO enrollment_tokens (token, created_at) VALUES ('test-token', ${Date.now()})
+         ON CONFLICT(token) DO NOTHING`
+      )
+      .run()
+
+    db.raw
+      .prepare(
+        `INSERT INTO nodes
+           (node_id, hostname, platform, version, status, access_token_hash, access_token_expires_at, enrollment_token, created_at, updated_at)
+         VALUES (?, 'host', 'linux', '1.0.0', 'online', 'hash', ${Date.now() + 3600000}, 'test-token', ${Date.now()}, ${Date.now()})`
+      )
+      .run(nodeId)
+  }
+
+  function setupRunningTask(nodeId: string, taskId: string, agentId = 'agent-1') {
+    const now = Date.now()
+    const commandId = `cmd-${taskId}`
+    db.raw
+      .prepare(
+        `INSERT INTO commands (command_id, node_id, type, payload, state, created_at)
+         VALUES (?, ?, 'task.run', '{}', 'leased', ?)`
+      )
+      .run(commandId, nodeId, now)
+    db.raw
+      .prepare(
+        `INSERT INTO tasks (task_id, command_id, node_id, agent_id, goal, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'test', 'running', ?, ?)`
+      )
+      .run(taskId, commandId, nodeId, agentId, now, now)
+  }
+
+  it('插入 task.cancel 命令行，字段正确', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+    setupRunningTask('node-1', 'task-1', 'agent-1')
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+
+    await agent.cancelTask('task-1')
+
+    const rows = db.raw
+      .prepare("SELECT * FROM commands WHERE type = 'task.cancel'")
+      .all() as Array<{
+      command_id: string
+      node_id: string
+      type: string
+      payload: string
+      state: string
+      created_at: number
+    }>
+    expect(rows).toHaveLength(1)
+    expect(rows[0].node_id).toBe('node-1')
+    expect(rows[0].state).toBe('pending')
+    expect(JSON.parse(rows[0].payload)).toEqual({ taskId: 'task-1', reason: 'user' })
+  })
+
+  it('从 tasks 表反查 nodeId，不依赖 agent 构造时的 nodeId', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-target')
+    setupOnlineNode('node-other')
+    setupRunningTask('node-target', 'task-x', 'agent-1')
+    // 构造时故意传 'node-other'，验证 cancelTask 用 tasks.node_id 而非构造时的 #nodeId
+    const agent = new TianjiAgent(db, 'node-other', 'agent-1')
+
+    await agent.cancelTask('task-x')
+
+    const row = db.raw.prepare("SELECT node_id FROM commands WHERE type = 'task.cancel'").get() as {
+      node_id: string
+    }
+    expect(row.node_id).toBe('node-target')
+  })
+
+  it('不存在的 taskId 抛错', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+
+    await expect(agent.cancelTask('ghost-task')).rejects.toThrow(/not found/i)
   })
 })

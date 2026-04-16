@@ -172,6 +172,37 @@ export class TianjiAgent extends AbstractAgent {
     })
   }
 
+  /**
+   * 发起取消某个 task 的请求。
+   *
+   * 向 commands 表插入一条 task.cancel 命令，node daemon 在下一轮 long-poll 时拉到，
+   * 通过 ActiveExecutorRegistry 路由到运行中的 TaskExecutor 并触发其 cancel。
+   *
+   * @remarks
+   * nodeId 从 tasks 表反查而非使用 this.#nodeId，因为 cancel 路由可能由任意 agent
+   * 实例发起，而真正持有 task 的 node 可能不同。
+   *
+   * @param taskId - 要取消的任务 ID
+   * @throws 若 taskId 在 tasks 表不存在（Let it crash，上层应已做存在性校验）
+   */
+  async cancelTask(taskId: string): Promise<void> {
+    const task = this.#db.raw.prepare('SELECT node_id FROM tasks WHERE task_id = ?').get(taskId) as
+      | { node_id: string }
+      | undefined
+
+    if (task === undefined) {
+      throw new Error(`Task not found: ${taskId}`)
+    }
+
+    const commandId = randomUUID()
+    const payload = JSON.stringify({ taskId, reason: 'user' })
+    this.#db.raw
+      .prepare(
+        'INSERT INTO commands (command_id, node_id, type, payload, state, created_at) VALUES (?, ?, ?, ?, ?, ?)'
+      )
+      .run(commandId, task.node_id, 'task.cancel', payload, 'pending', Date.now())
+  }
+
   clone(): TianjiAgent {
     return new TianjiAgent(this.#db, this.#nodeId, this.#cpAgentId, this.#bus)
   }
