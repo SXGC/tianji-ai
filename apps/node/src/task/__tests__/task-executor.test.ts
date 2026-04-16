@@ -832,11 +832,12 @@ describe('TaskExecutorConfig', () => {
     expect(failedEvent?.error).toBe(runFailedError)
   })
 
-  it('yield RunCancelled 时 execute 抛错，提示待 Phase 2.5 支持', async () => {
+  it('yield RunCancelled 时发 TaskCancelled（而非 TaskFailed/TaskCompleted）', async () => {
     const module = await import('../task-executor.js')
     const emitEvent = vi.fn()
     const runId = 'run-dispatch-cancelled' as never
     const now = Date.now()
+    const taskId = createTaskId('task-dispatch-3')
 
     const executor = new module.TaskExecutor(
       makeConfig({
@@ -866,14 +867,21 @@ describe('TaskExecutorConfig', () => {
       })
     )
 
-    // RunCancelled 尚未支持，应 reject 并提示 Phase 2.5
-    await expect(
-      executor.execute(createCommand(createTaskId('task-dispatch-3'), 'dispatch cancelled'))
-    ).rejects.toThrow(/Phase 2\.5/i)
+    // Task 2.5 起 RunCancelled 正常收口为 TaskCancelled，execute 不抛错
+    await executor.execute(createCommand(taskId, 'dispatch cancelled'))
 
-    // catch 块被触发，应发 TaskFailed
     const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
-    expect(emittedTypes).toContain('TaskFailed')
+    expect(emittedTypes).toContain('TaskStarted')
+    expect(emittedTypes).toContain('TaskCancelled')
+    expect(emittedTypes).not.toContain('TaskFailed')
+    expect(emittedTypes).not.toContain('TaskCompleted')
+
+    const cancelledEvent = (emitEvent.mock.calls as Array<[DomainEvent]>)
+      .map(([e]) => e)
+      .find((e) => e.type === 'TaskCancelled') as
+      | Extract<DomainEvent, { type: 'TaskCancelled' }>
+      | undefined
+    expect(cancelledEvent?.taskId).toBe(String(taskId))
   })
 
   it('for-await 抛 ProviderError 时，TaskFailed.error.code/message/category 透传自异常', async () => {
@@ -1099,7 +1107,7 @@ describe('TaskExecutorConfig', () => {
     expect(emittedTypes).not.toContain('TaskCompleted')
   })
 
-  it('logs run.cancelled turn summary and execute rejects (Phase 2.5 placeholder)', async () => {
+  it('logs run.cancelled turn summary and emits TaskCancelled', async () => {
     const module = await import('../task-executor.js')
     const written: Array<{ level: string; message: string; data?: Record<string, unknown> }> = []
     const emitEvent = vi.fn()
@@ -1114,7 +1122,7 @@ describe('TaskExecutorConfig', () => {
     const runId = 'run-test' as never
     const now = Date.now()
 
-    // 测试 run.cancelled：当前阶段 execute 应抛错，留待 Phase 2.5 支持 TaskCancelled
+    // 测试 run.cancelled：循环正常结束，分发 TaskCancelled
     const executor2 = new module.TaskExecutor(
       makeConfig({
         logger,
@@ -1144,12 +1152,9 @@ describe('TaskExecutorConfig', () => {
       })
     )
 
-    // RunCancelled 当前不支持，execute 应 reject
-    await expect(
-      executor2.execute(createCommand(createTaskId('task-002'), 'run cancelled'))
-    ).rejects.toThrow(/Phase 2\.5/i)
+    await executor2.execute(createCommand(createTaskId('task-002'), 'run cancelled'))
 
-    // turn summary 日志仍存在（在 throw 前已记录）
+    // turn summary 日志
     const cancelledSummary = written.find(
       (e) =>
         e.message === 'Run turn summary' &&
@@ -1157,8 +1162,10 @@ describe('TaskExecutorConfig', () => {
     )
     expect(cancelledSummary).toBeDefined()
 
-    // catch 块接住了 throw，所以会发 TaskFailed
+    // 分发 TaskCancelled，而非 TaskFailed/TaskCompleted
     const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
-    expect(emittedTypes).toContain('TaskFailed')
+    expect(emittedTypes).toContain('TaskCancelled')
+    expect(emittedTypes).not.toContain('TaskFailed')
+    expect(emittedTypes).not.toContain('TaskCompleted')
   })
 })

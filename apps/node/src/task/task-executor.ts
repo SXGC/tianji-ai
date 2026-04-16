@@ -160,8 +160,13 @@ export class TaskExecutor {
             break
           }
           case 'RunCancelled': {
-            // TODO(Phase 2.5)：补齐 TaskCancelled 分发，当前先 throw 暴露未支持状态
-            throw new Error('RunCancelled terminal not supported yet; will be handled in Phase 2.5')
+            await this.#config.logger?.logDebug(
+              this.#scope,
+              'Emitting TaskCancelled lifecycle event from RunCancelled',
+              { taskId }
+            )
+            this.#config.emitEvent({ type: 'TaskCancelled', taskId, timestamp: now() })
+            break
           }
         }
       } catch (error) {
