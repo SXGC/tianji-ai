@@ -52,6 +52,9 @@ export function resolveTarget(event: DomainEvent): EventTarget {
     case 'TaskFailed':
     case 'TaskCancelled':
     case 'TaskObservationLost':
+    case 'TaskMessageStarted':
+    case 'TaskMessageDelta':
+    case 'TaskMessageCompleted':
       return { aggregateType: 'Task', aggregateId: event.taskId }
 
     case 'NodeRegistered':

@@ -105,6 +105,9 @@ export function mapRuntimeEventToSessionUpdate(
     case 'TaskFailed':
     case 'TaskCancelled':
     case 'TaskObservationLost':
+    case 'TaskMessageStarted':
+    case 'TaskMessageDelta':
+    case 'TaskMessageCompleted':
       return null
   }
 }
