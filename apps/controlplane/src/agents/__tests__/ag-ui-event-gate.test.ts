@@ -260,6 +260,43 @@ describe('AgUiEventGate', () => {
       eventType: 'TEXT_MESSAGE_CONTENT',
     })
   })
+
+  it('正常终态后 dispose 为空操作且可重入', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    gate.emitTerminal({
+      type: EventType.RUN_FINISHED,
+      threadId: 'thread-1',
+      runId: 'run-1',
+    } as BaseEvent)
+    subscriber.next.mockClear()
+    const beforeErrorCount = sink.entries.filter((e) => e.level === 'error').length
+
+    gate.dispose()
+    gate.dispose()
+
+    expect(subscriber.next).not.toHaveBeenCalled()
+    expect(sink.entries.filter((e) => e.level === 'error').length).toBe(beforeErrorCount)
+  })
+
+  it('T7 业务方忘记 emitTerminal：dispose flush 活跃消息但不发终态事件', () => {
+    const { subscriber, sink, gate } = makeGate()
+
+    gate.emit({
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 'M1',
+      role: 'assistant',
+    } as BaseEvent)
+    gate.dispose()
+
+    const types = subscriber.next.mock.calls.map((c) => (c[0] as BaseEvent).type)
+    expect(types).toEqual(['TEXT_MESSAGE_START', 'TEXT_MESSAGE_END'])
+
+    const errorEntries = sink.entries.filter((e) => e.level === 'error')
+    expect(errorEntries).toHaveLength(1)
+    expect(errorEntries[0].message).toContain('without terminal')
+    expect(errorEntries[0].data).toMatchObject({ messageIds: ['M1'] })
+  })
 })
 
 describe('isTerminalAgUiEvent', () => {

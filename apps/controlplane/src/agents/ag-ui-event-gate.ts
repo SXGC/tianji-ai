@@ -146,7 +146,12 @@ export class AgUiEventGate {
   }
 
   dispose(): void {
-    throw new Error('Not implemented')
+    if (this.#disposed) return
+    this.#disposed = true
+
+    if (!this.#terminated && this.#active.size > 0) {
+      this.#flushActive('dispose')
+    }
   }
 }
 
