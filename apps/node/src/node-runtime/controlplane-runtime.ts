@@ -16,6 +16,7 @@ import { resolveAgentType } from '@tianji/shared'
 import { AgentRunner, InProcessAgentRunner } from '../acp/index.js'
 import { ControlPlaneConnection, type ControlPlaneConnectionConfig } from '../controlplane/index.js'
 import type { RuntimeLogger } from '../logger.js'
+import { ActiveExecutorRegistry } from '../task/active-executor-registry.js'
 import { TaskExecutor, type TaskExecutorConfig } from '../task/task-executor.js'
 
 export interface ControlPlaneRuntimeConfig {
@@ -77,6 +78,7 @@ export interface TaskExecutorLike {
   readonly executionState: NodeExecutionState
   readonly currentTaskId: string | null
   execute(command: TaskRunCommand): Promise<void>
+  cancel(): void
 }
 
 export interface ControlPlaneRuntimeHandle {
@@ -91,6 +93,7 @@ export function createControlPlaneRuntime(
 ): ControlPlaneRuntimeHandle {
   let currentConnection: ControlPlaneConnectionLike | null = null
   let taskExecutorRef: TaskExecutorLike | null = null
+  const registry = new ActiveExecutorRegistry()
 
   const updateExecutionState = (state: NodeExecutionState): void => {
     currentConnection?.setExecutionState(state)
@@ -101,35 +104,59 @@ export function createControlPlaneRuntime(
       return
     }
 
-    if (command.type !== 'task.run') {
-      // task.cancel 分发路径由后续 Task 3.5 接入 ActiveExecutorRegistry 实现。
-      config.logger
-        ?.logError(['daemon', 'controlplane'], 'Unsupported command type (dispatch pending)', {
+    switch (command.type) {
+      case 'task.run': {
+        const taskCommand: TaskRunCommand = {
           commandId: command.commandId,
-          type: command.type,
-        })
-        ?.catch(() => {})
-      return
+          nodeId: config.nodeId,
+          type: 'task.run',
+          payload: command.payload,
+          state: 'pending',
+          createdAt: Date.now(),
+        }
+        const taskId = String(taskCommand.payload.taskId)
+        registry.register(taskId, taskExecutorRef)
+        taskExecutorRef
+          .execute(taskCommand)
+          .catch((error) => {
+            config.logger
+              ?.logError(['daemon', 'controlplane'], 'Failed to execute task command', {
+                commandId: taskCommand.commandId,
+                taskId: taskCommand.payload.taskId,
+                agentId: taskCommand.payload.agentId,
+                error: error instanceof Error ? error.message : String(error),
+              })
+              ?.catch(() => {})
+          })
+          .finally(() => {
+            registry.unregister(taskId)
+          })
+        break
+      }
+      case 'task.cancel': {
+        try {
+          registry.cancel(String(command.payload.taskId))
+        } catch (error) {
+          config.logger
+            ?.logError(['daemon', 'controlplane'], 'Failed to cancel task', {
+              commandId: command.commandId,
+              taskId: command.payload.taskId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+            ?.catch(() => {})
+        }
+        break
+      }
+      default: {
+        const unknownCmd = command as unknown as { commandId: string; type: string }
+        config.logger
+          ?.logError(['daemon', 'controlplane'], 'Unsupported command type (dispatch pending)', {
+            commandId: unknownCmd.commandId,
+            type: unknownCmd.type,
+          })
+          ?.catch(() => {})
+      }
     }
-
-    const taskCommand: TaskRunCommand = {
-      commandId: command.commandId,
-      nodeId: config.nodeId,
-      type: 'task.run',
-      payload: command.payload,
-      state: 'pending',
-      createdAt: Date.now(),
-    }
-    taskExecutorRef.execute(taskCommand).catch((error) => {
-      config.logger
-        ?.logError(['daemon', 'controlplane'], 'Failed to execute task command', {
-          commandId: taskCommand.commandId,
-          taskId: taskCommand.payload.taskId,
-          agentId: taskCommand.payload.agentId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-        ?.catch(() => {})
-    })
   }
 
   const connection =
@@ -221,11 +248,25 @@ export function createControlPlaneRuntime(
     connection,
     taskExecutor,
     async onCommand(command: Command): Promise<void> {
-      if (command.type !== 'task.run') {
-        // task.cancel 分发路径由后续 Task 3.5 接入 ActiveExecutorRegistry 实现。
-        throw new Error(`Unsupported command type: ${command.type}`)
+      switch (command.type) {
+        case 'task.run': {
+          const taskId = String(command.payload.taskId)
+          registry.register(taskId, taskExecutor)
+          try {
+            await taskExecutor.execute(command)
+          } finally {
+            registry.unregister(taskId)
+          }
+          break
+        }
+        case 'task.cancel': {
+          registry.cancel(String(command.payload.taskId))
+          break
+        }
+        default: {
+          throw new Error(`Unknown command type: ${(command as { type: string }).type}`)
+        }
       }
-      await taskExecutor.execute(command)
     },
   }
 }

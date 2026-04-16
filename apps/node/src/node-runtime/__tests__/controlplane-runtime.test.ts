@@ -36,6 +36,7 @@ describe('createControlPlaneRuntime', () => {
           executionState: 'idle',
           currentTaskId: null,
           execute,
+          cancel: vi.fn(),
         }
       },
     }
