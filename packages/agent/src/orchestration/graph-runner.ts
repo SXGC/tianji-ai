@@ -128,14 +128,29 @@ export function runOrchestrationGraph(
 
       return finalState
     } catch (error) {
-      emit({
-        type: 'GraphRunFailed',
-        runId: options.runId,
-        graphId: options.graph.id,
-        graphVersion: options.graph.version,
-        error: toTianjiError(error),
-        timestamp: Date.now(),
-      })
+      const isAbort =
+        error instanceof Error &&
+        error.name === 'AbortError' &&
+        options.abortSignal?.aborted === true
+      if (isAbort) {
+        emit({
+          type: 'GraphRunCancelled',
+          runId: options.runId,
+          graphId: options.graph.id,
+          graphVersion: options.graph.version,
+          reason: 'abort',
+          timestamp: Date.now(),
+        })
+      } else {
+        emit({
+          type: 'GraphRunFailed',
+          runId: options.runId,
+          graphId: options.graph.id,
+          graphVersion: options.graph.version,
+          error: toTianjiError(error),
+          timestamp: Date.now(),
+        })
+      }
       throw error
     } finally {
       // 无论 invoke 成功还是失败，都要关闭事件流，防止消费者永远挂起
