@@ -142,6 +142,32 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
       return mapMessageCompleted(p.messageId, ctx)
     }
 
+    // ── Task 聚合：消息（展示链） ───────────────────────────────────────────
+    case 'TaskMessageStarted': {
+      const p = env.payload as { messageId: string }
+      return [
+        ev({
+          type: EventType.TEXT_MESSAGE_START,
+          messageId: p.messageId,
+          role: 'assistant',
+        }),
+      ]
+    }
+
+    case 'TaskMessageDelta': {
+      const p = env.payload as {
+        messageId: string
+        channel: string
+        payload: { content: string }
+      }
+      return mapMessageDelta(p.messageId, p.channel, p.payload.content, ctx)
+    }
+
+    case 'TaskMessageCompleted': {
+      const p = env.payload as { messageId: string }
+      return mapMessageCompleted(p.messageId, ctx)
+    }
+
     // ── Run 聚合：工具 ────────────────────────────────────────────────────────
     case 'ToolStarted': {
       const p = env.payload as {

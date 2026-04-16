@@ -779,3 +779,111 @@ describe('GraphRun 事件映射', () => {
     })
   })
 })
+
+// ============================================================================
+// TaskMessage* 事件映射
+// ============================================================================
+
+describe('TaskMessage* 事件映射', () => {
+  it('TaskMessageStarted → TEXT_MESSAGE_START，role=assistant', () => {
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageStarted',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        role: 'assistant',
+        timestamp: 1000,
+      }),
+      freshCtx()
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].type).toBe(EventType.TEXT_MESSAGE_START)
+    expect((result[0] as { messageId: string }).messageId).toBe('msg-1')
+    expect((result[0] as { role: string }).role).toBe('assistant')
+  })
+
+  it('TaskMessageDelta 在 text 通道下 → TEXT_MESSAGE_CONTENT', () => {
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageDelta',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        sequence: 1,
+        channel: 'text',
+        payload: { content: 'hello' },
+        timestamp: 1000,
+      }),
+      freshCtx()
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].type).toBe(EventType.TEXT_MESSAGE_CONTENT)
+    expect((result[0] as { delta: string }).delta).toBe('hello')
+  })
+
+  it('TaskMessageDelta 在 thinking 通道下首次触发 REASONING_START/REASONING_MESSAGE_START/REASONING_MESSAGE_CONTENT', () => {
+    const ctx = freshCtx()
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageDelta',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        sequence: 1,
+        channel: 'thinking',
+        payload: { content: 'step-1' },
+        timestamp: 1000,
+      }),
+      ctx
+    )
+    expect(result.map((e) => e.type)).toEqual([
+      EventType.REASONING_START,
+      EventType.REASONING_MESSAGE_START,
+      EventType.REASONING_MESSAGE_CONTENT,
+    ])
+    expect(ctx.inThinking).toBe(true)
+  })
+
+  it('TaskMessageCompleted 在 thinking 中先发 REASONING_MESSAGE_END+REASONING_END，再发 TEXT_MESSAGE_END', () => {
+    const ctx: EventMapperContext = { inThinking: true, taskId: 'task-001' }
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageCompleted',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        message: {
+          id: 'msg-1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+          createdAt: 1000,
+        },
+        timestamp: 1000,
+      }),
+      ctx
+    )
+    expect(result.map((e) => e.type)).toEqual([
+      EventType.REASONING_MESSAGE_END,
+      EventType.REASONING_END,
+      EventType.TEXT_MESSAGE_END,
+    ])
+    expect(ctx.inThinking).toBe(false)
+  })
+
+  it('TaskMessageCompleted 非 thinking 状态下只发 TEXT_MESSAGE_END', () => {
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageCompleted',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        message: {
+          id: 'msg-1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+          createdAt: 1000,
+        },
+        timestamp: 1000,
+      }),
+      freshCtx()
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].type).toBe(EventType.TEXT_MESSAGE_END)
+  })
+})
