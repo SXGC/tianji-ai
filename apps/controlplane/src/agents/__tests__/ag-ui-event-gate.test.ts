@@ -21,6 +21,40 @@ describe('AgUiEventGate', () => {
     expect(gate.alreadyTerminated()).toBe(false)
     expect(subscriber.next).not.toHaveBeenCalled()
   })
+
+  it('TEXT_MESSAGE_START 进入 active，TEXT_MESSAGE_END 移出 active', () => {
+    const { subscriber, gate } = makeGate()
+
+    const startEv = {
+      type: EventType.TEXT_MESSAGE_START,
+      messageId: 'M1',
+      role: 'assistant',
+    } as BaseEvent
+    const contentEv = {
+      type: EventType.TEXT_MESSAGE_CONTENT,
+      messageId: 'M1',
+      delta: 'hi',
+    } as BaseEvent
+    const endEv = { type: EventType.TEXT_MESSAGE_END, messageId: 'M1' } as BaseEvent
+
+    gate.emit(startEv)
+    gate.emit(contentEv)
+    gate.emit(endEv)
+
+    expect(subscriber.next).toHaveBeenCalledTimes(3)
+    expect(subscriber.next).toHaveBeenNthCalledWith(1, startEv)
+    expect(subscriber.next).toHaveBeenNthCalledWith(2, contentEv)
+    expect(subscriber.next).toHaveBeenNthCalledWith(3, endEv)
+  })
+
+  it('非 TEXT / REASONING 事件原样透传', () => {
+    const { subscriber, gate } = makeGate()
+
+    const stateDelta = { type: EventType.STATE_DELTA, delta: [] } as BaseEvent
+    gate.emit(stateDelta)
+
+    expect(subscriber.next).toHaveBeenCalledWith(stateDelta)
+  })
 })
 
 describe('isTerminalAgUiEvent', () => {

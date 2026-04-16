@@ -48,8 +48,49 @@ export class AgUiEventGate {
     return this.#terminated
   }
 
-  emit(_event: BaseEvent): void {
-    throw new Error('Not implemented')
+  emit(event: BaseEvent): void {
+    if (this.#terminated) {
+      void this.#logger.warn(SCOPE_AG_UI_GATE, 'emit after terminal, ignored', {
+        runId: this.#context.runId,
+        threadId: this.#context.threadId,
+        eventType: event.type,
+      })
+      return
+    }
+
+    this.#trackEvent(event)
+    this.#subscriber.next(event)
+  }
+
+  #trackEvent(event: BaseEvent): void {
+    const e = event as BaseEvent & { messageId?: string }
+    const mid = typeof e.messageId === 'string' ? e.messageId : undefined
+    if (mid === undefined) return
+
+    switch (event.type) {
+      case EventType.TEXT_MESSAGE_START: {
+        const entry = this.#active.get(mid)
+        if (entry !== undefined) entry.hasText = true
+        else this.#active.set(mid, { inThinking: false, hasText: true })
+        return
+      }
+      case EventType.REASONING_START: {
+        const entry = this.#active.get(mid)
+        if (entry !== undefined) entry.inThinking = true
+        else this.#active.set(mid, { inThinking: true, hasText: false })
+        return
+      }
+      case EventType.REASONING_END: {
+        const entry = this.#active.get(mid)
+        if (entry !== undefined) entry.inThinking = false
+        return
+      }
+      case EventType.TEXT_MESSAGE_END:
+        this.#active.delete(mid)
+        return
+      default:
+        return
+    }
   }
 
   emitTerminal(_event: BaseEvent): void {
