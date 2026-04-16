@@ -1,10 +1,16 @@
 import type { BaseEvent } from '@ag-ui/client'
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { createEventBus } from '@tianji/shared'
 import { firstValueFrom, toArray } from 'rxjs'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { type ControlPlaneDb, createDatabase } from '../../db/index.js'
 import { TianjiAgent } from '../tianji-agent.js'
+
+/** TianjiAgent 构造必传 logger；测试环境走内存 sink，避免噪声泄漏到 stdout。 */
+function makeTestLogger() {
+  return createObserverLogger({ sinks: [createMemorySink()] })
+}
 
 describe('TianjiAgent', () => {
   let db: ControlPlaneDb
@@ -46,7 +52,7 @@ describe('TianjiAgent', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
 
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
     const clonedAgent = agent.clone()
 
     await expect(
@@ -68,7 +74,7 @@ describe('TianjiAgent', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
 
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
 
     const firstEvent = await firstValueFrom(
       agent.run({
@@ -88,7 +94,7 @@ describe('TianjiAgent', () => {
     setupOnlineNode('node-1')
 
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus)
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
 
     const completion = firstValueFrom(
       agent
@@ -135,7 +141,7 @@ describe('TianjiAgent', () => {
   it('节点不存在时首个运行事件仍然是 RUN_STARTED，随后才是 RUN_ERROR', async () => {
     db = createDatabase(':memory:')
 
-    const agent = new TianjiAgent(db, 'missing-node', 'agent-1')
+    const agent = new TianjiAgent(db, 'missing-node', 'agent-1', undefined, makeTestLogger())
 
     const events = await firstValueFrom(
       agent
@@ -160,7 +166,7 @@ describe('TianjiAgent', () => {
     setupOnlineNode('node-1')
     db.raw.prepare('UPDATE nodes SET status = ? WHERE node_id = ?').run('offline', 'node-1')
 
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
 
     const events = await firstValueFrom(
       agent
@@ -201,7 +207,7 @@ describe('TianjiAgent', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
 
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
 
     await firstValueFrom(
       agent.run({
@@ -278,7 +284,7 @@ describe('TianjiAgent.cancelTask', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
     setupRunningTask('node-1', 'task-1', 'agent-1')
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
 
     await agent.cancelTask('task-1')
 
@@ -304,7 +310,7 @@ describe('TianjiAgent.cancelTask', () => {
     setupOnlineNode('node-other')
     setupRunningTask('node-target', 'task-x', 'agent-1')
     // 构造时故意传 'node-other'，验证 cancelTask 用 tasks.node_id 而非构造时的 #nodeId
-    const agent = new TianjiAgent(db, 'node-other', 'agent-1')
+    const agent = new TianjiAgent(db, 'node-other', 'agent-1', undefined, makeTestLogger())
 
     await agent.cancelTask('task-x')
 
@@ -317,7 +323,7 @@ describe('TianjiAgent.cancelTask', () => {
   it('不存在的 taskId 抛错', async () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1')
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
 
     await expect(agent.cancelTask('ghost-task')).rejects.toThrow(/not found/i)
   })
@@ -359,7 +365,7 @@ describe('TianjiAgent cancel 终态', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus)
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
 
     const events: BaseEvent[] = []
     const subscription = agent
@@ -410,7 +416,7 @@ describe('TianjiAgent cancel 终态', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus)
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
 
     const events: BaseEvent[] = []
     const subscription = agent

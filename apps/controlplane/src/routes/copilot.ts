@@ -7,6 +7,7 @@
  * @module routes/copilot
  */
 import { CopilotRuntime, copilotRuntimeNodeHttpEndpoint } from '@copilotkit/runtime'
+import type { ObserverLogger } from '@tianji/observer'
 import type { EventBus } from '@tianji/shared'
 import { Hono } from 'hono'
 
@@ -27,11 +28,16 @@ import type { ControlPlaneDb } from '../db/index.js'
  * - `POST /api/copilot` - CopilotKit runtime 消息流
  * - `POST /api/copilot/cancel` - 用户触发的任务取消请求
  *
- * @param db  - ControlPlane 数据库实例
- * @param bus - 进程内 EventBus 实例（未提供时 agent.run 会在订阅阶段 crash）
+ * @param db     - ControlPlane 数据库实例
+ * @param logger - 结构化日志，透传给 TianjiAgent 内部的 AgUiEventGate（必传）
+ * @param bus    - 进程内 EventBus 实例（未提供时 agent.run 会在订阅阶段 crash）
  * @returns 已配置 /api/copilot 端点的 Hono 应用实例
  */
-export function createCopilotRoute(db: ControlPlaneDb, bus?: EventBus): Hono {
+export function createCopilotRoute(
+  db: ControlPlaneDb,
+  logger: ObserverLogger,
+  bus?: EventBus
+): Hono {
   const app = new Hono()
 
   app.post('/api/copilot', async (c) => {
@@ -53,7 +59,7 @@ export function createCopilotRoute(db: ControlPlaneDb, bus?: EventBus): Hono {
       return c.json({ error: 'Node is offline' }, 409)
     }
 
-    const agent = new TianjiAgent(db, nodeId, agentId, bus)
+    const agent = new TianjiAgent(db, nodeId, agentId, bus, logger)
     const runtime = new CopilotRuntime({
       agents: { default: agent },
     })
@@ -95,7 +101,7 @@ export function createCopilotRoute(db: ControlPlaneDb, bus?: EventBus): Hono {
 
     // cancelTask 内部从 tasks 表反查 node_id，不依赖构造时的 nodeId / agentId，此处用占位。
     // TODO: 引入 TaskNotFoundError 替代消息匹配，使错误分类更严谨。
-    const agent = new TianjiAgent(db, '', '', bus)
+    const agent = new TianjiAgent(db, '', '', bus, logger)
     try {
       await agent.cancelTask(taskId)
     } catch (error) {

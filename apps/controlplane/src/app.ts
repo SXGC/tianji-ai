@@ -73,7 +73,7 @@ export function createApp(
   }
 
   app.route('/', createUiNodesRoute(db))
-  app.route('/', createCopilotRoute(db, bus))
+  app.route('/', createCopilotRoute(db, logger, bus))
   app.route('/', createWebUiRoute())
 
   return {

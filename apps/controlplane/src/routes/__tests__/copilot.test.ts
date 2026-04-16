@@ -1,8 +1,14 @@
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { Hono } from 'hono'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { type ControlPlaneDb, createDatabase } from '../../db/index.js'
 import { createCopilotRoute } from '../copilot.js'
+
+/** createCopilotRoute 必传 logger；测试走内存 sink。 */
+function makeTestLogger() {
+  return createObserverLogger({ sinks: [createMemorySink()] })
+}
 
 describe('POST /api/copilot', () => {
   let db: ControlPlaneDb
@@ -14,7 +20,7 @@ describe('POST /api/copilot', () => {
   function setup() {
     db = createDatabase(':memory:')
     const app = new Hono()
-    app.route('/', createCopilotRoute(db))
+    app.route('/', createCopilotRoute(db, makeTestLogger()))
     return { app }
   }
 
@@ -139,7 +145,7 @@ describe('POST /api/copilot/cancel', () => {
   function setup() {
     db = createDatabase(':memory:')
     const app = new Hono()
-    app.route('/', createCopilotRoute(db))
+    app.route('/', createCopilotRoute(db, makeTestLogger()))
     return { app }
   }
 
