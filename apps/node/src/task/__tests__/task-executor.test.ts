@@ -649,6 +649,212 @@ describe('TaskExecutorConfig', () => {
     expect(taskIdx).toBeGreaterThan(runIdx)
   })
 
+  it('非 assistant 角色的 MessageStarted/MessageCompleted 不产生 TaskMessage* 镜像', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-mirror-skip' as never
+    const now = Date.now()
+    const taskId = createTaskId('task-mirror-skip')
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield {
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-mirror-skip' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+            // user 消息不应镜像
+            yield {
+              type: 'MessageStarted',
+              runId,
+              messageId: 'msg-user-1',
+              message: {
+                id: 'msg-user-1',
+                role: 'user',
+                content: [{ type: 'text', text: 'hi' }],
+                createdAt: now,
+              },
+              timestamp: now,
+            }
+            yield {
+              type: 'MessageCompleted',
+              runId,
+              messageId: 'msg-user-1',
+              message: {
+                id: 'msg-user-1',
+                role: 'user',
+                content: [{ type: 'text', text: 'hi' }],
+                createdAt: now,
+              },
+              timestamp: now,
+            }
+            // tool 消息也不应镜像
+            yield {
+              type: 'MessageStarted',
+              runId,
+              messageId: 'msg-tool-1',
+              message: {
+                id: 'msg-tool-1',
+                role: 'tool',
+                content: [{ type: 'tool_result', toolCallId: 't-1', output: 'ok' }],
+                createdAt: now,
+              },
+              timestamp: now,
+            }
+            yield {
+              type: 'RunCompleted',
+              runId,
+              sessionId: 'session-mirror-skip' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+          },
+        }),
+      })
+    )
+
+    await executor.execute(createCommand(taskId, 'no mirror for non-assistant'))
+
+    const events = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e)
+    const taskMessages = events.filter(
+      (e) =>
+        e.type === 'TaskMessageStarted' ||
+        e.type === 'TaskMessageDelta' ||
+        e.type === 'TaskMessageCompleted'
+    )
+    expect(taskMessages).toEqual([])
+    // run 级消息仍然被原样发出，只是不做 task 镜像
+    expect(events.some((e) => e.type === 'MessageStarted')).toBe(true)
+  })
+
+  it('一个 task 产出多条 assistant 消息时，各自保持独立的 TaskMessage* 链', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-mirror-multi' as never
+    const now = Date.now()
+    const taskId = createTaskId('task-mirror-multi')
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createRunner: async () => ({
+          agentId: 'default',
+          connect: async () => undefined,
+          disconnect: async () => undefined,
+          async *query() {
+            yield {
+              type: 'RunStarted',
+              runId,
+              sessionId: 'session-mirror-multi' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+            // 第一条消息
+            yield {
+              type: 'MessageStarted',
+              runId,
+              messageId: 'msg-a',
+              message: { id: 'msg-a', role: 'assistant', content: [], createdAt: now },
+              timestamp: now,
+            }
+            yield {
+              type: 'MessageDelta',
+              runId,
+              messageId: 'msg-a',
+              sequence: 0,
+              channel: 'text',
+              payload: { content: 'first ' },
+              timestamp: now,
+            }
+            yield {
+              type: 'MessageCompleted',
+              runId,
+              messageId: 'msg-a',
+              message: {
+                id: 'msg-a',
+                role: 'assistant',
+                content: [{ type: 'text', text: 'first' }],
+                createdAt: now,
+              },
+              timestamp: now,
+            }
+            // 第二条消息（不同 messageId）
+            yield {
+              type: 'MessageStarted',
+              runId,
+              messageId: 'msg-b',
+              message: { id: 'msg-b', role: 'assistant', content: [], createdAt: now },
+              timestamp: now,
+            }
+            yield {
+              type: 'MessageDelta',
+              runId,
+              messageId: 'msg-b',
+              sequence: 0,
+              channel: 'text',
+              payload: { content: 'second ' },
+              timestamp: now,
+            }
+            yield {
+              type: 'MessageCompleted',
+              runId,
+              messageId: 'msg-b',
+              message: {
+                id: 'msg-b',
+                role: 'assistant',
+                content: [{ type: 'text', text: 'second' }],
+                createdAt: now,
+              },
+              timestamp: now,
+            }
+            yield {
+              type: 'RunCompleted',
+              runId,
+              sessionId: 'session-mirror-multi' as never,
+              triggerType: 'new',
+              timestamp: now,
+            }
+          },
+        }),
+      })
+    )
+
+    await executor.execute(createCommand(taskId, 'two assistant messages'))
+
+    const events = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e)
+    const taskChain = events
+      .filter(
+        (e) =>
+          e.type === 'TaskMessageStarted' ||
+          e.type === 'TaskMessageDelta' ||
+          e.type === 'TaskMessageCompleted'
+      )
+      .map((e) => {
+        const msg = e as
+          | Extract<DomainEvent, { type: 'TaskMessageStarted' }>
+          | Extract<DomainEvent, { type: 'TaskMessageDelta' }>
+          | Extract<DomainEvent, { type: 'TaskMessageCompleted' }>
+        return { type: msg.type, messageId: msg.messageId }
+      })
+
+    expect(taskChain).toEqual([
+      { type: 'TaskMessageStarted', messageId: 'msg-a' },
+      { type: 'TaskMessageDelta', messageId: 'msg-a' },
+      { type: 'TaskMessageCompleted', messageId: 'msg-a' },
+      { type: 'TaskMessageStarted', messageId: 'msg-b' },
+      { type: 'TaskMessageDelta', messageId: 'msg-b' },
+      { type: 'TaskMessageCompleted', messageId: 'msg-b' },
+    ])
+  })
+
   it('logs run.failed and run.cancelled turn summaries', async () => {
     const module = await import('../task-executor.js')
     const written: Array<{ level: string; message: string; data?: Record<string, unknown> }> = []
