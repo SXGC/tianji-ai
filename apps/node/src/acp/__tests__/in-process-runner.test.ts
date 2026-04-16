@@ -133,7 +133,7 @@ describe('InProcessAgentRunner', () => {
     })
   })
 
-  it('stops yielding events after disconnect', async () => {
+  it('disconnect 后 query 产出 RunCancelled 然后结束', async () => {
     let releaseNextEvent: (() => void) | null = null
     const abort = vi.fn()
 
@@ -176,14 +176,23 @@ describe('InProcessAgentRunner', () => {
     await runner.connect()
     const iterator = runner.query('hello')[Symbol.asyncIterator]()
 
+    // 先消费第一个事件（MessageDelta，包含 runId 用于后续 RunCancelled 构造）
     const first = await iterator.next()
     expect(first.value?.type).toBe('MessageDelta')
 
+    // 触发 disconnect，然后释放 pending promise
     const pendingNext = iterator.next()
     await runner.disconnect()
     ;(releaseNextEvent as (() => void) | null)?.()
 
-    await expect(pendingNext).resolves.toEqual({ done: true, value: undefined })
+    // disconnect 后应产出 RunCancelled
+    const cancelResult = await pendingNext
+    expect(cancelResult.done).toBe(false)
+    expect(cancelResult.value?.type).toBe('RunCancelled')
+
+    // 之后 iterator 结束
+    const doneResult = await iterator.next()
+    expect(doneResult.done).toBe(true)
     expect(abort).toHaveBeenCalledTimes(1)
   })
 

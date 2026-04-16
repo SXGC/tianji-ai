@@ -34,6 +34,13 @@ export function createCommandPollRoute(
 
     const timeout = Math.min(Number(c.req.query('timeout') ?? 30000), 60000)
 
+    // task.cancel 命令在节点 busy 时也必须下发，不受 busy 限制；
+    // task.run 命令在节点 busy 时跳过，等节点空闲后再取。
+    const pendingCancel = tryLeasePendingCancelCommand(db, nodeId)
+    if (pendingCancel !== null) {
+      return c.json(pendingCancel)
+    }
+
     if (!isNodeBusy(db, nodeId)) {
       const command = tryLeasePendingCommand(db, nodeId)
       if (command !== null) {
@@ -51,6 +58,11 @@ export function createCommandPollRoute(
 
       if (c.req.raw.signal.aborted) {
         return c.body(null, 204)
+      }
+
+      const pendingCancelInLoop = tryLeasePendingCancelCommand(db, nodeId)
+      if (pendingCancelInLoop !== null) {
+        return c.json(pendingCancelInLoop)
       }
 
       if (!isNodeBusy(db, nodeId)) {
@@ -104,6 +116,44 @@ function tryLeasePendingCommand(db: ControlPlaneDb, nodeId: string): PollCommand
   db.raw
     .prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE command_id = ?')
     .run('running', now, row.command_id)
+
+  return toPollCommandResponse(row.command_id, row.type, JSON.parse(row.payload))
+}
+
+/**
+ * 专门取 task.cancel 类型的待处理命令，不受节点 busy 状态限制。
+ *
+ * 取消命令必须即时下发，即使节点正在执行任务（busy）也不能等待。
+ * 其余类型命令（如 task.run）在节点 busy 时不下发，仍由调用方的 busy 检查守门。
+ */
+function tryLeasePendingCancelCommand(
+  db: ControlPlaneDb,
+  nodeId: string
+): PollCommandResponse | null {
+  const row = db.raw
+    .prepare(
+      `SELECT command_id, type, payload FROM commands
+       WHERE node_id = ? AND type = 'task.cancel' AND state = 'pending'
+       ORDER BY created_at ASC
+       LIMIT 1`
+    )
+    .get(nodeId) as { command_id: string; type: string; payload: string } | undefined
+
+  if (row === undefined) {
+    return null
+  }
+
+  const now = Date.now()
+  const result = db.raw
+    .prepare(
+      `UPDATE commands SET state = 'leased', leased_at = ?
+       WHERE command_id = ? AND state = 'pending'`
+    )
+    .run(now, row.command_id)
+
+  if (result.changes === 0) {
+    return null
+  }
 
   return toPollCommandResponse(row.command_id, row.type, JSON.parse(row.payload))
 }

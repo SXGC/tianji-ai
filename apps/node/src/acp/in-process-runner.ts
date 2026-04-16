@@ -7,7 +7,7 @@ import {
   createAgentSession,
   loadAgentContextForName,
 } from '@tianji/agent'
-import type { DomainEvent } from '@tianji/shared'
+import type { DomainEvent, RunId, SessionId } from '@tianji/shared'
 
 /**
  * Runs native agents inside the daemon process to avoid ACP subprocess overhead.
@@ -56,6 +56,9 @@ export class InProcessAgentRunner {
   /**
    * 通过 queryWithGraph 向 session 发送 prompt，产出 DomainEvent 流。
    *
+   * disconnect() 触发时，session.abort() 中断 queryWithGraph，此时检测到 generation
+   * 不匹配，立即产出 RunCancelled 事件后 return，让 TaskExecutor 能走 cancel 分支。
+   *
    * @param prompt - 用户输入的文本
    */
   async *query(prompt: string): AsyncIterable<DomainEvent> {
@@ -64,14 +67,33 @@ export class InProcessAgentRunner {
     }
 
     const session = this.#session
+    const sessionId = session.sessionId
     const generation = this.#activeGeneration
     let completedSeen = false
+    let lastRunId: string | null = null
 
     for await (const event of session.queryWithGraph(this.#defaultGraph, {
       initialState: { input: prompt },
       compileOptions: { agentExecutorFactory: this.#executorFactory },
     })) {
+      // 跟踪最新的 runId，用于 disconnect 时构造 RunCancelled 事件
+      if ('runId' in event && typeof event.runId === 'string') {
+        lastRunId = event.runId
+      }
+
       if (generation !== this.#activeGeneration || this.#session !== session) {
+        // disconnect 中断了 session，需要产出 RunCancelled 让 TaskExecutor 走 cancel 分支
+        if (lastRunId !== null) {
+          const cancelledEvent: DomainEvent = {
+            type: 'RunCancelled',
+            runId: lastRunId as RunId,
+            sessionId: sessionId as SessionId,
+            triggerType: 'new',
+            timestamp: Date.now(),
+            reason: 'abort',
+          }
+          yield cancelledEvent
+        }
         return
       }
 
