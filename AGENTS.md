@@ -1,9 +1,12 @@
+
 # 输出规范
 
+- 必须加深思考深度。
 - 所有最终回答必须使用中文。
-- 回答必须直白，把用户当做普通高中生，禁止用办公室黑话套话。不使用表情符号。不写无信息量的客套话或填充内容,例如*出清*改为*清理*。
-- 使用简洁的格式输出。对于复杂对比、流程多使用图表。
-- 强制收口。结束对话必须要在下一步的计划前，总结本次对话行为，并列出使用的 skill 和 tool。
+- 回答必须直白，把用户当做普通高中生，禁止用办公室黑话套话。不使用表情符号。不写无信息量的客套话或填充内容。
+- 默认不要输出具体代码，除非用户明确要求。优先用架构、职责、边界、数据流和设计权衡来回答。必须举例时也只用伪代码或最小骨架。
+- 强制收口。结束对话必须要在下一步的计划前，总结本次对话行为，并列出使用的 skill 和 tool。和 tool。
+
 
 # 核心原则
 
@@ -15,6 +18,11 @@
 ## 架构原则
 - 遵循KISS原则（Keep It Simple and Stupid）和奥卡姆剃刀原理（如无必要，勿增实体）
 - 所有实现不能仅仅考虑实现，而要考虑到未来的可维护性、可读性。
+
+## 执行计划原则
+
+- 没有明确要求，默认使用 subagent-driven 进行执行.
+- 使用 opus 进行 review 代码，使用 sonnet 进行编写代码.
 
 ## 代码风格
 - 绝对不允许在一个文件中放入超过 800 行代码
@@ -35,6 +43,7 @@
 - 任何环境变量的添加都需要明确让用户同意.
 - 禁止递归
 - 业务代码不要过多考虑边界判断
+- 所有隐式全局变量的功能（类似 als）都不允许放过多变量，只允许放基础变量
 
 ## 日志
 - 日志需要分层，不能只用一个 log level。catch 异常时，请使用 error level 日志。
@@ -78,7 +87,7 @@
 ### 提交规则
 
 - 如果需要执行 `git commit`，必须先加载 `git commit` skill。
-
+- 绝对不允许添加例如 `Co-Authored-By:` 这样的内容
 
 ## 文件读取与编辑规则
 
@@ -108,15 +117,104 @@ git commit --no-verify
 * 如果冲突出现在你未修改的文件中，立即停止并询问用户。
 * 严禁 `force push`。
 
-## 代码质量
+<!-- gitnexus:start -->
+# GitNexus — Code Intelligence
 
+This project is indexed by GitNexus as **tianji-ai** (3378 symbols, 5814 relationships, 224 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+
+> If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
+
+## Always Do
+
+- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `gitnexus_impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
+- **MUST run `gitnexus_detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows.
+- **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
+- When exploring unfamiliar code, use `gitnexus_query({query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
+- When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `gitnexus_context({name: "symbolName"})`.
+
+## When Debugging
+
+1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
+2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
+3. `READ gitnexus://repo/tianji-ai/process/{processName}` — trace the full execution flow step by step
+4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
+
+## When Refactoring
+
+- **Renaming**: MUST use `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` first. Review the preview — graph edits are safe, text_search edits need manual review. Then run with `dry_run: false`.
+- **Extracting/Splitting**: MUST run `gitnexus_context({name: "target"})` to see all incoming/outgoing refs, then `gitnexus_impact({target: "target", direction: "upstream"})` to find all external callers before moving code.
+- After any refactor: run `gitnexus_detect_changes({scope: "all"})` to verify only expected files changed.
+
+## Never Do
+
+- NEVER edit a function, class, or method without first running `gitnexus_impact` on it.
+- NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
+- NEVER rename symbols with find-and-replace — use `gitnexus_rename` which understands the call graph.
+- NEVER commit changes without running `gitnexus_detect_changes()` to check affected scope.
+
+## Tools Quick Reference
+
+| Tool | When to use | Command |
+|------|-------------|---------|
+| `query` | Find code by concept | `gitnexus_query({query: "auth validation"})` |
+| `context` | 360-degree view of one symbol | `gitnexus_context({name: "validateUser"})` |
+| `impact` | Blast radius before editing | `gitnexus_impact({target: "X", direction: "upstream"})` |
+| `detect_changes` | Pre-commit scope check | `gitnexus_detect_changes({scope: "staged"})` |
+| `rename` | Safe multi-file rename | `gitnexus_rename({symbol_name: "old", new_name: "new", dry_run: true})` |
+| `cypher` | Custom graph queries | `gitnexus_cypher({query: "MATCH ..."})` |
+
+## Impact Risk Levels
+
+| Depth | Meaning | Action |
+|-------|---------|--------|
+| d=1 | WILL BREAK — direct callers/importers | MUST update these |
+| d=2 | LIKELY AFFECTED — indirect deps | Should test |
+| d=3 | MAY NEED TESTING — transitive | Test if critical path |
+
+## Resources
+
+| Resource | Use for |
+|----------|---------|
+| `gitnexus://repo/tianji-ai/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/tianji-ai/clusters` | All functional areas |
+| `gitnexus://repo/tianji-ai/processes` | All execution flows |
+| `gitnexus://repo/tianji-ai/process/{name}` | Step-by-step execution trace |
+
+## Self-Check Before Finishing
+
+Before completing any code modification task, verify:
+1. `gitnexus_impact` was run for all modified symbols
+2. No HIGH/CRITICAL risk warnings were ignored
+3. `gitnexus_detect_changes()` confirms changes match expected scope
+4. All d=1 (WILL BREAK) dependents were updated
+
+## Keeping the Index Fresh
+
+After committing code changes, the GitNexus index becomes stale. Re-run analyze to update it:
+
+```bash
+npx gitnexus analyze
 ```
-pnpm test:coverage
-pnpm sonar 
+
+If the index previously included embeddings, preserve them by adding `--embeddings`:
+
+```bash
+npx gitnexus analyze --embeddings
 ```
 
-### sonar
+To check whether embeddings exist, inspect `.gitnexus/meta.json` — the `stats.embeddings` field shows the count (0 means no embeddings). **Running analyze without `--embeddings` will delete any previously generated embeddings.**
 
-环境变量中已经有 SONAR_HOST_URL 和 SONAR_TOKEN
+> Claude Code users: A PostToolUse hook handles this automatically after `git commit` and `git merge`.
 
-Sonar 的 api/ce/task 可以查询 Compute Engine 任务；质量门可以用 api/qualitygates/project_status 查；问题列表可以用 api/issues/search 查；指标可以走 api/measures
+## CLI
+
+| Task | Read this skill file |
+|------|---------------------|
+| Understand architecture / "How does X work?" | `.claude/skills/gitnexus/gitnexus-exploring/SKILL.md` |
+| Blast radius / "What breaks if I change X?" | `.claude/skills/gitnexus/gitnexus-impact-analysis/SKILL.md` |
+| Trace bugs / "Why is X failing?" | `.claude/skills/gitnexus/gitnexus-debugging/SKILL.md` |
+| Rename / extract / split / refactor | `.claude/skills/gitnexus/gitnexus-refactoring/SKILL.md` |
+| Tools, resources, schema reference | `.claude/skills/gitnexus/gitnexus-guide/SKILL.md` |
+| Index, status, clean, wiki CLI commands | `.claude/skills/gitnexus/gitnexus-cli/SKILL.md` |
+
+<!-- gitnexus:end -->

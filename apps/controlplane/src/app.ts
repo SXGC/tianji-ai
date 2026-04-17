@@ -5,12 +5,16 @@ import { Hono } from 'hono'
 import type { ControlPlaneDb } from './db/index.js'
 import { createCommandPollRoute } from './routes/command-poll.js'
 import { createCopilotRoute } from './routes/copilot.js'
+import { createDebugEventsRoute } from './routes/debug-events.js'
+import { createDebugNodesRoute } from './routes/debug-nodes.js'
+import { createEventLogMaxSequenceRoute } from './routes/event-log-max-sequence.js'
 import { createEventsRoute } from './routes/events.js'
 import { createNodeHeartbeatRoute } from './routes/node-heartbeat.js'
 import { createNodeRegisterRoute } from './routes/node-register.js'
 import { createUiNodesRoute } from './routes/ui-nodes.js'
 import { createWebUiRoute } from './routes/web-ui.js'
 import { ObservationMonitor } from './services/observation-monitor.js'
+import { SqliteEventLogStore } from './storage/event-log-sqlite.js'
 
 export interface ControlPlaneApp {
   readonly app: Hono
@@ -47,6 +51,7 @@ export function createApp(
 ): ControlPlaneApp {
   const { emitEvent, enterCorrelation, bus } = options
   const app = new Hono()
+  const eventLogStore = new SqliteEventLogStore(db.raw)
 
   app.get('/health', (c) => c.json({ status: 'ok' }))
 
@@ -62,6 +67,7 @@ export function createApp(
   app.route('/', createNodeRegisterRoute(db, logger, emitEvent))
   app.route('/', createNodeHeartbeatRoute(db, logger))
   app.route('/', createCommandPollRoute(db, logger))
+  app.route('/', createEventLogMaxSequenceRoute(db, logger, eventLogStore))
   // bus 由 Task 5 统一注入；未注入时跳过路由注册（等同于 404），
   // 避免在无 bus 的测试环境中启动时 throw。
   if (bus !== undefined) {
@@ -69,7 +75,11 @@ export function createApp(
   }
 
   app.route('/', createUiNodesRoute(db))
-  app.route('/', createCopilotRoute(db, bus))
+  app.route('/', createCopilotRoute(db, logger, bus))
+  if (process.env.TIANJI_DEBUG === 'true') {
+    app.route('/', createDebugEventsRoute(db))
+    app.route('/', createDebugNodesRoute(db))
+  }
   app.route('/', createWebUiRoute())
 
   return {

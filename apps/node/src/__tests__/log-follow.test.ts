@@ -150,6 +150,19 @@ describe('formatCliLogEntry', () => {
     expect(result).toContain('\x1b[90m')
   })
 
+  it('applies ANSI gray color for trace level when colorize is true', () => {
+    const result = formatCliLogEntry(
+      {
+        timestamp: '2026-01-01T00:00:00.000Z',
+        level: 'trace',
+        scope: ['test'],
+        message: 'trace',
+      },
+      true
+    )
+    expect(result).toContain('\x1b[90m')
+  })
+
   it('applies ANSI color for info level when colorize is true', () => {
     const result = formatCliLogEntry(
       {

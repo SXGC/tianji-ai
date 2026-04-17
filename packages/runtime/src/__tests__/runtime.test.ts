@@ -325,7 +325,7 @@ describe('SessionRuntime', () => {
           sessionId: session.sessionId,
           runId,
           triggerType: 'new',
-          errorCode: 'RUNTIME_EXECUTION_FAILED',
+          errorCode: 'ToolError',
         }),
       }),
     ])

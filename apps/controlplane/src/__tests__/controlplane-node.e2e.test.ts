@@ -8,10 +8,14 @@ import { fileURLToPath } from 'node:url'
 
 import { serve } from '@hono/node-server'
 import { createMemorySink, createObserverLogger } from '@tianji/observer'
+import { SequenceCounter, createRuntimeEventPipeline } from '@tianji/runtime'
+import { createEventBus } from '@tianji/shared'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createApp } from '../app.js'
 import { createDatabase } from '../db/index.js'
+import { SqliteEventLogStore } from '../storage/event-log-sqlite.js'
+import { subscribeEventLog } from '../storage/event-log-subscriber.js'
 
 const nodeAppDir = fileURLToPath(new URL('../../../../apps/node', import.meta.url))
 const nodeDistBinPath = fileURLToPath(new URL('../../../../apps/node/dist/bin.js', import.meta.url))
@@ -62,6 +66,106 @@ describe('controlplane <-> node e2e', () => {
     }
   }, 20000)
 
+  it('cancel 命令链路：POST cancel → node disconnect → TaskCancelled 落入 event_log，总延迟 < 3s', async () => {
+    const slowAgentPath = fileURLToPath(
+      new URL('./fixtures/fake-acp-agent-slow.mjs', import.meta.url)
+    )
+    const env = await setupTestEnv('node-e2e-cancel', { agentPath: slowAgentPath })
+
+    try {
+      nodeProcess = env.nodeProcess
+      await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-cancel')
+
+      // 1. 发 task.run，启动一个永不完成的任务
+      const runResponse = await fetch(`${env.baseUrl}/api/copilot`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-node-id': 'node-e2e-cancel',
+          'x-agent-id': 'default',
+        },
+        body: JSON.stringify({
+          method: 'agent/run',
+          params: { agentId: 'default' },
+          body: {
+            threadId: 'thread-cancel-e2e-1',
+            runId: 'run-cancel-e2e-1',
+            messages: [{ id: 'm1', role: 'user', content: 'long running task' }],
+            tools: [],
+            context: [],
+            forwardedProps: {},
+            state: {},
+          },
+        }),
+      })
+      expect(runResponse.status).toBe(200)
+
+      // 2. 等待任务行写入 tasks 表（copilot 路由创建任务后异步下发给 node）
+      let taskId: string | undefined
+      const taskDeadline = Date.now() + 5000
+      while (Date.now() < taskDeadline && taskId === undefined) {
+        const row = env.db.raw
+          .prepare('SELECT task_id FROM tasks ORDER BY created_at DESC LIMIT 1')
+          .get() as { task_id: string } | undefined
+        taskId = row?.task_id
+        if (taskId === undefined) {
+          await new Promise((resolve) => setTimeout(resolve, 50))
+        }
+      }
+      expect(taskId).toBeDefined()
+
+      // 3. 等 TaskStarted 事件落入 event_log，确认 node 已接手任务并开始执行
+      const startedDeadline = Date.now() + 5000
+      let taskStarted = false
+      const taskStartedSql =
+        "SELECT COUNT(*) AS c FROM event_log WHERE aggregate_id = ? AND type = 'TaskStarted'"
+      while (Date.now() < startedDeadline && !taskStarted) {
+        const row = env.db.raw.prepare(taskStartedSql).get(taskId) as { c: number }
+        if (row.c > 0) {
+          taskStarted = true
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+      expect(taskStarted).toBe(true)
+
+      // 4. 发 cancel，记录起始时间
+      const cancelStart = Date.now()
+      const cancelResponse = await fetch(`${env.baseUrl}/api/copilot/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId }),
+      })
+      expect(cancelResponse.status).toBe(202)
+
+      // 5. 轮询 event_log，等待 TaskCancelled 落表，限 3 秒内完成
+      const cancelDeadline = cancelStart + 3000
+      let cancelled = false
+      const taskCancelledSql =
+        "SELECT COUNT(*) AS c FROM event_log WHERE aggregate_id = ? AND type = 'TaskCancelled'"
+      while (Date.now() < cancelDeadline && !cancelled) {
+        const row = env.db.raw.prepare(taskCancelledSql).get(taskId) as { c: number }
+        if (row.c > 0) {
+          cancelled = true
+          break
+        }
+        await new Promise((resolve) => setTimeout(resolve, 50))
+      }
+
+      const totalLatencyMs = Date.now() - cancelStart
+      const cancelMessage = `TaskCancelled 事件未在 3 秒内落入 event_log（实际等待 ${totalLatencyMs}ms）`
+      expect(cancelled, cancelMessage).toBe(true)
+      expect(totalLatencyMs).toBeLessThan(3000)
+    } finally {
+      await stopProcess(nodeProcess)
+      nodeProcess = null
+      env.monitor.stop()
+      await env.closeEventLog()
+      env.db.close()
+      env.server.close()
+    }
+  }, 30000)
+
   it('leases a created task command to the connected node', async () => {
     const env = await setupTestEnv('node-e2e-002')
 
@@ -69,26 +173,46 @@ describe('controlplane <-> node e2e', () => {
       nodeProcess = env.nodeProcess
       await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-002')
 
-      const createTaskResponse = await fetch(`${env.baseUrl}/api/ui/tasks`, {
+      const createTaskResponse = await fetch(`${env.baseUrl}/api/copilot`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-node-id': 'node-e2e-002',
+          'x-agent-id': 'default',
+        },
         body: JSON.stringify({
-          nodeId: 'node-e2e-002',
-          agentId: 'default',
-          goal: 'run integration task',
+          method: 'agent/run',
+          params: {
+            agentId: 'default',
+          },
+          body: {
+            threadId: 'thread-node-e2e-002',
+            runId: 'run-node-e2e-002',
+            messages: [{ id: 'msg-1', role: 'user', content: 'run integration task' }],
+            tools: [],
+            context: [],
+            forwardedProps: {},
+            state: {},
+          },
         }),
       })
 
-      expect(createTaskResponse.status).toBe(201)
-      const createdTask = (await createTaskResponse.json()) as { taskId: string }
+      expect(createTaskResponse.status).toBe(200)
+
+      const createdTask = env.db.raw
+        .prepare('SELECT task_id FROM tasks ORDER BY created_at DESC LIMIT 1')
+        .get() as { task_id: string } | undefined
+
+      expect(createdTask).toBeDefined()
 
       const deadline = Date.now() + 8000
       let taskStatus = 'pending'
 
       while (Date.now() < deadline) {
-        const taskResponse = await fetch(`${env.baseUrl}/api/ui/tasks/${createdTask.taskId}`)
-        const task = (await taskResponse.json()) as { status: string }
-        taskStatus = task.status
+        const taskRow = env.db.raw
+          .prepare('SELECT status FROM tasks WHERE task_id = ?')
+          .get(createdTask!.task_id) as { status: string } | undefined
+        taskStatus = taskRow?.status ?? 'pending'
         if (taskStatus !== 'pending') {
           break
         }
@@ -106,7 +230,15 @@ describe('controlplane <-> node e2e', () => {
   }, 20000)
 })
 
-async function setupTestEnv(nodeId: string): Promise<{
+interface SetupTestEnvOptions {
+  /** 覆盖 fake ACP agent 脚本路径，默认使用 fake-acp-agent.mjs（快速完成型） */
+  readonly agentPath?: string
+}
+
+async function setupTestEnv(
+  nodeId: string,
+  options: SetupTestEnvOptions = {}
+): Promise<{
   baseUrl: string
   db: ReturnType<typeof createDatabase>
   monitor: ReturnType<typeof createApp>['monitor']
@@ -114,6 +246,7 @@ async function setupTestEnv(nodeId: string): Promise<{
   nodeProcess: ChildProcess
   stdoutChunks: Buffer[]
   stderrChunks: Buffer[]
+  closeEventLog: () => Promise<void>
 }> {
   const baseDir = await mkdtemp(join(tmpdir(), 'tianji-cp-node-e2e-'))
   const configDir = join(baseDir, 'config')
@@ -130,7 +263,16 @@ async function setupTestEnv(nodeId: string): Promise<{
 
   const sink = createMemorySink()
   const logger = createObserverLogger({ sinks: [sink] })
-  const { app, monitor } = createApp(db, logger)
+
+  // 装配 cp 侧 EventBus + EventLog，使 /api/events 路由可以接收 node 上传的事件。
+  // 不装配时 /api/events 不注册（见 app.ts），node forwarder 会拿到 404。
+  // 注意：不传 emitEvent 以避免在无 ALS 上下文中调用 pipeline.emitEvent 报错。
+  // cp 自身的 NodeRegistered 等事件对 e2e 测试不需要落 event_log。
+  const bus = createEventBus({})
+  const store = new SqliteEventLogStore(db.raw)
+  const eventLogHandle = subscribeEventLog(bus, store, { logger })
+
+  const { app, monitor } = createApp(db, logger, { bus })
   monitor.start()
   const server = serve({ fetch: app.fetch, port, hostname: '127.0.0.1' })
 
@@ -161,6 +303,8 @@ async function setupTestEnv(nodeId: string): Promise<{
   await waitForProcessOutput(registerProcess, 'Daemon listening on port')
   await stopProcess(registerProcess)
 
+  const agentScriptPath = options.agentPath ?? fakeAcpAgentPath
+
   await writeFile(
     configPath,
     JSON.stringify({
@@ -169,7 +313,7 @@ async function setupTestEnv(nodeId: string): Promise<{
         items: {
           default: {
             command: '/usr/bin/env',
-            args: ['node', fakeAcpAgentPath],
+            args: ['node', agentScriptPath],
           },
         },
       },
@@ -210,6 +354,10 @@ async function setupTestEnv(nodeId: string): Promise<{
     nodeProcess,
     stdoutChunks,
     stderrChunks,
+    closeEventLog: async () => {
+      await eventLogHandle.close()
+      await bus.close()
+    },
   }
 }
 

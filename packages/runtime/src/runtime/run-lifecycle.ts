@@ -24,7 +24,7 @@ import {
 
 import type { DeepagentsRunResult } from '../engines/deepagents-engine.js'
 import type { SnapshotStore } from '../snapshot-store.js'
-import { hasSideEffect, toTianjiError } from './helpers.js'
+import { hasSideEffect, toPassThroughTianjiError } from './helpers.js'
 import {
   mergeMetadata,
   readTokenUsage,
@@ -247,7 +247,7 @@ export async function handleRunFailure(
   error: unknown,
   capturedUsage: TokenUsage | undefined
 ): Promise<void> {
-  const resolvedError = toTianjiError(error)
+  const resolvedError = toPassThroughTianjiError(error)
   const failedRunSnapshot: RunSnapshot = {
     ...runSnapshot,
     status: 'failed',

@@ -90,15 +90,13 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
       ]
     }
 
+    // cancel 是用户主动取消，不是错误。只更新状态，RUN_FINISHED 由 tianji-agent 持有
+    // threadId/runId 后补发，与 TaskCompleted 处理方式对齐。
     case 'TaskCancelled':
       return [
         ev({
           type: EventType.STATE_DELTA,
           delta: [{ op: 'replace', path: '/taskStatus', value: 'cancelled' }],
-        }),
-        ev({
-          type: EventType.RUN_ERROR,
-          message: 'Task cancelled',
         }),
       ]
 
@@ -138,6 +136,32 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
     }
 
     case 'MessageCompleted': {
+      const p = env.payload as { messageId: string }
+      return mapMessageCompleted(p.messageId, ctx)
+    }
+
+    // ── Task 聚合：消息（展示链） ───────────────────────────────────────────
+    case 'TaskMessageStarted': {
+      const p = env.payload as { messageId: string }
+      return [
+        ev({
+          type: EventType.TEXT_MESSAGE_START,
+          messageId: p.messageId,
+          role: 'assistant',
+        }),
+      ]
+    }
+
+    case 'TaskMessageDelta': {
+      const p = env.payload as {
+        messageId: string
+        channel: string
+        payload: { content: string }
+      }
+      return mapMessageDelta(p.messageId, p.channel, p.payload.content, ctx)
+    }
+
+    case 'TaskMessageCompleted': {
       const p = env.payload as { messageId: string }
       return mapMessageCompleted(p.messageId, ctx)
     }
@@ -307,7 +331,7 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
     }
 
     // ── 以下事件不映射到 AG-UI ────────────────────────────────────────────────
-    // GraphRunFailed、Session* 、Node*、TaskObservationLost 暂无 AG-UI 映射
+    // GraphRunFailed/GraphRunCancelled、Session* 、Node*、TaskObservationLost 暂无 AG-UI 映射
     default:
       return []
   }

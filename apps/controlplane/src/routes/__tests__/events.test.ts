@@ -17,6 +17,10 @@ import { type ControlPlaneDb, createDatabase } from '../../db/index.js'
 import { generateAccessToken, hashToken } from '../../services/auth.js'
 import { createEventsRoute } from '../events.js'
 
+function readEntries(sink: ReturnType<typeof createMemorySink>) {
+  return sink.entries.map((entry) => ({ message: entry.message, data: entry.data }))
+}
+
 /** 构造合法的 DomainEventEnvelope（Task 聚合，node 进程写入）。 */
 function makeTaskEnvelope(overrides: Partial<DomainEventEnvelope> = {}): DomainEventEnvelope {
   return {
@@ -64,9 +68,16 @@ describe('POST /api/events', () => {
   /** 构造经过认证的 POST 请求。 */
   function postEvents(
     body: string,
-    overrides: { token?: string; bus?: { publish: ReturnType<typeof vi.fn> } } = {}
+    overrides: {
+      token?: string
+      bus?: {
+        publish: ReturnType<typeof vi.fn>
+        subscribe: ReturnType<typeof vi.fn>
+        close: ReturnType<typeof vi.fn>
+      }
+    } = {}
   ) {
-    const bus = overrides.bus ?? { publish: vi.fn(), subscribe: vi.fn() }
+    const bus = overrides.bus ?? { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() }
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
     const app = new Hono()
@@ -81,11 +92,12 @@ describe('POST /api/events', () => {
         body,
       }),
       bus,
+      sink,
     }
   }
 
   it('returns 401 without authorization header', async () => {
-    const bus = { publish: vi.fn(), subscribe: vi.fn() }
+    const bus = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() }
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
     const app = new Hono()
@@ -104,7 +116,7 @@ describe('POST /api/events', () => {
   })
 
   it('接收合法 DomainEventEnvelope NDJSON，publish 到 bus', async () => {
-    const bus = { publish: vi.fn(), subscribe: vi.fn() }
+    const bus = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() }
     const envelope1 = makeTaskEnvelope({ sequence: 1 })
     const envelope2 = makeTaskEnvelope({ sequence: 2 })
     const body = `${JSON.stringify(envelope1)}\n${JSON.stringify(envelope2)}\n`
@@ -124,8 +136,50 @@ describe('POST /api/events', () => {
     )
   })
 
+  it('非 MessageDelta 事件会记录 cp ingest 诊断日志', async () => {
+    const bus = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() }
+    const envelope = makeTaskEnvelope({ eventId: 'task-diag', sequence: 7 })
+
+    const { response, sink } = postEvents(`${JSON.stringify(envelope)}\n`, { bus })
+    const res = await response
+
+    expect(res.status).toBe(200)
+    expect(readEntries(sink)).toContainEqual(
+      expect.objectContaining({
+        message: 'accepted envelope for cp ingest',
+        data: expect.objectContaining({
+          eventId: 'task-diag',
+          eventType: 'TaskStarted',
+          aggregateType: 'Task',
+          aggregateId: 'task-1',
+          sequence: 7,
+        }),
+      })
+    )
+  })
+
+  it('MessageDelta 不记录 cp ingest 诊断日志', async () => {
+    const bus = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() }
+    const envelope = makeTaskEnvelope({
+      eventId: 'msg-delta-diag',
+      type: 'MessageDelta',
+      aggregateType: 'Run',
+      aggregateId: 'run-1',
+      payload: { type: 'MessageDelta', content: 'x' } as never,
+      sequence: 9,
+    })
+
+    const { response, sink } = postEvents(`${JSON.stringify(envelope)}\n`, { bus })
+    const res = await response
+
+    expect(res.status).toBe(200)
+    expect(
+      readEntries(sink).some((entry) => entry.message === 'accepted envelope for cp ingest')
+    ).toBe(false)
+  })
+
   it('校验失败（writer-rules 不通过）→ throw → bus.publish 不被调用', async () => {
-    const bus = { publish: vi.fn(), subscribe: vi.fn() }
+    const bus = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() }
 
     // Node 聚合只允许 cp 写入，node 进程写入会触发 validateWriter throw。
     const invalidEnvelope = makeTaskEnvelope({
@@ -142,7 +196,7 @@ describe('POST /api/events', () => {
   })
 
   it('空 body 返回 accepted: 0，不调用 publish', async () => {
-    const bus = { publish: vi.fn(), subscribe: vi.fn() }
+    const bus = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() }
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
     const app = new Hono()
@@ -164,7 +218,7 @@ describe('POST /api/events', () => {
   })
 
   it('跳过 NDJSON 中的空行', async () => {
-    const bus = { publish: vi.fn(), subscribe: vi.fn() }
+    const bus = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() }
     const envelope = makeTaskEnvelope({ sequence: 1 })
     const body = `\n\n${JSON.stringify(envelope)}\n\n`
 
@@ -178,7 +232,7 @@ describe('POST /api/events', () => {
   })
 
   it('流式 NDJSON body 逐行处理', async () => {
-    const bus = { publish: vi.fn(), subscribe: vi.fn() }
+    const bus = { publish: vi.fn(), subscribe: vi.fn(), close: vi.fn() }
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
     const app = new Hono()

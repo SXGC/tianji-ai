@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { LoadedAgentContext } from '@tianji/agent'
-import type { DomainEvent, DomainEventEnvelope } from '@tianji/shared'
+import type { DomainEvent } from '@tianji/shared'
 
 const createAgentSessionMock = vi.fn()
 const loadAgentContextForNameMock = vi.fn()
@@ -38,14 +38,12 @@ function createContext(): LoadedAgentContext {
   }
 }
 
-async function collectEvents(
-  iterable: AsyncIterable<DomainEventEnvelope>
-): Promise<DomainEventEnvelope[]> {
-  const envelopes: DomainEventEnvelope[] = []
-  for await (const envelope of iterable) {
-    envelopes.push(envelope)
+async function collectEvents(iterable: AsyncIterable<DomainEvent>): Promise<DomainEvent[]> {
+  const events: DomainEvent[] = []
+  for await (const event of iterable) {
+    events.push(event)
   }
-  return envelopes
+  return events
 }
 
 describe('InProcessAgentRunner', () => {
@@ -89,17 +87,53 @@ describe('InProcessAgentRunner', () => {
     })
 
     await runner.connect()
-    const envelopes = await collectEvents(runner.query('hello'))
+    const events = await collectEvents(runner.query('hello'))
 
     expect(loadAgentContextForNameMock).toHaveBeenCalledWith('reviewer', expect.any(Object))
     expect(createAgentSessionMock).toHaveBeenCalled()
-    expect(envelopes).toHaveLength(2)
-    expect(envelopes[0]?.type).toBe('MessageDelta')
-    expect(envelopes[1]?.type).toBe('RunCompleted')
-    expect(envelopes[1]?.payload).toEqual(completedEvent)
+    expect(events).toHaveLength(2)
+    expect(events[0]?.type).toBe('MessageDelta')
+    expect(events[1]).toEqual(completedEvent)
   })
 
-  it('stops yielding events after disconnect', async () => {
+  it('emits TaskSessionAttached after creating the session', async () => {
+    const emitEvent = vi.fn()
+
+    createAgentSessionMock.mockReturnValue({
+      sessionId: 'session-1',
+      abort: vi.fn(),
+      async *queryWithGraph(_graph: unknown, _options: unknown) {
+        yield {
+          type: 'RunCompleted',
+          runId: 'run-1' as never,
+          sessionId: 'session-1' as never,
+          triggerType: 'new',
+          timestamp: 1,
+        }
+      },
+    })
+
+    const { InProcessAgentRunner } = await import('../in-process-runner.js')
+    const runner = new InProcessAgentRunner({
+      agentId: 'reviewer',
+      taskId: 'task-1',
+      emitEvent,
+      nativeAgentContext: createContext(),
+      defaultGraph: {} as never,
+      executorFactory: {} as never,
+    })
+
+    await runner.connect()
+
+    expect(emitEvent).toHaveBeenCalledWith({
+      type: 'TaskSessionAttached',
+      taskId: 'task-1',
+      sessionId: 'session-1',
+      timestamp: expect.any(Number),
+    })
+  })
+
+  it('disconnect 后 query 产出 RunCancelled 然后结束', async () => {
     let releaseNextEvent: (() => void) | null = null
     const abort = vi.fn()
 
@@ -142,14 +176,23 @@ describe('InProcessAgentRunner', () => {
     await runner.connect()
     const iterator = runner.query('hello')[Symbol.asyncIterator]()
 
+    // 先消费第一个事件（MessageDelta，包含 runId 用于后续 RunCancelled 构造）
     const first = await iterator.next()
     expect(first.value?.type).toBe('MessageDelta')
 
+    // 触发 disconnect，然后释放 pending promise
     const pendingNext = iterator.next()
     await runner.disconnect()
     ;(releaseNextEvent as (() => void) | null)?.()
 
-    await expect(pendingNext).resolves.toEqual({ done: true, value: undefined })
+    // disconnect 后应产出 RunCancelled
+    const cancelResult = await pendingNext
+    expect(cancelResult.done).toBe(false)
+    expect(cancelResult.value?.type).toBe('RunCancelled')
+
+    // 之后 iterator 结束
+    const doneResult = await iterator.next()
+    expect(doneResult.done).toBe(true)
     expect(abort).toHaveBeenCalledTimes(1)
   })
 
@@ -190,8 +233,8 @@ describe('InProcessAgentRunner', () => {
     })
 
     await runner.connect()
-    const envelopes = await collectEvents(runner.query('hello'))
+    const events = await collectEvents(runner.query('hello'))
 
-    expect(envelopes.map((env) => env.type)).toEqual(['RunFailed', 'RunCompleted'])
+    expect(events.map((event) => event.type)).toEqual(['RunFailed', 'RunCompleted'])
   })
 })

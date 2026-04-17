@@ -3,6 +3,7 @@
  * @module bus/__tests__/forwarder.test
  */
 
+import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { createEventBus } from '@tianji/shared'
 import type { DomainEventEnvelope } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
@@ -20,6 +21,24 @@ function makeEnvelope(seq: number): DomainEventEnvelope {
     aggregateType: 'Run' as const,
     aggregateId: 'r1',
     source: { processKind: 'node' as const, processId: 'p', nodeId: 'n' },
+    payload: {} as never,
+  }
+}
+
+function makeTaskEnvelope(processKind: 'daemon' | 'node'): DomainEventEnvelope {
+  return {
+    eventId: `task-${processKind}`,
+    type: 'TaskStarted',
+    occurredAt: 'T',
+    correlationId: 'c-task',
+    causationId: null,
+    sequence: 1,
+    aggregateType: 'Task',
+    aggregateId: 'task-1',
+    source:
+      processKind === 'node'
+        ? { processKind, processId: 'p', nodeId: 'n' }
+        : { processKind, processId: 'p' },
     payload: {} as never,
   }
 }
@@ -129,5 +148,94 @@ describe('Forwarder', () => {
     await fwd.dispose()
     // dispose 也应跳过
     expect(post).not.toHaveBeenCalled()
+  })
+
+  it('丢弃 cp writer-rules 一定会拒绝的 envelope', async () => {
+    const post = vi.fn().mockResolvedValue(undefined)
+    const bus = createEventBus({ lagSink: vi.fn() })
+    const fwd = createForwarder({
+      bus,
+      post,
+      maxItems: 10,
+      flushIntervalMs: 60_000,
+      getCurrentTaskId: () => 'task-y',
+    })
+
+    bus.publish(makeTaskEnvelope('daemon'))
+    bus.publish(makeTaskEnvelope('node'))
+    await flushMicrotasks()
+    await flushMicrotasks()
+
+    await fwd.dispose()
+
+    expect(post).toHaveBeenCalledTimes(1)
+    const forwarded = post.mock.calls[0][0].events as DomainEventEnvelope[]
+    expect(forwarded).toHaveLength(1)
+    expect(forwarded[0]?.source.processKind).toBe('node')
+    expect(forwarded[0]?.type).toBe('TaskStarted')
+  })
+
+  it('非 MessageDelta 事件会记录 node forwarder 诊断日志', async () => {
+    const post = vi.fn().mockResolvedValue(undefined)
+    const bus = createEventBus({ lagSink: vi.fn() })
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const fwd = createForwarder({
+      bus,
+      post,
+      maxItems: 1,
+      flushIntervalMs: 60_000,
+      getCurrentTaskId: () => 'task-y',
+      logger,
+    })
+
+    bus.publish(makeEnvelope(11))
+    await flushMicrotasks()
+    await flushMicrotasks()
+
+    expect(sink.entries).toContainEqual(
+      expect.objectContaining({
+        message: 'forwarding envelope to controlplane',
+        data: expect.objectContaining({
+          eventId: 'e11',
+          eventType: 'RunStarted',
+          aggregateType: 'Run',
+          aggregateId: 'r1',
+          sequence: 11,
+        }),
+      })
+    )
+
+    await fwd.dispose()
+  })
+
+  it('MessageDelta 不记录 node forwarder 诊断日志', async () => {
+    const post = vi.fn().mockResolvedValue(undefined)
+    const bus = createEventBus({ lagSink: vi.fn() })
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+    const fwd = createForwarder({
+      bus,
+      post,
+      maxItems: 1,
+      flushIntervalMs: 60_000,
+      getCurrentTaskId: () => 'task-y',
+      logger,
+    })
+
+    bus.publish({
+      ...makeEnvelope(12),
+      eventId: 'e12',
+      type: 'MessageDelta',
+      payload: { type: 'MessageDelta', content: 'x' } as never,
+    })
+    await flushMicrotasks()
+    await flushMicrotasks()
+
+    expect(
+      sink.entries.some((entry) => entry.message === 'forwarding envelope to controlplane')
+    ).toBe(false)
+
+    await fwd.dispose()
   })
 })

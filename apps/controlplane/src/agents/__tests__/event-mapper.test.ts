@@ -172,24 +172,22 @@ describe('Task 事件映射', () => {
     })
   })
 
-  describe('TaskCancelled → STATE_DELTA + RUN_ERROR', () => {
-    it('产生两个事件：先 STATE_DELTA，再 RUN_ERROR', () => {
+  describe('TaskCancelled → 只发 STATE_DELTA（取消不是错误）', () => {
+    it('不产生 RUN_ERROR（cancel 是用户主动取消，非错误）', () => {
       const result = mapToAgUi(
         envelope({ type: 'TaskCancelled', taskId: 'task-001', timestamp: 1000 }),
         freshCtx()
       )
-      expect(result).toHaveLength(2)
-      expect(result[0].type).toBe(EventType.STATE_DELTA)
-      expect(result[1].type).toBe(EventType.RUN_ERROR)
+      expect(result.some((e) => e.type === EventType.RUN_ERROR)).toBe(false)
     })
 
-    it('RUN_ERROR 的 message 固定为 "Task cancelled"', () => {
+    it('只产生一个 STATE_DELTA 事件，由上层运行器统一发送 RUN_FINISHED', () => {
       const result = mapToAgUi(
         envelope({ type: 'TaskCancelled', taskId: 'task-001', timestamp: 1000 }),
         freshCtx()
       )
-      const resultEv = result[1] as { message: string }
-      expect(resultEv.message).toBe('Task cancelled')
+      expect(result).toHaveLength(1)
+      expect(result[0].type).toBe(EventType.STATE_DELTA)
     })
 
     it('STATE_DELTA 包含 /taskStatus=cancelled patch', () => {
@@ -777,5 +775,113 @@ describe('GraphRun 事件映射', () => {
       )
       expect(result).toHaveLength(0)
     })
+  })
+})
+
+// ============================================================================
+// TaskMessage* 事件映射
+// ============================================================================
+
+describe('TaskMessage* 事件映射', () => {
+  it('TaskMessageStarted → TEXT_MESSAGE_START，role=assistant', () => {
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageStarted',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        role: 'assistant',
+        timestamp: 1000,
+      }),
+      freshCtx()
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].type).toBe(EventType.TEXT_MESSAGE_START)
+    expect((result[0] as { messageId: string }).messageId).toBe('msg-1')
+    expect((result[0] as { role: string }).role).toBe('assistant')
+  })
+
+  it('TaskMessageDelta 在 text 通道下 → TEXT_MESSAGE_CONTENT', () => {
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageDelta',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        sequence: 1,
+        channel: 'text',
+        payload: { content: 'hello' },
+        timestamp: 1000,
+      }),
+      freshCtx()
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].type).toBe(EventType.TEXT_MESSAGE_CONTENT)
+    expect((result[0] as { delta: string }).delta).toBe('hello')
+  })
+
+  it('TaskMessageDelta 在 thinking 通道下首次触发 REASONING_START/REASONING_MESSAGE_START/REASONING_MESSAGE_CONTENT', () => {
+    const ctx = freshCtx()
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageDelta',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        sequence: 1,
+        channel: 'thinking',
+        payload: { content: 'step-1' },
+        timestamp: 1000,
+      }),
+      ctx
+    )
+    expect(result.map((e) => e.type)).toEqual([
+      EventType.REASONING_START,
+      EventType.REASONING_MESSAGE_START,
+      EventType.REASONING_MESSAGE_CONTENT,
+    ])
+    expect(ctx.inThinking).toBe(true)
+  })
+
+  it('TaskMessageCompleted 在 thinking 中先发 REASONING_MESSAGE_END+REASONING_END，再发 TEXT_MESSAGE_END', () => {
+    const ctx: EventMapperContext = { inThinking: true, taskId: 'task-001' }
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageCompleted',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        message: {
+          id: 'msg-1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+          createdAt: 1000,
+        },
+        timestamp: 1000,
+      }),
+      ctx
+    )
+    expect(result.map((e) => e.type)).toEqual([
+      EventType.REASONING_MESSAGE_END,
+      EventType.REASONING_END,
+      EventType.TEXT_MESSAGE_END,
+    ])
+    expect(ctx.inThinking).toBe(false)
+  })
+
+  it('TaskMessageCompleted 非 thinking 状态下只发 TEXT_MESSAGE_END', () => {
+    const result = mapToAgUi(
+      envelope({
+        type: 'TaskMessageCompleted',
+        taskId: 'task-001',
+        messageId: 'msg-1',
+        message: {
+          id: 'msg-1',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'done' }],
+          createdAt: 1000,
+        },
+        timestamp: 1000,
+      }),
+      freshCtx()
+    )
+    expect(result).toHaveLength(1)
+    expect(result[0].type).toBe(EventType.TEXT_MESSAGE_END)
   })
 })

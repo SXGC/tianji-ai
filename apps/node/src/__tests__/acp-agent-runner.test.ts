@@ -159,7 +159,7 @@ describe('AgentRunner', () => {
         (notification: { update: { sessionUpdate: string } }, runId: string) => {
           const now = Date.now()
           if (notification.update.sessionUpdate === 'agent_message_chunk') {
-            const event = {
+            return {
               type: 'MessageDelta',
               runId,
               messageId: 'msg1',
@@ -168,21 +168,9 @@ describe('AgentRunner', () => {
               payload: { content: 'hi' },
               timestamp: now,
             }
-            return {
-              eventId: `test_msg_${now}`,
-              type: 'MessageDelta',
-              occurredAt: new Date(now).toISOString(),
-              correlationId: String(runId),
-              causationId: null,
-              sequence: 0,
-              aggregateType: 'Run',
-              aggregateId: String(runId),
-              source: { processKind: 'node', processId: 'test' },
-              payload: event,
-            }
           }
           if (notification.update.sessionUpdate === 'agent_thought_chunk') {
-            const event = {
+            return {
               type: 'MessageDelta',
               runId,
               messageId: 'msg2',
@@ -190,18 +178,6 @@ describe('AgentRunner', () => {
               channel: 'thinking',
               payload: { content: 'thinking' },
               timestamp: now,
-            }
-            return {
-              eventId: `test_thought_${now}`,
-              type: 'MessageDelta',
-              occurredAt: new Date(now).toISOString(),
-              correlationId: String(runId),
-              causationId: null,
-              sequence: 0,
-              aggregateType: 'Run',
-              aggregateId: String(runId),
-              source: { processKind: 'node', processId: 'test' },
-              payload: event,
             }
           }
           return null
@@ -226,6 +202,10 @@ describe('AgentRunner', () => {
       expect(events[0]!.type).toBe('MessageDelta')
       expect(events[1]!.type).toBe('MessageDelta')
       expect(events[2]!.type).toBe('RunCompleted')
+      expect(events[2]).toMatchObject({
+        sessionId: 'session-123',
+        triggerType: 'new',
+      })
     })
 
     it('yields RunCompleted even when no events are produced', async () => {

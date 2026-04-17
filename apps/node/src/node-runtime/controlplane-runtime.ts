@@ -4,10 +4,10 @@ import type {
   AgentInfo,
   Command,
   DomainEvent,
-  DomainEventEnvelope,
   NodeExecutionState,
   NodeId,
   PollCommandResponse,
+  TaskRunCommand,
   TianjiAgentConfig,
 } from '@tianji/shared'
 
@@ -16,6 +16,7 @@ import { resolveAgentType } from '@tianji/shared'
 import { AgentRunner, InProcessAgentRunner } from '../acp/index.js'
 import { ControlPlaneConnection, type ControlPlaneConnectionConfig } from '../controlplane/index.js'
 import type { RuntimeLogger } from '../logger.js'
+import { ActiveExecutorRegistry } from '../task/active-executor-registry.js'
 import { TaskExecutor, type TaskExecutorConfig } from '../task/task-executor.js'
 
 export interface ControlPlaneRuntimeConfig {
@@ -42,15 +43,12 @@ export interface ControlPlaneRuntimeConfig {
   readonly logger?: RuntimeLogger
   /** 传给 SessionRuntime 的 observer logger，用于 runtime 层日志（如 token usage）。 */
   readonly observerLogger?: ObserverLogger
+  /** 在任务执行入口建立独立因果链上下文。 */
+  readonly enterCorrelation: <T>(correlationId: string, fn: () => Promise<T>) => Promise<T>
   /**
-   * 发射 Task 生命周期领域事件，由 daemon-entry 注入（连接 pipeline → bus）。
-   * 仅在有 controlplane 配置时使用。
+   * 发射 Task 生命周期领域事件与 runner 事件，由 daemon-entry 注入 node 身份的 pipeline。
    */
-  readonly emitEvent: (event: DomainEvent) => void
-  /**
-   * 将 agent runner 产生的 DomainEventEnvelope publish 到 bus，由 daemon-entry 注入。
-   */
-  readonly publishEnvelope: (envelope: DomainEventEnvelope) => void
+  readonly emitTaskEvent: (event: DomainEvent) => void
 }
 
 export interface ControlPlaneCallbacks {
@@ -66,6 +64,10 @@ export interface ControlPlaneConnectionLike {
   /** 暴露给 daemon-entry 的 HTTP client，用于 forwarder 的 postDomainEvents。 */
   readonly client?: {
     postDomainEvents(ndjson: string): Promise<void>
+    maxSequence(
+      aggregateType: 'Session' | 'GraphRun' | 'Run' | 'Task' | 'Node',
+      aggregateId: string
+    ): Promise<number | null>
   }
   start(): Promise<void>
   stop(): void
@@ -75,7 +77,8 @@ export interface ControlPlaneConnectionLike {
 export interface TaskExecutorLike {
   readonly executionState: NodeExecutionState
   readonly currentTaskId: string | null
-  execute(command: Command): Promise<void>
+  execute(command: TaskRunCommand): Promise<void>
+  cancel(): void
 }
 
 export interface ControlPlaneRuntimeHandle {
@@ -90,36 +93,83 @@ export function createControlPlaneRuntime(
 ): ControlPlaneRuntimeHandle {
   let currentConnection: ControlPlaneConnectionLike | null = null
   let taskExecutorRef: TaskExecutorLike | null = null
+  const registry = new ActiveExecutorRegistry()
 
   const updateExecutionState = (state: NodeExecutionState): void => {
     currentConnection?.setExecutionState(state)
   }
 
-  const toCommand = (command: PollCommandResponse): Command => ({
-    commandId: command.commandId,
-    nodeId: config.nodeId,
-    type: command.type,
-    payload: command.payload,
-    state: 'pending',
-    createdAt: Date.now(),
-  })
-
+  /**
+   * 处理 long-poll 回调下发的命令（fire-and-forget 路径）。
+   *
+   * 此函数由 ControlPlaneConnection 的轮询循环异步调用，调用方不会 await 其结果，
+   * 因此任何未捕获异常都会变成游离的 rejected Promise，无法向上传播。
+   * 这条路径只能将错误落入日志——这不是"吞异常"的妥协，而是该分发模型的固有限制。
+   *
+   * 真正的 Let-it-crash 语义由 {@link ControlPlaneRuntimeHandle.onCommand} 承担：
+   * 该路径是 await 调用，异常可以正常传播给调用方并触发上层重启/报警机制。
+   */
   const executePolledCommand = (command: PollCommandResponse): void => {
     if (taskExecutorRef === null) {
       return
     }
 
-    const taskCommand = toCommand(command)
-    taskExecutorRef.execute(taskCommand).catch((error) => {
-      config.logger
-        ?.logError(['daemon', 'controlplane'], 'Failed to execute task command', {
-          commandId: taskCommand.commandId,
-          taskId: taskCommand.payload.taskId,
-          agentId: taskCommand.payload.agentId,
-          error: error instanceof Error ? error.message : String(error),
-        })
-        ?.catch(() => {})
-    })
+    switch (command.type) {
+      case 'task.run': {
+        const taskCommand: TaskRunCommand = {
+          commandId: command.commandId,
+          nodeId: config.nodeId,
+          type: 'task.run',
+          payload: command.payload,
+          state: 'pending',
+          createdAt: Date.now(),
+        }
+        const taskId = String(taskCommand.payload.taskId)
+        registry.register(taskId, taskExecutorRef)
+        taskExecutorRef
+          .execute(taskCommand)
+          .catch((error) => {
+            config.logger
+              ?.logError(['daemon', 'controlplane'], 'Failed to execute task command', {
+                commandId: taskCommand.commandId,
+                taskId: taskCommand.payload.taskId,
+                agentId: taskCommand.payload.agentId,
+                error: error instanceof Error ? error.message : String(error),
+              })
+              ?.catch(() => {})
+          })
+          .finally(() => {
+            registry.unregister(taskId)
+          })
+        break
+      }
+      case 'task.cancel': {
+        // fire-and-forget 路径无法向上传播异常，只能记录日志；onCommand 路径直接 throw 实现 Let-it-crash。
+        try {
+          registry.cancel(String(command.payload.taskId))
+        } catch (error) {
+          config.logger
+            ?.logError(['daemon', 'controlplane'], 'Failed to cancel task', {
+              commandId: command.commandId,
+              taskId: command.payload.taskId,
+              error: error instanceof Error ? error.message : String(error),
+            })
+            ?.catch(() => {})
+        }
+        break
+      }
+      default: {
+        // 穷尽断言：若 PollCommandResponse 新增 variant 而此处未处理，TS 编译期会在此行报错。
+        const exhaustive: never = command
+        const fallback = exhaustive as { commandId?: string; type?: string }
+        config.logger
+          ?.logError(['daemon', 'controlplane'], 'Unsupported command type (dispatch pending)', {
+            commandId: fallback.commandId,
+            type: fallback.type,
+          })
+          ?.catch(() => {})
+      }
+    }
   }
 
   const connection =
@@ -158,6 +208,7 @@ export function createControlPlaneRuntime(
       nodeId: config.nodeId,
       onExecutionStateChange: updateExecutionState,
       logger: config.logger,
+      enterCorrelation: config.enterCorrelation,
       createRunner: async (command) => {
         const agentConfig = config.agentConfigs[command.payload.agentId]
         if (agentConfig === undefined) {
@@ -184,6 +235,8 @@ export function createControlPlaneRuntime(
         if (useInProcessRunner) {
           return new InProcessAgentRunner({
             agentId: command.payload.agentId,
+            taskId: String(command.payload.taskId),
+            emitEvent: config.emitTaskEvent,
             nativeAgentContext: config.nativeAgentContext,
             runtimeOptions: config.observerLogger ? { logger: config.observerLogger } : undefined,
             defaultGraph: config.defaultGraph,
@@ -199,8 +252,7 @@ export function createControlPlaneRuntime(
           logger: config.logger,
         })
       },
-      emitEvent: config.emitEvent,
-      publishEnvelope: config.publishEnvelope,
+      emitEvent: config.emitTaskEvent,
     } satisfies TaskExecutorConfig)
 
   taskExecutorRef = taskExecutor
@@ -209,7 +261,27 @@ export function createControlPlaneRuntime(
     connection,
     taskExecutor,
     async onCommand(command: Command): Promise<void> {
-      await taskExecutor.execute(command)
+      switch (command.type) {
+        case 'task.run': {
+          const taskId = String(command.payload.taskId)
+          registry.register(taskId, taskExecutor)
+          try {
+            await taskExecutor.execute(command)
+          } finally {
+            registry.unregister(taskId)
+          }
+          break
+        }
+        case 'task.cancel': {
+          registry.cancel(String(command.payload.taskId))
+          break
+        }
+        default: {
+          // 穷尽断言：若 Command 新增 variant 而此处未处理，TS 编译期会在此行报错。
+          const exhaustive: never = command
+          throw new Error(`Unknown command type: ${(exhaustive as { type: string }).type}`)
+        }
+      }
     },
   }
 }

@@ -110,6 +110,7 @@ subscribeOtelAdapter(bus)
 const { app, monitor } = createApp(db, logger, {
   emitEvent: (ev) => pipeline.emitEvent(ev),
   enterCorrelation,
+  bus,
 })
 monitor.start()
 

@@ -5,6 +5,8 @@
  */
 
 import type { TianjiError } from '../errors.js'
+import type { AppMessage } from '../message.js'
+import type { MessageDeltaChannel, MessageDeltaPayload } from './run.js'
 
 interface TaskFields {
   readonly taskId: string
@@ -43,6 +45,26 @@ export interface TaskObservationLostEvent extends TaskFields {
   readonly lastObservedAt: string
 }
 
+export interface TaskMessageStartedEvent extends TaskFields {
+  readonly type: 'TaskMessageStarted'
+  readonly messageId: string
+  readonly role: 'assistant'
+}
+
+export interface TaskMessageDeltaEvent extends TaskFields {
+  readonly type: 'TaskMessageDelta'
+  readonly messageId: string
+  readonly sequence: number
+  readonly channel: MessageDeltaChannel
+  readonly payload: MessageDeltaPayload
+}
+
+export interface TaskMessageCompletedEvent extends TaskFields {
+  readonly type: 'TaskMessageCompleted'
+  readonly messageId: string
+  readonly message: AppMessage
+}
+
 export type TaskDomainEvent =
   | TaskStartedEvent
   | TaskWaitingEvent
@@ -51,3 +73,6 @@ export type TaskDomainEvent =
   | TaskFailedEvent
   | TaskCancelledEvent
   | TaskObservationLostEvent
+  | TaskMessageStartedEvent
+  | TaskMessageDeltaEvent
+  | TaskMessageCompletedEvent

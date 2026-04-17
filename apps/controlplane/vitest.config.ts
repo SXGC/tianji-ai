@@ -1,10 +1,12 @@
 import { fileURLToPath } from 'node:url'
 
+import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vitest/config'
 
 const packageRoot = fileURLToPath(new URL('.', import.meta.url))
 
 export default defineConfig({
+  plugins: [react()],
   resolve: {
     alias: {
       '@tianji/observer': fileURLToPath(
@@ -18,7 +20,7 @@ export default defineConfig({
   test: {
     environment: 'node',
     name: '@tianji/controlplane',
-    include: ['src/**/__tests__/**/*.{test,spec}.ts'],
+    include: ['src/**/__tests__/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['node_modules', 'dist'],
     globals: true,
     root: packageRoot,

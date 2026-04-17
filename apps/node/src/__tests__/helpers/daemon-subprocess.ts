@@ -3,7 +3,8 @@ import { access, readFile, rm } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 
 import { type AgentSession, DaemonClient } from '@tianji/agent'
-import type { DomainEvent, RunId, SessionId } from '@tianji/shared'
+import type { DomainEvent, DomainEventEnvelope, EventBus, RunId, SessionId } from '@tianji/shared'
+import { createEventBus } from '@tianji/shared'
 
 import type { UserConfigPaths } from '../../config.js'
 
@@ -19,35 +20,67 @@ interface SpawnedDaemonProcess {
   readonly stderrChunks: Buffer[]
 }
 
-export function createStubSession(chunks: readonly string[]): AgentSession {
+export interface LiveStubSession {
+  readonly session: AgentSession
+  readonly bus: EventBus
+}
+
+export function wrapRunEnvelope(event: DomainEvent): DomainEventEnvelope {
+  const runId = 'runId' in event ? String(event.runId) : 'test-run'
+  return {
+    eventId: `evt_${event.type}_${Date.now()}`,
+    type: event.type,
+    occurredAt: new Date().toISOString(),
+    correlationId: runId,
+    causationId: null,
+    sequence: 1,
+    aggregateType: 'Run',
+    aggregateId: runId,
+    source: { processKind: 'daemon', processId: String(process.pid) },
+    payload: event,
+  }
+}
+
+export function createStubSession(chunks: readonly string[]): LiveStubSession {
   const sessionId = `session_stub_${Date.now()}` as SessionId
+  const bus = createEventBus({ lagSink: () => undefined })
 
   return {
-    sessionId,
-    abort: () => undefined,
-    async *queryWithGraph(): AsyncIterable<DomainEvent> {
-      const runId = `run_${Date.now()}` as RunId
-      const messageId = `msg_${Date.now()}`
+    bus,
+    session: {
+      sessionId,
+      abort: () => undefined,
+      close: () => undefined,
+      async *queryWithGraph(): AsyncIterable<DomainEvent> {
+        const runId = `run_${Date.now()}` as RunId
+        const messageId = `msg_${Date.now()}`
 
-      for (let i = 0; i < chunks.length; i++) {
-        yield {
-          type: 'MessageDelta',
+        for (let i = 0; i < chunks.length; i++) {
+          const event: DomainEvent = {
+            type: 'MessageDelta',
+            runId,
+            messageId,
+            sequence: i,
+            channel: 'text',
+            payload: { content: chunks[i] },
+            timestamp: Date.now(),
+          }
+          bus.publish(wrapRunEnvelope(event))
+          await new Promise<void>((resolve) => queueMicrotask(resolve))
+          yield event
+        }
+
+        const completedEvent: DomainEvent = {
+          type: 'RunCompleted',
           runId,
-          messageId,
-          sequence: i,
-          channel: 'text',
-          payload: { content: chunks[i] },
+          sessionId,
+          triggerType: 'new',
           timestamp: Date.now(),
         }
-      }
-
-      yield {
-        type: 'RunCompleted',
-        runId,
-        sessionId,
-        triggerType: 'new',
-        timestamp: Date.now(),
-      }
+        bus.publish(wrapRunEnvelope(completedEvent))
+        await new Promise<void>((resolve) => queueMicrotask(resolve))
+        yield completedEvent
+      },
     },
   }
 }

@@ -1,4 +1,5 @@
 import type { ObserverLogger } from '@tianji/observer'
+import type { PollCommandResponse } from '@tianji/shared'
 import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from '../db/index.js'
@@ -33,6 +34,13 @@ export function createCommandPollRoute(
 
     const timeout = Math.min(Number(c.req.query('timeout') ?? 30000), 60000)
 
+    // task.cancel 命令在节点 busy 时也必须下发，不受 busy 限制；
+    // task.run 命令在节点 busy 时跳过，等节点空闲后再取。
+    const pendingCancel = tryLeasePendingCancelCommand(db, nodeId)
+    if (pendingCancel !== null) {
+      return c.json(pendingCancel)
+    }
+
     if (!isNodeBusy(db, nodeId)) {
       const command = tryLeasePendingCommand(db, nodeId)
       if (command !== null) {
@@ -50,6 +58,11 @@ export function createCommandPollRoute(
 
       if (c.req.raw.signal.aborted) {
         return c.body(null, 204)
+      }
+
+      const pendingCancelInLoop = tryLeasePendingCancelCommand(db, nodeId)
+      if (pendingCancelInLoop !== null) {
+        return c.json(pendingCancelInLoop)
       }
 
       if (!isNodeBusy(db, nodeId)) {
@@ -73,10 +86,7 @@ function isNodeBusy(db: ControlPlaneDb, nodeId: string): boolean {
   return node?.execution_state === 'busy'
 }
 
-function tryLeasePendingCommand(
-  db: ControlPlaneDb,
-  nodeId: string
-): { commandId: string; type: string; payload: unknown } | null {
+function tryLeasePendingCommand(db: ControlPlaneDb, nodeId: string): PollCommandResponse | null {
   const row = db.raw
     .prepare(
       `SELECT command_id, type, payload FROM commands
@@ -102,13 +112,75 @@ function tryLeasePendingCommand(
     return null
   }
 
+  // task.run 命令在 commands 表插入时会伴随 tasks 行；task.cancel 没有 tasks 行（UPDATE 0 行 = 无副作用）。
   db.raw
     .prepare('UPDATE tasks SET status = ?, updated_at = ? WHERE command_id = ?')
     .run('running', now, row.command_id)
 
-  return {
-    commandId: row.command_id,
-    type: row.type,
-    payload: JSON.parse(row.payload),
+  return toPollCommandResponse(row.command_id, row.type, JSON.parse(row.payload))
+}
+
+/**
+ * 专门取 task.cancel 类型的待处理命令，不受节点 busy 状态限制。
+ *
+ * 取消命令必须即时下发，即使节点正在执行任务（busy）也不能等待。
+ * 其余类型命令（如 task.run）在节点 busy 时不下发，仍由调用方的 busy 检查守门。
+ */
+function tryLeasePendingCancelCommand(
+  db: ControlPlaneDb,
+  nodeId: string
+): PollCommandResponse | null {
+  const row = db.raw
+    .prepare(
+      `SELECT command_id, type, payload FROM commands
+       WHERE node_id = ? AND type = 'task.cancel' AND state = 'pending'
+       ORDER BY created_at ASC
+       LIMIT 1`
+    )
+    .get(nodeId) as { command_id: string; type: string; payload: string } | undefined
+
+  if (row === undefined) {
+    return null
+  }
+
+  const now = Date.now()
+  const result = db.raw
+    .prepare(
+      `UPDATE commands SET state = 'leased', leased_at = ?
+       WHERE command_id = ? AND state = 'pending'`
+    )
+    .run(now, row.command_id)
+
+  if (result.changes === 0) {
+    return null
+  }
+
+  return toPollCommandResponse(row.command_id, row.type, JSON.parse(row.payload))
+}
+
+/**
+ * 将 DB 行映射为强类型 PollCommandResponse。
+ * 未知 type 立即抛错（Let it crash）：DB 侧应已由写入端约束有效 type，未知值意味着数据损坏或协议升级未同步。
+ */
+function toPollCommandResponse(
+  commandId: string,
+  type: string,
+  payload: unknown
+): PollCommandResponse {
+  switch (type) {
+    case 'task.run':
+      return {
+        commandId: commandId as PollCommandResponse['commandId'],
+        type: 'task.run',
+        payload: payload as Extract<PollCommandResponse, { type: 'task.run' }>['payload'],
+      }
+    case 'task.cancel':
+      return {
+        commandId: commandId as PollCommandResponse['commandId'],
+        type: 'task.cancel',
+        payload: payload as Extract<PollCommandResponse, { type: 'task.cancel' }>['payload'],
+      }
+    default:
+      throw new Error(`Unknown command type in DB: ${type} (commandId=${commandId})`)
   }
 }

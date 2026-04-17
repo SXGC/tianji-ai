@@ -187,6 +187,17 @@ export function processToolStartEvent(
     args: (event.data?.input ?? {}) as Record<string, unknown>,
   }
   state.builtinToolInvocations.set(toolCallId, invocation)
+  void options.logger?.info(['runtime', 'deepagents'], 'deepagents.builtin_tool.started', {
+    sessionId: options.sessionId,
+    runId: options.runId,
+    toolCallId,
+    toolName: invocation.toolName,
+    args: invocation.args,
+    backendConstructor: options.deepagents.backend?.constructor?.name,
+    backendRootDir: readInspectableString(options.deepagents.backend, 'rootDir'),
+    backendVirtualMode: readInspectableBoolean(options.deepagents.backend, 'virtualMode'),
+    backendInheritEnv: readInspectableBoolean(options.deepagents.backend, 'inheritEnv'),
+  })
   options.emitEvent({
     type: 'ToolStarted',
     runId: options.runId,
@@ -228,6 +239,19 @@ export function processToolEndEvent(
       },
     ],
     createdAt: Date.now(),
+  })
+
+  void options.logger?.info(['runtime', 'deepagents'], 'deepagents.builtin_tool.completed', {
+    sessionId: options.sessionId,
+    runId: options.runId,
+    toolCallId,
+    toolName: invocation.toolName,
+    args: invocation.args,
+    result: event.data?.output,
+    backendConstructor: options.deepagents.backend?.constructor?.name,
+    backendRootDir: readInspectableString(options.deepagents.backend, 'rootDir'),
+    backendVirtualMode: readInspectableBoolean(options.deepagents.backend, 'virtualMode'),
+    backendInheritEnv: readInspectableBoolean(options.deepagents.backend, 'inheritEnv'),
   })
 
   options.emitEvent({
@@ -274,4 +298,22 @@ export function dispatchStreamEvent(
   if (event.event === 'on_tool_end') {
     processToolEndEvent(loopState, event, options)
   }
+}
+
+function readInspectableString(value: unknown, key: string): string | undefined {
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  return typeof record[key] === 'string' ? record[key] : undefined
+}
+
+function readInspectableBoolean(value: unknown, key: string): boolean | undefined {
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  return typeof record[key] === 'boolean' ? record[key] : undefined
 }

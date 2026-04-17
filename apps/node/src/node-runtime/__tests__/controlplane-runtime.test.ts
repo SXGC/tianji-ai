@@ -36,6 +36,7 @@ describe('createControlPlaneRuntime', () => {
           executionState: 'idle',
           currentTaskId: null,
           execute,
+          cancel: vi.fn(),
         }
       },
     }
@@ -49,6 +50,9 @@ describe('createControlPlaneRuntime', () => {
         platform: 'linux',
         version: '0.0.1',
         agentList: [],
+        agentConfigs: {},
+        emitTaskEvent: vi.fn(),
+        enterCorrelation: async (_correlationId, fn) => fn(),
       },
       deps
     )

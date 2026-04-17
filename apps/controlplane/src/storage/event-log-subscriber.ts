@@ -9,7 +9,11 @@
 
 import type { ObserverLogger } from '@tianji/observer'
 import type { DomainEventEnvelope, ErrorSink, EventBus, EventLogStore } from '@tianji/shared'
-import { BatchCommitter } from '@tianji/shared'
+import {
+  BatchCommitter,
+  buildEventDiagnosticFields,
+  shouldLogEventDiagnostics,
+} from '@tianji/shared'
 
 export interface EventLogSubscriberOptions {
   readonly maxItems?: number
@@ -51,10 +55,16 @@ export function subscribeEventLog(
       await store.append(batch)
     },
     onFlushError: (err, items) => {
+      const first = items[0]
+      const diagnostics =
+        first !== undefined && shouldLogEventDiagnostics(first)
+          ? buildEventDiagnosticFields(first)
+          : undefined
       // 使用 error 级别日志保证错误可见性
       void logger?.error(['event-log-subscriber', 'flush'], 'batch flush failed', {
         itemCount: items.length,
         error: err instanceof Error ? err.message : String(err),
+        ...diagnostics,
       })
       // 若配置了 errorSink，通知第一条 envelope（代表该批次）
       if (errorSink && items.length > 0) {

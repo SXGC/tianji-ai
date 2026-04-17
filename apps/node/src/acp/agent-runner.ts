@@ -8,7 +8,6 @@ import { ClientSideConnection, ndJsonStream } from '@agentclientprotocol/sdk'
 import {
   DEFAULT_AGENT_COMMAND,
   type DomainEvent,
-  type DomainEventEnvelope,
   type RunId,
   createRunId,
   createSessionId,
@@ -35,6 +34,7 @@ export class AgentRunner {
   #connection: ClientSideConnection | null = null
   #client: AcpNodeClient | null = null
   #acpSessionId: string | null = null
+  #disconnectController: AbortController | null = null
 
   constructor(config: AgentRunnerConfig) {
     this.agentId = config.agentId
@@ -80,9 +80,11 @@ export class AgentRunner {
       agentId: this.#config.agentId,
       acpSessionId: this.#acpSessionId,
     })
+
+    this.#disconnectController = new AbortController()
   }
 
-  async *query(prompt: string): AsyncIterable<DomainEventEnvelope> {
+  async *query(prompt: string): AsyncIterable<DomainEvent> {
     if (this.#connection === null || this.#client === null || this.#acpSessionId === null) {
       throw new Error('Not connected. Call connect() first.')
     }
@@ -94,7 +96,7 @@ export class AgentRunner {
 
     const runId = createRunId(`run_${Date.now()}`)
     const sessionId = createSessionId(this.#acpSessionId)
-    const eventBuffer: DomainEventEnvelope[] = []
+    const eventBuffer: DomainEvent[] = []
 
     const unsubscribe = this.#client.onSessionUpdate((update) => {
       const envelope = mapSessionUpdateToRuntimeEvent(update, runId)
@@ -102,6 +104,21 @@ export class AgentRunner {
         eventBuffer.push(envelope)
       }
     })
+
+    const signal = this.#disconnectController?.signal
+
+    // 构造一个 abort 信号对应的 Promise，当 disconnect() 触发时立即 resolve
+    // 用于打断 while 循环中的 sleep，让 cancel 路径快速退出
+    const abortPromise: Promise<'aborted'> | null =
+      signal === undefined
+        ? null
+        : new Promise<'aborted'>((resolve) => {
+            if (signal.aborted) {
+              resolve('aborted')
+              return
+            }
+            signal.addEventListener('abort', () => resolve('aborted'), { once: true })
+          })
 
     try {
       const promptResult = this.#connection.prompt({
@@ -121,15 +138,39 @@ export class AgentRunner {
         }
       )
 
-      while (!promptDone || eventBuffer.length > 0) {
+      while (!signal?.aborted && (!promptDone || eventBuffer.length > 0)) {
         if (eventBuffer.length > 0) {
           const event = eventBuffer.shift()
           if (event) {
             yield event
           }
         } else {
-          await new Promise((resolve) => setTimeout(resolve, 10))
+          // 等待新事件、prompt 完成或 abort 信号，三者任意一个触发即唤醒
+          await Promise.race([
+            new Promise<void>((resolve) => setTimeout(resolve, 10)),
+            abortPromise ?? new Promise<never>(() => {}),
+          ])
         }
+      }
+
+      if (signal?.aborted) {
+        await this.#config.logger?.logInfo(
+          ['acp', 'runner'],
+          'Agent chat cancelled via disconnect',
+          {
+            agentId: this.#config.agentId,
+          }
+        )
+        const cancelledEvent: DomainEvent = {
+          type: 'RunCancelled',
+          runId,
+          sessionId,
+          triggerType: 'new',
+          timestamp: Date.now(),
+          reason: 'abort',
+        }
+        yield cancelledEvent
+        return
       }
 
       if (promptError !== null) {
@@ -155,7 +196,7 @@ export class AgentRunner {
         triggerType: 'new',
         timestamp: Date.now(),
       }
-      yield wrapRunCompletedEnvelope(completedEvent, runId)
+      yield completedEvent
     } finally {
       unsubscribe()
     }
@@ -165,30 +206,12 @@ export class AgentRunner {
     await this.#config.logger?.logDebug(['acp', 'runner'], 'Disconnecting agent', {
       agentId: this.#config.agentId,
     })
+    this.#disconnectController?.abort()
     await this.#processManager?.kill()
     this.#processManager = null
     this.#connection = null
     this.#client = null
     this.#acpSessionId = null
-  }
-}
-
-/**
- * 将 DomainEvent 包装为 Run 聚合的 DomainEventEnvelope。
- * source.processKind 固定为 'node'，表示 node runner 进程侧。
- */
-function wrapRunCompletedEnvelope(event: DomainEvent, runId: RunId): DomainEventEnvelope {
-  const now = Date.now()
-  return {
-    eventId: `runner_${event.type}_${now}`,
-    type: event.type,
-    occurredAt: new Date(now).toISOString(),
-    correlationId: String(runId),
-    causationId: null,
-    sequence: 0,
-    aggregateType: 'Run',
-    aggregateId: String(runId),
-    source: { processKind: 'node', processId: String(process.pid) },
-    payload: event,
+    this.#disconnectController = null
   }
 }

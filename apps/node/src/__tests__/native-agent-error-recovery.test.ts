@@ -1,11 +1,5 @@
 import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
-import {
-  type DomainEvent,
-  type DomainEventEnvelope,
-  TianjiError,
-  createNodeId,
-  createTaskId,
-} from '@tianji/shared'
+import { type DomainEvent, TianjiError, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { InProcessAgentRunner } from '../acp/in-process-runner.js'
@@ -59,8 +53,8 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
-      publishEnvelope: vi.fn(),
       createRunner: async (cmd) => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
@@ -101,25 +95,25 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     const abortFn = vi.fn()
 
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
-    vi.mocked(agentMock.createAgentSession).mockReturnValue({
+    vi.mocked(agentMock.createAgentSession).mockResolvedValue({
       sessionId: SESSION_ID,
       queryWithGraph: async function* () {
         yield messageDeltaEvent()
         throw new Error('provider rate limited')
       },
       abort: abortFn,
+      close: vi.fn(),
     })
 
     const stateChanges: string[] = []
     const emittedEvents: DomainEvent[] = []
-    const publishedEnvelopes: DomainEventEnvelope[] = []
     const baseContext = createFakeContext()
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
-      publishEnvelope: (env) => publishedEnvelopes.push(env),
       createRunner: async (cmd) => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
@@ -140,9 +134,12 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
     expect(lifecycleTypes).toContain('TaskStarted')
     expect(lifecycleTypes).toContain('TaskFailed')
 
-    // agent envelope published before throw
-    expect(publishedEnvelopes).toHaveLength(1)
-    expect(publishedEnvelopes[0]?.payload.type).toBe('MessageDelta')
+    expect(emittedEvents.map((event) => event.type)).toEqual([
+      'TaskStarted',
+      'MessageDelta',
+      'TaskMessageDelta',
+      'TaskFailed',
+    ])
 
     // session.abort() was called during runner.disconnect()
     expect(abortFn).toHaveBeenCalled()
@@ -163,25 +160,25 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
 
     // Second call: succeeds
     vi.mocked(agentMock.loadAgentContextForName).mockResolvedValueOnce(createFakeContext())
-    vi.mocked(agentMock.createAgentSession).mockReturnValue({
+    vi.mocked(agentMock.createAgentSession).mockResolvedValue({
       sessionId: SESSION_ID,
       queryWithGraph: async function* () {
         yield messageDeltaEvent()
         yield runCompletedEvent()
       },
       abort: abortFn,
+      close: vi.fn(),
     })
 
     const stateChanges: string[] = []
     const emittedEvents: DomainEvent[] = []
-    const publishedEnvelopes: DomainEventEnvelope[] = []
     const baseContext = createFakeContext()
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
+      enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
-      publishEnvelope: (env) => publishedEnvelopes.push(env),
       createRunner: async (cmd) => {
         return new InProcessAgentRunner({
           agentId: cmd.payload.agentId,
@@ -204,10 +201,15 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
 
     // lifecycle events: TaskStarted + TaskFailed (first) + TaskStarted + TaskCompleted (second)
     const lifecycleTypes = emittedEvents.map((e) => e.type)
-    expect(lifecycleTypes).toEqual(['TaskStarted', 'TaskFailed', 'TaskStarted', 'TaskCompleted'])
-
-    // agent envelopes: MessageDelta + RunCompleted (from second run only)
-    expect(publishedEnvelopes.map((e) => e.payload.type)).toEqual(['MessageDelta', 'RunCompleted'])
+    expect(lifecycleTypes).toEqual([
+      'TaskStarted',
+      'TaskFailed',
+      'TaskStarted',
+      'MessageDelta',
+      'TaskMessageDelta',
+      'RunCompleted',
+      'TaskCompleted',
+    ])
 
     // Executor is idle after both calls
     expect(executor.executionState).toBe('idle')

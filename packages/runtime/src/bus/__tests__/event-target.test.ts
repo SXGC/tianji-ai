@@ -31,6 +31,20 @@ describe('resolveTarget', () => {
     expect(target.aggregateId).toBe('gr_1')
   })
 
+  it('GraphRun 聚合：GraphRunCancelled → aggregateType=GraphRun, aggregateId=runId', () => {
+    const event: DomainEvent = {
+      type: 'GraphRunCancelled',
+      runId: 'gr_1',
+      graphId: 'g1',
+      graphVersion: 1,
+      reason: 'abort',
+      timestamp: 0,
+    }
+    const target = resolveTarget(event)
+    expect(target.aggregateType).toBe('GraphRun')
+    expect(target.aggregateId).toBe('gr_1')
+  })
+
   it('Run 聚合：RunStarted → aggregateType=Run, aggregateId=runId', () => {
     const event: DomainEvent = {
       type: 'RunStarted',
@@ -65,5 +79,51 @@ describe('resolveTarget', () => {
     const target = resolveTarget(event)
     expect(target.aggregateType).toBe('Node')
     expect(target.aggregateId).toBe('node_1')
+  })
+
+  it('Task 聚合：TaskMessageStarted → aggregateType=Task, aggregateId=taskId', () => {
+    const event: DomainEvent = {
+      type: 'TaskMessageStarted',
+      taskId: 'task_1',
+      messageId: 'msg_1',
+      role: 'assistant',
+      timestamp: 0,
+    }
+    const target = resolveTarget(event)
+    expect(target.aggregateType).toBe('Task')
+    expect(target.aggregateId).toBe('task_1')
+  })
+
+  it('Task 聚合：TaskMessageDelta → aggregateType=Task, aggregateId=taskId', () => {
+    const event: DomainEvent = {
+      type: 'TaskMessageDelta',
+      taskId: 'task_1',
+      messageId: 'msg_1',
+      sequence: 1,
+      channel: 'text',
+      payload: { content: 'hello' },
+      timestamp: 0,
+    }
+    const target = resolveTarget(event)
+    expect(target.aggregateType).toBe('Task')
+    expect(target.aggregateId).toBe('task_1')
+  })
+
+  it('Task 聚合：TaskMessageCompleted → aggregateType=Task, aggregateId=taskId', () => {
+    const event: DomainEvent = {
+      type: 'TaskMessageCompleted',
+      taskId: 'task_1',
+      messageId: 'msg_1',
+      message: {
+        id: 'msg_1',
+        role: 'assistant',
+        content: [{ type: 'text', text: 'done' }],
+        createdAt: 0,
+      },
+      timestamp: 0,
+    }
+    const target = resolveTarget(event)
+    expect(target.aggregateType).toBe('Task')
+    expect(target.aggregateId).toBe('task_1')
   })
 })

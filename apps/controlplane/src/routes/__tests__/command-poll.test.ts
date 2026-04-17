@@ -1,4 +1,5 @@
 import { createMemorySink, createObserverLogger } from '@tianji/observer'
+import type { PollCommandResponse } from '@tianji/shared'
 import { Hono } from 'hono'
 import { afterEach, describe, expect, it } from 'vitest'
 
@@ -83,6 +84,37 @@ describe('GET /api/nodes/:nodeId/commands/poll', () => {
     const command = db.raw
       .prepare('SELECT state FROM commands WHERE command_id = ?')
       .get('cmd-1') as { state: string }
+    expect(command.state).toBe('leased')
+  })
+
+  it('should return a pending task.cancel command with structured payload', async () => {
+    const app = await setup()
+    const now = Date.now()
+
+    db.raw
+      .prepare(
+        `INSERT INTO commands (command_id, node_id, type, payload, state, created_at)
+         VALUES ('cmd-cancel-1', 'node-001', 'task.cancel', ?, 'pending', ?)`
+      )
+      .run(JSON.stringify({ taskId: 'task-to-cancel', reason: 'user' }), now)
+
+    const response = await app.request('/api/nodes/node-001/commands/poll?timeout=100', {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+
+    expect(response.status).toBe(200)
+
+    const data = (await response.json()) as PollCommandResponse
+    expect(data.commandId).toBe('cmd-cancel-1')
+    expect(data.type).toBe('task.cancel')
+    if (data.type === 'task.cancel') {
+      expect(data.payload.taskId).toBe('task-to-cancel')
+      expect(data.payload.reason).toBe('user')
+    }
+
+    const command = db.raw
+      .prepare('SELECT state FROM commands WHERE command_id = ?')
+      .get('cmd-cancel-1') as { state: string }
     expect(command.state).toBe('leased')
   })
 

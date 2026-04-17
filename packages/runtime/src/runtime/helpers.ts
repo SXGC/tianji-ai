@@ -11,7 +11,7 @@
  * - 被 runtime/session-runtime.ts 和 run-lifecycle.ts 引用。
  * - 不对外 re-export（均为内部符号）。
  */
-import { CancelledError, ProviderError, type RunSnapshot, TianjiError } from '@tianji/shared'
+import { CancelledError, type RunSnapshot, TianjiError } from '@tianji/shared'
 
 import { ToolRegistry } from '../tool-catalog.js'
 import type { ToolCatalog } from '../tool-catalog.js'
@@ -115,22 +115,25 @@ export function createAbortSignalScope(
 
 // ── 错误归一化 ─────────────────────────────────────────────────────────────────
 
-export function toError(error: unknown): Error {
-  if (error instanceof Error) {
-    return error
-  }
-
-  return new Error(String(error))
-}
-
-export function toTianjiError(error: unknown): TianjiError {
+/**
+ * 将任意 error 转换为 TianjiError，透传原始 error 的诊断信息：
+ * - TianjiError 实例 → 直接返回，不包装。
+ * - 普通 Error 实例 → `code` 取自 `error.name`，`category` 为 'internal'。
+ * - 非 Error 值 → `code` 为 'unknown'，`message` 为 `String(error)`。
+ *
+ * 与 `toTianjiError` 的区别：后者固定用 'RUNTIME_EXECUTION_FAILED' 包装，
+ * 本函数保留原始 name/message 便于诊断。
+ */
+export function toPassThroughTianjiError(error: unknown): TianjiError {
   if (error instanceof TianjiError) {
     return error
   }
 
-  return new ProviderError('RUNTIME_EXECUTION_FAILED', toError(error).message, {
-    cause: toError(error),
-  })
+  if (error instanceof Error) {
+    return new TianjiError('internal', error.name || 'Error', error.message, { cause: error })
+  }
+
+  return new TianjiError('internal', 'unknown', String(error))
 }
 
 export function isAbortError(error: unknown): boolean {

@@ -94,8 +94,7 @@ src/
 │  ├─ register / heartbeat / poll   # node 侧 REST
 │  ├─ events                        # 任务事件写入
 │  ├─ ui-nodes                      # UI 读取节点列表
-│  ├─ ui-tasks(-stream)             # UI 创建任务 / SSE 订阅
-│  └─ copilot                       # CopilotKit 运行时代理
+│  └─ copilot                       # CopilotKit 运行时代理与任务创建入口
 ├─ middleware/        # Access Token 校验、请求日志
 ├─ services/          # EventStore、ObservationMonitor、Auth
 └─ agents/            # TianjiAgent：把 node 任务事件桥接到 CopilotKit
@@ -106,10 +105,10 @@ migrations/           # 手写 SQL migration 文件，按序执行
 
 1. Node 使用一次性 Enrollment Token 调用注册接口，换取专属 Access Token。
 2. Node 周期性上报心跳，同步在线状态与本机可用 agent 列表。
-3. 浏览器选择 node + agent，提交任务；controlplane 写入 `commands` / `tasks`。
+3. 浏览器选择 node + agent，通过 `/api/copilot` 发起一次 Copilot 运行；`TianjiAgent.run()` 在 controlplane 内部写入 `commands` / `tasks`。
 4. Node 轮询命令接口，拿到任务后本地执行。
-5. Node 把执行过程以事件流回传到事件接口，controlplane 持久化到 `task_events`。
-6. 浏览器通过 SSE 订阅同一任务，实时渲染；刷新后仍可回放。
+5. Node 把执行过程以事件流回传到事件接口，controlplane 持久化到 `event_log`。
+6. CopilotRuntime 消费同一条事件流并把任务过程推送回前端；刷新后仍可基于事件重放。
 
 ---
 
@@ -154,7 +153,7 @@ src/web/
 ├─ router/            # TanStack Router 路由定义与页面
 ├─ components/        # 展示与交互组件，包含 CopilotKit 封装
 ├─ stores/            # Zustand store：节点列表、当前任务等
-├─ services/          # 对 /api/ui/* 的调用封装
+├─ services/          # 对节点列表等 /api/* 接口的调用封装
 └─ styles/            # 样式
 ```
 
@@ -163,11 +162,57 @@ src/web/
 | 模块 | 职责 |
 |---|---|
 | 节点视图 | 从 `/api/ui/nodes` 拉取在线节点与其 agent 列表 |
-| 任务创建 | 选择 node + agent，提交任务 |
-| 任务流 | 通过 SSE 订阅任务事件，实时渲染执行过程，支持重放 |
+| 任务创建 | 选择 node + agent，通过 `/api/copilot` 发起 Copilot 运行，由后端内部创建 task / command |
+| 任务流 | 通过 CopilotRuntime 返回的事件流实时渲染执行过程，支持基于事件重放 |
 | CopilotKit 集成 | 把 controlplane 暴露的 `/api/copilot` 作为 CopilotKit 后端，TianjiAgent 负责把 node 任务适配成 CopilotKit 能理解的事件流 |
 
 ---
+
+## 取消命令路由
+
+### POST /api/copilot/cancel
+
+浏览器触发取消时，向此端点发送请求：
+
+```
+POST /api/copilot/cancel
+Content-Type: application/json
+
+{ "taskId": "<uuid>" }
+```
+
+响应码语义：
+
+| 状态码 | 含义 |
+|---|---|
+| 202 Accepted | 命令已写入 commands 表，异步处理 |
+| 400 Bad Request | body 格式非法或 taskId 缺失/非字符串 |
+| 404 Not Found | taskId 在 tasks 表不存在 |
+| 500 Internal Server Error | 未预期异常，由 Hono 默认错误处理接管 |
+
+端点不需要 `x-node-id` / `x-agent-id` 请求头，因为 `cancelTask` 内部从 `tasks` 表反查 `node_id`。实现位于 `apps/controlplane/src/routes/copilot.ts`。
+
+### TianjiAgent.cancelTask
+
+`cancelTask(taskId)` 是取消命令的核心写入方法，位于 `apps/controlplane/src/agents/tianji-agent.ts`。
+
+执行逻辑：
+1. 从 `tasks` 表查 `node_id`（找不到则抛错，Let it crash）。
+2. 向 `commands` 表插入一条 `type = 'task.cancel'` 命令，`payload` 包含 `{ taskId, reason: 'user' }`，`state = 'pending'`。
+3. 返回，不等待 node 执行结果。
+
+为什么 nodeId 从 tasks 表反查而不是用构造时的 `this.#nodeId`：cancel 请求可能由任意上下文发起（包括为 cancel 专门创建的临时 agent 实例），而持有 task 的 node 未必是当前实例绑定的 node。反查保证命令总被路由到正确的节点。
+
+### 命令轮询中的 busy 门控绕过
+
+Node 正在执行任务时处于 `busy` 状态，`tryLeasePendingCommand` 对 busy 节点不下发 `task.run` 命令。但 `task.cancel` 命令必须在 busy 时也能下发，否则取消永远等到任务跑完才生效。
+
+`apps/controlplane/src/routes/command-poll.ts` 用两个独立函数处理这两类情况：
+
+- `tryLeasePendingCancelCommand`：专门取 `type = 'task.cancel'` 命令，**跳过 busy 检查**，在轮询开始时和 wait 循环内优先执行。
+- `tryLeasePendingCommand`：取其他类型命令，仅在 `!isNodeBusy` 时执行。
+
+轮询的优先级顺序：cancel 命令 > busy 检查 > 普通命令。这个设计的意义是：取消是用户意图，不应被节点当前状态阻塞。
 
 ## 事件系统
 

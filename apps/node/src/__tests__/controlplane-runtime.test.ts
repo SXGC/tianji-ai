@@ -1,10 +1,4 @@
-import {
-  type Command,
-  type DomainEvent,
-  type DomainEventEnvelope,
-  createNodeId,
-  createTaskId,
-} from '@tianji/shared'
+import { type Command, type DomainEvent, createNodeId, createTaskId } from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -15,23 +9,6 @@ import type {
   TaskExecutorLike,
 } from '../node-runtime/controlplane-runtime.js'
 import { createControlPlaneRuntime } from '../node-runtime/controlplane-runtime.js'
-
-/** 将裸 DomainEvent 包装为最小化 DomainEventEnvelope，专用于测试。 */
-function wrap(event: DomainEvent): DomainEventEnvelope {
-  const runId = 'runId' in event ? String(event.runId) : 'test'
-  return {
-    eventId: `test_${event.type}`,
-    type: event.type,
-    occurredAt: new Date().toISOString(),
-    correlationId: runId,
-    causationId: null,
-    sequence: 0,
-    aggregateType: 'Run',
-    aggregateId: runId,
-    source: { processKind: 'node', processId: 'test' },
-    payload: event,
-  }
-}
 
 const { agentRunnerMock, inProcessRunnerMock } = vi.hoisted(() => ({
   agentRunnerMock: vi.fn(),
@@ -49,13 +26,13 @@ function createRunnerDouble() {
     connect: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
     async *query() {
-      yield wrap({
+      yield {
         type: 'RunCompleted',
         runId: 'run-test' as never,
         sessionId: 'session-test' as never,
         triggerType: 'new',
         timestamp: Date.now(),
-      })
+      }
     },
   }
 }
@@ -74,6 +51,7 @@ function createConnectionDouble(): ControlPlaneConnectionLike {
     setExecutionState: vi.fn(),
     client: {
       postDomainEvents: vi.fn(async () => undefined),
+      maxSequence: vi.fn(async () => null),
     },
   }
 }
@@ -90,8 +68,8 @@ function createTestConfig(
     version: '1.0.0',
     agentList: [],
     agentConfigs: {},
-    emitEvent: vi.fn(),
-    publishEnvelope: vi.fn(),
+    enterCorrelation: async (_correlationId, fn) => fn(),
+    emitTaskEvent: vi.fn(),
     ...overrides,
   }
 }
@@ -137,6 +115,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
           executionState: 'idle',
           currentTaskId: null,
           execute: vi.fn(async () => undefined),
+          cancel: vi.fn(),
         }
       },
     }
@@ -166,6 +145,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
         executionState: 'idle',
         currentTaskId: null,
         execute,
+        cancel: vi.fn(),
       }),
     }
 
@@ -202,6 +182,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
         executionState: 'idle',
         currentTaskId: null,
         execute,
+        cancel: vi.fn(),
       }),
     }
 
@@ -247,6 +228,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
         executionState: 'idle',
         currentTaskId: null,
         execute,
+        cancel: vi.fn(),
       }),
     }
 
@@ -256,6 +238,40 @@ describe('createControlPlaneRuntime with custom deps', () => {
     await runtime.onCommand(cmd)
 
     expect(execute).toHaveBeenCalledWith(cmd)
+  })
+
+  it('passes task session attachment dependencies into in-process runner', async () => {
+    setupRunnerMocks()
+
+    const emitTaskEvent = vi.fn()
+    const logger = createLoggerDouble()
+    const runtime = createControlPlaneRuntime(
+      createTestConfig({
+        emitTaskEvent,
+        logger,
+        agentConfigs: {
+          default: {
+            type: 'native',
+          } as never,
+        },
+        nativeAgentContext: {} as never,
+        defaultGraph: {} as never,
+        executorFactory: {} as never,
+      }),
+      {
+        createConnection: () => createConnectionDouble(),
+      }
+    )
+
+    await runtime.onCommand(createTestCommand())
+
+    expect(inProcessRunnerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: 'default',
+        taskId: createTaskId('task-001'),
+        emitEvent: emitTaskEvent,
+      })
+    )
   })
 
   it('does not call execute when taskExecutorRef is null at command time', async () => {
@@ -276,6 +292,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
         executionState: 'idle',
         currentTaskId: null,
         execute: vi.fn(async () => undefined),
+        cancel: vi.fn(),
       }),
     }
 
@@ -297,6 +314,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
       executionState: 'idle',
       currentTaskId: null,
       execute: vi.fn(async () => undefined),
+      cancel: vi.fn(),
     }
 
     const deps: ControlPlaneRuntimeDeps = {
@@ -326,6 +344,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
           executionState: 'idle',
           currentTaskId: null,
           execute: vi.fn(async () => undefined),
+          cancel: vi.fn(),
         }
       },
     }
@@ -359,6 +378,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
         executionState: 'idle',
         currentTaskId: null,
         execute: vi.fn(async () => undefined),
+        cancel: vi.fn(),
       }),
     }
 
@@ -520,5 +540,124 @@ describe('createRunner routing', () => {
     await expect(runtime.taskExecutor.execute(createTestCommand())).rejects.toThrow(
       'Agent config not found for agentId "default"'
     )
+  })
+})
+
+describe('task.cancel command dispatch via ActiveExecutorRegistry', () => {
+  function createCancelCommand(taskId: string): Command {
+    return {
+      commandId: 'cmd-cancel-1' as never,
+      nodeId: createNodeId('node-test'),
+      type: 'task.cancel',
+      state: 'pending',
+      createdAt: Date.now(),
+      payload: { taskId: createTaskId(taskId), reason: 'user' },
+    }
+  }
+
+  it('task.cancel 命令路由到对应 taskId 的 executor.cancel', async () => {
+    const cancel = vi.fn()
+    let resolveExecute: (() => void) | undefined
+    const execute = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        resolveExecute = resolve
+      })
+    })
+
+    const deps: ControlPlaneRuntimeDeps = {
+      createConnection: () => ({
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(),
+        setExecutionState: vi.fn(),
+      }),
+      createTaskExecutor: () => ({
+        executionState: 'idle',
+        currentTaskId: null,
+        execute,
+        cancel,
+      }),
+    }
+
+    const runtime = createControlPlaneRuntime(createTestConfig(), deps)
+    const runCmd = createTestCommand() // task.run, taskId=task-001
+    const runPromise = runtime.onCommand(runCmd)
+
+    // 等 register 完成（execute 开始挂起后 registry 已有记录）
+    await new Promise((r) => setTimeout(r, 10))
+
+    await runtime.onCommand(createCancelCommand('task-001'))
+    expect(cancel).toHaveBeenCalledOnce()
+
+    resolveExecute?.()
+    await runPromise
+  })
+
+  it('task.cancel 命令对未注册 taskId 抛错（Let it crash）', async () => {
+    const deps: ControlPlaneRuntimeDeps = {
+      createConnection: () => ({
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(),
+        setExecutionState: vi.fn(),
+      }),
+      createTaskExecutor: () => ({
+        executionState: 'idle',
+        currentTaskId: null,
+        execute: vi.fn(async () => undefined),
+        cancel: vi.fn(),
+      }),
+    }
+
+    const runtime = createControlPlaneRuntime(createTestConfig(), deps)
+    await expect(runtime.onCommand(createCancelCommand('task-ghost'))).rejects.toThrow(/not found/i)
+  })
+
+  it('task.run 执行完成后 registry 自动 unregister', async () => {
+    const execute = vi.fn(async () => undefined) // 立刻完成
+
+    const deps: ControlPlaneRuntimeDeps = {
+      createConnection: () => ({
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(),
+        setExecutionState: vi.fn(),
+      }),
+      createTaskExecutor: () => ({
+        executionState: 'idle',
+        currentTaskId: null,
+        execute,
+        cancel: vi.fn(),
+      }),
+    }
+
+    const runtime = createControlPlaneRuntime(createTestConfig(), deps)
+    await runtime.onCommand(createTestCommand())
+
+    // 执行完成后 registry 已清空，cancel 同一 taskId 应抛错
+    await expect(runtime.onCommand(createCancelCommand('task-001'))).rejects.toThrow(/not found/i)
+  })
+
+  it('task.run 执行抛错后 registry 也 unregister', async () => {
+    const execute = vi.fn(async () => {
+      throw new Error('boom')
+    })
+
+    const deps: ControlPlaneRuntimeDeps = {
+      createConnection: () => ({
+        start: vi.fn(async () => undefined),
+        stop: vi.fn(),
+        setExecutionState: vi.fn(),
+      }),
+      createTaskExecutor: () => ({
+        executionState: 'idle',
+        currentTaskId: null,
+        execute,
+        cancel: vi.fn(),
+      }),
+    }
+
+    const runtime = createControlPlaneRuntime(createTestConfig(), deps)
+    await expect(runtime.onCommand(createTestCommand())).rejects.toThrow('boom')
+
+    // 执行抛错后 registry 也应已清空
+    await expect(runtime.onCommand(createCancelCommand('task-001'))).rejects.toThrow(/not found/i)
   })
 })

@@ -71,7 +71,7 @@ CLAUDE.md 明确规定 **单文件不得超过 800 行**。事件总线重构后
 | `ObserverLogger` | 类型 re-export | packages/agent |
 | `readDeepagentsRunWorkflowState` / `readRunRuntimeMetadata` / `readSessionRuntimeMetadata` | 函数 | `__tests__` 内部（未跨包） |
 
-`deepagents-engine.ts` **不通过 index.ts 对外导出**，只被 `runtime.ts` 使用。其外部可见符号仅有：`executeDeepagentsRun`、`DeepagentsRunResult`。
+`deepagents-engine.ts` **不通过 index.ts 对外导出**，只被 `runtime.ts` 使用。其外部可见符号仅有：`executeDeepagentsRun`、`DeepagentsRunResult`。该文件路径保留，作为内部薄入口继续导出 `executeDeepagentsRun` 和 `DeepagentsRunResult`，避免影响 `runtime.ts` 的既有 import 关系。
 
 `__tests__` 下会对 `../runtime.js` 做深路径 import（见 `legacy-snapshot-compat.test.ts`、`runtime-engine-selection.test.ts`、`runtime-deepagents-bootstrap.test.ts` 等），这些路径必须保留，因此 `runtime.ts` 必须作为 re-export barrel 保留。
 
@@ -156,7 +156,7 @@ CLAUDE.md 明确规定 **单文件不得超过 800 行**。事件总线重构后
 | `helpers/runtime-test-utils.ts` | `../../runtime.js` | 同上 |
 | `runtime-public-api.test.ts` | 断言 re-export 列表 | 必须 100% 一致 |
 
-**结论**：只要 barrel `runtime.ts` 和 `engines/deepagents-engine.ts` 保留原路径 + 原全部符号 re-export，**测试不需要任何修改**。
+**结论**：只要 `runtime.ts` 作为 barrel 保留原路径 + 原全部符号 re-export，`engines/deepagents-engine.ts` 作为内部薄入口继续导出 `executeDeepagentsRun` 和 `DeepagentsRunResult` 以维持 `runtime.ts` 的既有 import 关系，**既有测试不需要任何修改**（新增导出面/路径兼容性保护测试见 §5）。
 
 ---
 
@@ -164,16 +164,20 @@ CLAUDE.md 明确规定 **单文件不得超过 800 行**。事件总线重构后
 
 共 2 个 subagent 任务，分别拆 runtime.ts 和 deepagents-engine.ts。每个任务内部按顺序操作，**不并行**（因为要反复搬同一个文件的代码）。
 
+> **通用要求（A1–A5 / B1–B7 每一步都适用）**：每一步搬走符号后，必须**同步更新原文件的 import 与 re-export**，使 `runtime.ts` / `deepagents-engine.ts` 继续对外暴露完全一致的符号集，保证该步 commit 时 typecheck 独立通过。严禁"先搬走，后续步骤再补 re-export"的做法。
+>
+> **关于 barrel 内的 re-export 转发**：`index.ts` 当前 re-export 的 `ObserverLogger`（来自 `./observer.js`）和 `RuntimeProviderConfig`（来自 `./provider-config.js` 等）在 `runtime.ts` 中本身就是二次转发，barrel 化后必须**原样保留这些转发**，不得把它们当作"已迁走的本地符号"处理。
+
 ### Task A：拆分 `runtime.ts`
 
 | 步骤 | 动作 | 验证 | commit |
 |---|---|---|---|
-| A1 | 新建 `src/runtime/` 目录，创建 `types.ts`，搬移表 2.1 指定类型 | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取 runtime 公共/内部类型到 runtime/types.ts` |
-| A2 | 创建 `src/runtime/metadata.ts`，搬移 metadata 读写 + engine 守卫 + usage 读取 | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取 metadata 读写到 runtime/metadata.ts` |
-| A3 | 创建 `src/runtime/helpers.ts`，搬移通用工具 + 错误归一化 + abort signal | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取通用 helpers 到 runtime/helpers.ts` |
-| A4 | 创建 `src/runtime/run-lifecycle.ts`，搬移 handleRunXxx + 日志函数 | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取 run 生命周期处理器到 runtime/run-lifecycle.ts` |
-| A5 | 创建 `src/runtime/session-runtime.ts`，搬移 `SessionRuntimeImpl` + 工厂函数 | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取 SessionRuntimeImpl 到 runtime/session-runtime.ts` |
-| A6 | 将 `src/runtime.ts` 改为纯 barrel（只保留 `export ... from './runtime/*.js'`），确保与 `index.ts` re-export 列表一一对应 | `pnpm --filter @tianji/runtime test` + `pnpm check` | `refactor(runtime): runtime.ts 转为 barrel re-export 子模块` |
+| A1 | 新建 `src/runtime/` 目录，创建 `types.ts`，搬移表 2.1 指定类型；在 `runtime.ts` 顶部追加 `export * from './runtime/types.js'`（或按需精确 re-export） | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取 runtime 公共/内部类型到 runtime/types.ts` |
+| A2 | 创建 `src/runtime/metadata.ts`，搬移 metadata 读写 + engine 守卫 + usage 读取；`runtime.ts` 追加对应 re-export（含 `readSessionRuntimeMetadata` / `readRunRuntimeMetadata` / `readDeepagentsRunWorkflowState`） | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取 metadata 读写到 runtime/metadata.ts` |
+| A3 | 创建 `src/runtime/helpers.ts`，搬移通用工具 + 错误归一化 + abort signal；`runtime.ts` 内改为从 `./runtime/helpers.js` 引入（本身不对外 re-export，因这些非公共符号） | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取通用 helpers 到 runtime/helpers.ts` |
+| A4 | 创建 `src/runtime/run-lifecycle.ts`，搬移 handleRunXxx + 日志函数；`runtime.ts` 中的 `SessionRuntimeImpl` 改为调用导入的纯函数 | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取 run 生命周期处理器到 runtime/run-lifecycle.ts` |
+| A5 | 创建 `src/runtime/session-runtime.ts`，搬移 `SessionRuntimeImpl` + 工厂函数 `createSessionRuntime` / `normalizeSessionRuntimeOptions` / `resolveDeepagentsModel`；`runtime.ts` 追加 `export { createSessionRuntime, ... } from './runtime/session-runtime.js'` | `pnpm --filter @tianji/runtime typecheck` | `refactor(runtime): 抽取 SessionRuntimeImpl 到 runtime/session-runtime.ts` |
+| A6 | 将 `src/runtime.ts` 精简为**纯 barrel**：只保留子模块 re-export + `ObserverLogger` / `RuntimeProviderConfig` 等外来转发；与 `index.ts` 的 re-export 列表逐项比对 | `pnpm --filter @tianji/runtime test` + `pnpm --filter @tianji/runtime test -- runtime-public-api` + `pnpm check` | `refactor(runtime): runtime.ts 转为 barrel re-export 子模块` |
 
 ### Task B：拆分 `deepagents-engine.ts`
 
@@ -187,6 +191,8 @@ CLAUDE.md 明确规定 **单文件不得超过 800 行**。事件总线重构后
 | B6 | 创建 `config-resolvers.ts` | typecheck | `refactor(runtime): 抽取 deepagents 配置解析` |
 | B7 | 创建 `tool-adapter.ts`（createDeepagentsTools + executeDeepagentsToolCall + executeWithTimeout） | typecheck | `refactor(runtime): 抽取 deepagents 工具适配层` |
 | B8 | `deepagents-engine.ts` 精简为只含 `executeDeepagentsRun` 主函数 + re-export `DeepagentsRunResult` | `pnpm --filter @tianji/runtime test` + `pnpm check` | `refactor(runtime): deepagents-engine.ts 精简为主入口` |
+
+> **Task B 通用要求**：同 Task A，B1–B7 每一步都必须同步更新 `deepagents-engine.ts` 的 import / re-export，保证该步独立 typecheck 通过；`runtime.ts` 对 `executeDeepagentsRun` 的 import 路径在 B8 前**不得改动**。
 
 ### 整体收尾
 
@@ -209,13 +215,14 @@ CLAUDE.md 明确规定 **单文件不得超过 800 行**。事件总线重构后
 | 修改 `index.ts` 的 export 列表 | 外部消费者直接受影响 |
 | 修改 `SessionRuntimeImpl` 的方法签名或字段可见性 | 属于重写 |
 | 调整任何业务行为（事件时序、错误码、快照字段） | 非拆分目标 |
-| 新增测试 | 纯搬运，旧测试即回归保护 |
+| 新增业务测试 | 纯搬运，旧业务测试即回归保护。**但**：允许新增**最小范围**的导出面 / 路径兼容性保护测试（例如断言 `index.ts` re-export 列表、`../runtime.js` 深路径 import 仍可用、`executeDeepagentsRun` / `DeepagentsRunResult` 仍从 `engines/deepagents-engine.js` 导出）；若现有测试已充分覆盖则不新增，但不得为了守住"纯搬运"口径而放弃必要的回归保护验证 |
 | 修改 `__tests__/` 中任何文件 | 同上 |
 | 把 `executeDeepagentsRun` 暴露到 `index.ts` | 原本就是内部符号 |
 | 触碰 `packages/runtime` 之外的任何包 | 物理拆分边界 |
+| 在"保留两份 helper"时顺手统一语义 | 若发现 runtime 侧与 deepagents 侧同名 helper（例如 `isDeepagentsInterruptRecord` / `toError` / `isAbortError`）**实现已分叉**，必须**立即停止并上报用户**，禁止自行判断哪一份是"正确版本"后统一；这属于语义变更，不在本次拆分范围 |
 
 拆分必须保证：
 
 1. `packages/runtime/src/index.ts` 的 export 列表与**拆分前完全一致**（符号名、类型参数、顺序不强求）。
-2. `packages/runtime/src/runtime.ts` 和 `packages/runtime/src/engines/deepagents-engine.ts` **路径保留**，作为 barrel 继续可被 `__tests__/` 深路径 import。
+2. `packages/runtime/src/runtime.ts` **路径保留**，作为 barrel 继续可被 `__tests__/` 深路径 import；`packages/runtime/src/engines/deepagents-engine.ts` **路径保留**，作为内部薄入口继续导出 `executeDeepagentsRun` 和 `DeepagentsRunResult`，维持 `runtime.ts` 的既有 import 关系。
 3. 外部快照、事件时序、错误语义零变化。

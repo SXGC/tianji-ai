@@ -6,6 +6,7 @@
 
 import type {
   AgentInfo,
+  AggregateType,
   NodeExecutionState,
   NodeHeartbeatRequest,
   NodeRegisterRequest,
@@ -122,6 +123,23 @@ export class ControlPlaneClient {
     if (!response.ok) {
       throw new Error(`Post domain events failed: ${response.status}`)
     }
+  }
+
+  async maxSequence(aggregateType: AggregateType, aggregateId: string): Promise<number | null> {
+    const params = new URLSearchParams({ aggregateType, aggregateId })
+    const response = await this.#fetchAuth(`/api/event-log/max-sequence?${params.toString()}`, {
+      method: 'GET',
+    })
+
+    if (response.status === 401) {
+      throw new ControlPlaneAuthError('Max sequence query rejected: token expired or revoked')
+    }
+    if (!response.ok) {
+      throw new Error(`Max sequence query failed: ${response.status}`)
+    }
+
+    const data = (await response.json()) as { maxSequence: number | null }
+    return data.maxSequence
   }
 
   async openEventStream(): Promise<NdjsonWriter> {

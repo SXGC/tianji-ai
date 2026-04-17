@@ -15,7 +15,7 @@ const LOG_FOLLOW_CHUNK_SIZE = 64 * 1024
 
 const ANSI_RESET = '\x1b[0m'
 const LOG_LEVEL_ANSI_COLORS: Record<CliLogLevel, string> = {
-  trace: '\x1b[97m',
+  trace: '\x1b[90m',
   debug: '\x1b[90m',
   info: '\x1b[32m',
   warn: '\x1b[33m',
