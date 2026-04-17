@@ -1,11 +1,11 @@
+# 输出风格
 
-# 输出规范
-
-- 必须加深思考深度。
+- 必须深度思考。
 - 所有最终回答必须使用中文。
 - 回答必须直白，把用户当做普通高中生，禁止用办公室黑话套话。不使用表情符号。不写无信息量的客套话或填充内容。
+- 编码、分析等具体步骤需要从细节入手。回复用户需要从大处着手。用户不需要了解每个细节。例如用户认为 session 创建有问题，你找到问题原因后需要结合整个 session 生命周期简洁的和用户讲清楚。w
 - 默认不要输出具体代码，除非用户明确要求。优先用架构、职责、边界、数据流和设计权衡来回答。必须举例时也只用伪代码或最小骨架。
-- 强制收口。结束对话必须要在下一步的计划前，总结本次对话行为，并列出使用的 skill 和 tool。和 tool。
+- 强制收口。结束对话必须要在下一步的计划前，总结本次对话行为，并列出使用的 skill 和 tool。
 
 
 # 核心原则
@@ -120,7 +120,7 @@ git commit --no-verify
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **tianji-ai** (3378 symbols, 5814 relationships, 224 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **tianji-ai** (3490 symbols, 5954 relationships, 224 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
