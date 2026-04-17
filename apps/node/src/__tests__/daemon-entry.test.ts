@@ -71,6 +71,16 @@ const loadUserConfigContextMock = vi.fn<() => Promise<LoadUserConfigContextResul
 const logInfoMock = vi.fn(async () => undefined)
 const logErrorMock = vi.fn(async () => undefined)
 const logDebugMock = vi.fn(async () => undefined)
+const observerLoggerMock = {
+  trace: vi.fn(async () => undefined),
+  debug: vi.fn(async () => undefined),
+  info: vi.fn(async () => undefined),
+  warn: vi.fn(async () => undefined),
+  error: vi.fn(async () => undefined),
+  fatal: vi.fn(async () => undefined),
+  log: vi.fn(async () => undefined),
+  child: vi.fn(() => observerLoggerMock),
+}
 const createAgentSessionMock = vi.fn(() => ({ sessionId: 'session-1' }))
 const buildDefaultGraphMock = vi.fn(async () => ({
   graph: {
@@ -126,6 +136,7 @@ vi.mock('../logger.js', () => ({
     logWarn: vi.fn(async () => undefined),
     logError: logErrorMock,
     appendCliLog: vi.fn(async () => undefined),
+    observerLogger: observerLoggerMock,
   })),
   logDebug: logDebugMock,
   logInfo: logInfoMock,
@@ -475,13 +486,10 @@ describe('runDaemonEntry', () => {
       expect(shutdownMock).toHaveBeenCalledOnce()
     })
 
-    expect(logErrorMock).toHaveBeenCalledWith(
-      paths,
+    expect(observerLoggerMock.fatal).toHaveBeenCalledWith(
       ['daemon'],
       'Daemon crashed with uncaught exception',
-      {
-        error: 'boom',
-      }
+      expect.objectContaining({ name: 'Error', message: 'boom' })
     )
     expect(logInfoMock).toHaveBeenCalledWith(paths, ['daemon'], 'Daemon exiting', {
       reason: 'uncaughtException',
@@ -508,13 +516,10 @@ describe('runDaemonEntry', () => {
     unhandledRejectionHandler?.('rejected')
 
     await waitFor(() => {
-      expect(logErrorMock).toHaveBeenCalledWith(
-        paths,
+      expect(observerLoggerMock.error).toHaveBeenCalledWith(
         ['daemon'],
         'Daemon caught unhandled rejection',
-        {
-          error: 'rejected',
-        }
+        expect.objectContaining({ message: 'rejected' })
       )
     })
 

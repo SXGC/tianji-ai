@@ -10,7 +10,7 @@ import {
   buildDefaultGraph,
   createUnifiedRuntimeEntry,
 } from '@tianji/agent'
-import { subscribeEventBusLogger, subscribeOtelAdapter } from '@tianji/observer'
+import { errorToLogData, subscribeEventBusLogger, subscribeOtelAdapter } from '@tianji/observer'
 import {
   CausalContext,
   SequenceCounter,
@@ -38,8 +38,16 @@ type DaemonShutdownReason =
   | { readonly type: 'signal'; readonly signal: NodeJS.Signals }
   | { readonly type: 'uncaughtException'; readonly error: unknown }
 
-function formatErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+/**
+ * 把 daemon 顶层抛出物规范化为结构化日志 data。
+ *
+ * 委托给 observer 的 `errorToLogData`，保留 `name`、`message`、`stack` 及递归 `cause`。
+ * 薄包装层的目的是让单元测试可以直接 import 此函数而不依赖 daemon 完整启动链路。
+ *
+ * @param error - 任意抛出值（Error 对象、字符串或其他原始值）
+ */
+export function buildDaemonCrashLogData(error: unknown): Record<string, unknown> {
+  return errorToLogData(error)
 }
 
 export async function runDaemonEntry(): Promise<void> {
@@ -67,7 +75,7 @@ export async function runDaemonEntry(): Promise<void> {
         subscriptionId: err.subscriptionId,
         eventId: err.envelope.eventId,
         eventType: err.envelope.type,
-        error: err.error instanceof Error ? err.error.message : String(err.error),
+        ...errorToLogData(err.error),
       })
     },
   })
@@ -349,16 +357,17 @@ export async function runDaemonEntry(): Promise<void> {
       }
       // -------------------------------------------------------------------------
     } catch (error) {
+      const errorData = errorToLogData(error)
       updateControlPlaneStatus({
         enabled: true,
         status: 'degraded',
         baseUrl: controlPlaneConfig.baseUrl,
-        lastError: error instanceof Error ? error.message : String(error),
+        lastError: typeof errorData.message === 'string' ? errorData.message : String(error),
       })
       await logError(context.paths, ['daemon', 'controlplane'], 'Control plane connection failed', {
         baseUrl: controlPlaneConfig.baseUrl,
         nodeId: controlPlaneConfig.nodeId,
-        error: error instanceof Error ? error.message : String(error),
+        ...errorData,
       })
       // controlplane 连接失败时 daemon 继续以本地模式运行
       process.stderr.write('Warning: controlplane connection failed, running in local-only mode\n')
@@ -380,9 +389,11 @@ export async function runDaemonEntry(): Promise<void> {
       }
 
       if (reason.type === 'uncaughtException') {
-        await logError(context.paths, ['daemon'], 'Daemon crashed with uncaught exception', {
-          error: formatErrorMessage(reason.error),
-        })
+        await logger.observerLogger.fatal(
+          ['daemon'],
+          'Daemon crashed with uncaught exception',
+          buildDaemonCrashLogData(reason.error)
+        )
       }
 
       controlPlaneHandle?.connection.stop()
@@ -415,9 +426,11 @@ export async function runDaemonEntry(): Promise<void> {
     void shutdown({ type: 'uncaughtException', error })
   })
   process.on('unhandledRejection', (error) => {
-    void logError(context.paths, ['daemon'], 'Daemon caught unhandled rejection', {
-      error: formatErrorMessage(error),
-    })
+    void logger.observerLogger.error(
+      ['daemon'],
+      'Daemon caught unhandled rejection',
+      buildDaemonCrashLogData(error)
+    )
   })
 }
 
@@ -429,21 +442,18 @@ if (_isMain) {
   try {
     await runDaemonEntry()
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    const stack = error instanceof Error ? error.stack : undefined
+    const data = buildDaemonCrashLogData(error)
+    const message = typeof data.message === 'string' ? data.message : String(error)
     process.stderr.write(`[daemon] Fatal startup error: ${message}\n`)
-    if (stack) {
-      process.stderr.write(`${stack}\n`)
+    if (typeof data.stack === 'string') {
+      process.stderr.write(`${data.stack}\n`)
     }
     try {
       const { getUserConfigPaths } = await import('./config.js')
       const paths = getUserConfigPaths()
-      await logError(paths, ['daemon'], 'Fatal startup error', {
-        error: message,
-        stack,
-      })
+      await logError(paths, ['daemon'], 'Fatal startup error', data)
     } catch {
-      // 日志写入失败时不再尝试
+      // 日志写入失败时不再尝试（该分支本身已是最后兜底）
     }
     process.exit(1)
   }
