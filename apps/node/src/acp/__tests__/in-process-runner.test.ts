@@ -1,240 +1,42 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import type { LoadedAgentContext } from '@tianji/agent'
-import type { DomainEvent } from '@tianji/shared'
-
-const createAgentSessionMock = vi.fn()
-const loadAgentContextForNameMock = vi.fn()
-
-vi.mock('@tianji/agent', () => ({
-  createAgentSession: createAgentSessionMock,
-  loadAgentContextForName: loadAgentContextForNameMock,
-}))
-
-function createContext(): LoadedAgentContext {
-  return {
-    paths: {
-      configDir: '/tmp/test',
-      agentsDir: '/tmp/test/agents',
-      logsDir: '/tmp/test/logs',
-      configFilePath: '/tmp/test/tianji.json',
-      cliLogFilePath: '/tmp/test/logs/tianji.log',
-      daemonPortPath: '/tmp/test/daemon.port',
-      daemonPidPath: '/tmp/test/daemon.pid',
-    },
-    config: {},
-    agent: {
-      agentName: 'default',
-      modelRef: 'openai/gpt-4o-mini',
-      provider: 'openai',
-      modelName: 'gpt-4o-mini',
-      providerConfig: undefined,
-      soulPath: '/tmp/test/agents/default/SOUL.md',
-      soul: 'test soul',
-      workspace: undefined,
-    },
-    resolvedEnvVars: [],
-    snapshotStore: {} as never,
-  }
-}
-
-async function collectEvents(iterable: AsyncIterable<DomainEvent>): Promise<DomainEvent[]> {
-  const events: DomainEvent[] = []
-  for await (const event of iterable) {
-    events.push(event)
-  }
-  return events
-}
+import { InProcessAgentRunner } from '../in-process-runner.js'
 
 describe('InProcessAgentRunner', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    loadAgentContextForNameMock.mockResolvedValue(createContext())
-  })
-
-  it('creates an in-process session and streams native events', async () => {
-    const completedEvent: DomainEvent = {
-      type: 'RunCompleted',
-      runId: 'run-1' as never,
-      sessionId: 'session-1' as never,
-      triggerType: 'new',
-      timestamp: 1,
-    }
-
-    createAgentSessionMock.mockReturnValue({
-      sessionId: 'session-1',
-      abort: vi.fn(),
-      async *queryWithGraph(_graph: unknown, _options: unknown) {
-        yield {
-          type: 'MessageDelta',
-          runId: 'run-1' as never,
-          messageId: 'msg-1' as never,
-          sequence: 0,
-          channel: 'text',
-          payload: { content: 'hello' },
-          timestamp: 0,
-        }
-        yield completedEvent
-      },
-    })
-
-    const { InProcessAgentRunner } = await import('../in-process-runner.js')
+  it('stores agentId from config', () => {
     const runner = new InProcessAgentRunner({
       agentId: 'reviewer',
-      nativeAgentContext: createContext(),
-      defaultGraph: {} as never,
-      executorFactory: {} as never,
     })
 
-    await runner.connect()
-    const events = await collectEvents(runner.query('hello'))
-
-    expect(loadAgentContextForNameMock).toHaveBeenCalledWith('reviewer', expect.any(Object))
-    expect(createAgentSessionMock).toHaveBeenCalled()
-    expect(events).toHaveLength(2)
-    expect(events[0]?.type).toBe('MessageDelta')
-    expect(events[1]).toEqual(completedEvent)
+    expect(runner.agentId).toBe('reviewer')
   })
 
-  it('emits TaskSessionAttached after creating the session', async () => {
-    const emitEvent = vi.fn()
-
-    createAgentSessionMock.mockReturnValue({
-      sessionId: 'session-1',
-      abort: vi.fn(),
-      async *queryWithGraph(_graph: unknown, _options: unknown) {
-        yield {
-          type: 'RunCompleted',
-          runId: 'run-1' as never,
-          sessionId: 'session-1' as never,
-          triggerType: 'new',
-          timestamp: 1,
-        }
-      },
-    })
-
-    const { InProcessAgentRunner } = await import('../in-process-runner.js')
+  it('connect throws explicit legacy-shell error', async () => {
     const runner = new InProcessAgentRunner({
       agentId: 'reviewer',
-      taskId: 'task-1',
-      emitEvent,
-      nativeAgentContext: createContext(),
-      defaultGraph: {} as never,
-      executorFactory: {} as never,
     })
 
-    await runner.connect()
-
-    expect(emitEvent).toHaveBeenCalledWith({
-      type: 'TaskSessionAttached',
-      taskId: 'task-1',
-      sessionId: 'session-1',
-      timestamp: expect.any(Number),
-    })
+    await expect(runner.connect()).rejects.toThrow(
+      'InProcessAgentRunner can no longer be used as a mainline entry; use unified entry'
+    )
   })
 
-  it('disconnect 后 query 产出 RunCancelled 然后结束', async () => {
-    let releaseNextEvent: (() => void) | null = null
-    const abort = vi.fn()
-
-    createAgentSessionMock.mockReturnValue({
-      sessionId: 'session-1',
-      abort,
-      async *queryWithGraph(_graph: unknown, _options: unknown) {
-        yield {
-          type: 'MessageDelta',
-          runId: 'run-1' as never,
-          messageId: 'msg-1' as never,
-          sequence: 0,
-          channel: 'text',
-          payload: { content: 'first' },
-          timestamp: 0,
-        }
-        await new Promise<void>((resolve) => {
-          releaseNextEvent = resolve
-        })
-        yield {
-          type: 'MessageDelta',
-          runId: 'run-1' as never,
-          messageId: 'msg-2' as never,
-          sequence: 1,
-          channel: 'text',
-          payload: { content: 'second' },
-          timestamp: 1,
-        }
-      },
-    })
-
-    const { InProcessAgentRunner } = await import('../in-process-runner.js')
+  it('query throws explicit legacy-shell error', async () => {
     const runner = new InProcessAgentRunner({
       agentId: 'reviewer',
-      nativeAgentContext: createContext(),
-      defaultGraph: {} as never,
-      executorFactory: {} as never,
     })
 
-    await runner.connect()
     const iterator = runner.query('hello')[Symbol.asyncIterator]()
-
-    // 先消费第一个事件（MessageDelta，包含 runId 用于后续 RunCancelled 构造）
-    const first = await iterator.next()
-    expect(first.value?.type).toBe('MessageDelta')
-
-    // 触发 disconnect，然后释放 pending promise
-    const pendingNext = iterator.next()
-    await runner.disconnect()
-    ;(releaseNextEvent as (() => void) | null)?.()
-
-    // disconnect 后应产出 RunCancelled
-    const cancelResult = await pendingNext
-    expect(cancelResult.done).toBe(false)
-    expect(cancelResult.value?.type).toBe('RunCancelled')
-
-    // 之后 iterator 结束
-    const doneResult = await iterator.next()
-    expect(doneResult.done).toBe(true)
-    expect(abort).toHaveBeenCalledTimes(1)
+    await expect(iterator.next()).rejects.toThrow(
+      'InProcessAgentRunner can no longer be used as a mainline entry; use unified entry'
+    )
   })
 
-  it('deduplicates repeated RunCompleted events', async () => {
-    createAgentSessionMock.mockReturnValue({
-      sessionId: 'session-1',
-      abort: vi.fn(),
-      async *queryWithGraph(_graph: unknown, _options: unknown) {
-        const completed: DomainEvent = {
-          type: 'RunCompleted',
-          runId: 'run-1' as never,
-          sessionId: 'session-1' as never,
-          triggerType: 'new',
-          timestamp: 1,
-        }
-        yield {
-          type: 'RunFailed',
-          runId: 'run-1' as never,
-          sessionId: 'session-1' as never,
-          triggerType: 'new',
-          error: {
-            code: 'runtime_error',
-            message: 'boom',
-          },
-          timestamp: 0,
-        }
-        yield completed
-        yield completed
-      },
-    })
-
-    const { InProcessAgentRunner } = await import('../in-process-runner.js')
+  it('disconnect remains a no-op for legacy shell', async () => {
     const runner = new InProcessAgentRunner({
       agentId: 'reviewer',
-      nativeAgentContext: createContext(),
-      defaultGraph: {} as never,
-      executorFactory: {} as never,
     })
 
-    await runner.connect()
-    const events = await collectEvents(runner.query('hello'))
-
-    expect(events.map((event) => event.type)).toEqual(['RunFailed', 'RunCompleted'])
+    await expect(runner.disconnect()).resolves.toBeUndefined()
   })
 })

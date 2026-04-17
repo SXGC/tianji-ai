@@ -12,9 +12,9 @@
 
 ## 当前公开内容
 
-- 运行时入口：`createSessionRuntime`
+- 运行时入口：`createSessionRuntime`、`createGraphRuntime`
 - 配置中心：`loadResolvedConfig`、`resolveConfigPaths`、`resolveWorkspaceConfig`、`createWorkspaceId`
-- 运行时接口与配置类型：`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`
+- 运行时接口与配置类型：`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`、`GraphRuntime`、`GraphRunRequest`、`GraphRunHandle`
 - observer 边界：`ObserverLogger`
 - 配置错误与元数据类型：`RuntimeConfigError`、`ResolvedConfig`、`ResolvedConfigPaths`、`WorkspaceConfigResolution`、`ConfigLayerSnapshot`
 - Metadata 读取：`readSessionRuntimeMetadata`、`readRunRuntimeMetadata`、`readDeepagentsRunWorkflowState`
@@ -44,6 +44,37 @@ const runtime = createSessionRuntime({
 
 void runtime
 ```
+
+## Unified Entry 与 Graph Runtime
+
+从这次重构开始，应用侧的合法主链入口应该是：
+
+1. 先在 `@tianji/agent` 层进入 unified entry
+2. 由 unified entry 解析默认图并装配 executor registry
+3. 再把请求交给 `@tianji/runtime` 的 graph runtime
+
+也就是说，`@tianji/runtime` 现在不仅负责单 session 的 run 生命周期，还对外暴露“整张图”的运行入口。
+
+```ts
+import { createGraphRuntime } from '@tianji/runtime'
+
+const graphRuntime = createGraphRuntime({
+  sessionRuntime,
+  graphRunner,
+})
+
+const handle = await graphRuntime.runGraph({
+  graph,
+  executors,
+  initialState: { input: 'hello' },
+})
+
+for await (const event of handle.events) {
+  void event
+}
+```
+
+旧的 session facade、ACP runner 一类对象不再应该被应用直接当作主链入口使用。
 
 ## 配置中心
 

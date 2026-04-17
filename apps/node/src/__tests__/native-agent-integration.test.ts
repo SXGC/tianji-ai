@@ -1,4 +1,4 @@
-import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
+import type { UnifiedRuntimeEntry } from '@tianji/agent'
 import {
   CausalContext,
   NoopSequenceRecoverer,
@@ -8,50 +8,37 @@ import {
 import {
   type DomainEvent,
   type DomainEventEnvelope,
+  type TaskRunCommand,
   createNodeId,
   createTaskId,
 } from '@tianji/shared'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { InProcessAgentRunner } from '../acp/in-process-runner.js'
 import { TaskExecutor } from '../task/task-executor.js'
 import {
-  SESSION_ID,
-  createCommand,
-  createFakeContext,
   messageDeltaEvent,
   runCompletedEvent,
   toolCompletedEvent,
   toolStartedEvent,
 } from './helpers/native-agent-test-utils.js'
 
-/**
- * Mock @tianji/agent module at the top level.
- * Provides controllable createAgentSession / loadAgentContextForName stubs
- * so real InProcessAgentRunner and TaskExecutor code runs against fake sessions.
- */
-vi.mock('@tianji/agent', () => ({
-  loadAgentContextForName: vi.fn(),
-  createAgentSession: vi.fn(),
-}))
-
-/** 最小化 stub，仅满足 InProcessAgentRunner 构造签名所需 */
-const stubDefaultGraph = {} as OrchestrationGraph
-const stubExecutorFactory = (() => {
-  throw new Error('not used in unit tests')
-}) as unknown as AgentExecutorFactory
-
-// --- setup ---
-
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-let agentMock: typeof import('@tianji/agent')
-
-beforeEach(async () => {
-  vi.clearAllMocks()
-  agentMock = await import('@tianji/agent')
-})
-
-// --- tests ---
+function createTaskRunCommand(
+  taskId: ReturnType<typeof createTaskId>,
+  goal: string
+): TaskRunCommand {
+  return {
+    commandId: `command-${taskId}` as never,
+    nodeId: createNodeId('node-test'),
+    type: 'task.run',
+    state: 'pending',
+    createdAt: Date.now(),
+    payload: {
+      taskId,
+      agentId: 'default',
+      goal,
+    },
+  }
+}
 
 function createEnvelopeCollector() {
   const publishedEnvelopes: DomainEventEnvelope[] = []
@@ -88,23 +75,29 @@ function assertNoSyntheticRunEnvelopes(publishedEnvelopes: DomainEventEnvelope[]
   }
 }
 
-describe('TaskExecutor + InProcessAgentRunner integration', () => {
-  it('emits TaskStarted/TaskCompleted and runner events on success', async () => {
-    const events: DomainEvent[] = [messageDeltaEvent(), runCompletedEvent()]
-    vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
-    vi.mocked(agentMock.createAgentSession).mockResolvedValue({
-      sessionId: SESSION_ID,
-      queryWithGraph: async function* () {
-        for (const e of events) yield e
-      },
-      abort: vi.fn(),
-      close: vi.fn(),
-    })
+function createUnifiedEntry(events: readonly DomainEvent[]): UnifiedRuntimeEntry {
+  return {
+    run: vi.fn(async () => ({
+      sessionId: 'session-test' as never,
+      runId: 'run-test' as never,
+      events: (async function* () {
+        for (const event of events) {
+          yield event
+        }
+      })(),
+    })),
+    resume: vi.fn(),
+    cancel: vi.fn(async () => undefined),
+    stream: vi.fn(),
+  }
+}
 
+describe('TaskExecutor + unified entry integration', () => {
+  it('emits TaskStarted/TaskCompleted and runtime events on success', async () => {
+    const events: DomainEvent[] = [messageDeltaEvent(), runCompletedEvent()]
     const stateChanges: string[] = []
     const emittedEvents: DomainEvent[] = []
     const { publishedEnvelopes, emitEvent } = createEnvelopeCollector()
-    const baseContext = createFakeContext()
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
@@ -114,25 +107,15 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
         emittedEvents.push(ev)
         await emitEvent(ev)
       },
-      createRunner: async (cmd) => {
-        return new InProcessAgentRunner({
-          agentId: cmd.payload.agentId,
-          nativeAgentContext: baseContext,
-          defaultGraph: stubDefaultGraph,
-          executorFactory: stubExecutorFactory,
-        })
-      },
+      createUnifiedEntry: async () => createUnifiedEntry(events),
     })
 
     expect(executor.executionState).toBe('idle')
 
     const taskId = createTaskId('task-001')
-    await executor.execute(createCommand(taskId, 'do something'))
+    await executor.execute(createTaskRunCommand(taskId, 'do something'))
 
-    // State transitions: busy -> idle
     expect(stateChanges).toEqual(['busy', 'idle'])
-
-    // Executor returns to idle with null currentTaskId
     expect(executor.executionState).toBe('idle')
     expect(executor.currentTaskId).toBeNull()
 
@@ -147,37 +130,18 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
 
   it('publishes tool events as agent events', async () => {
     const events: DomainEvent[] = [toolStartedEvent(), toolCompletedEvent(), runCompletedEvent()]
-    vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
-    vi.mocked(agentMock.createAgentSession).mockResolvedValue({
-      sessionId: SESSION_ID,
-      queryWithGraph: async function* () {
-        for (const e of events) yield e
-      },
-      abort: vi.fn(),
-      close: vi.fn(),
-    })
-
     const emittedEvents: DomainEvent[] = []
-    const baseContext = createFakeContext()
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: () => undefined,
       enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (event) => emittedEvents.push(event),
-      createRunner: async (cmd) => {
-        return new InProcessAgentRunner({
-          agentId: cmd.payload.agentId,
-          nativeAgentContext: baseContext,
-          defaultGraph: stubDefaultGraph,
-          executorFactory: stubExecutorFactory,
-        })
-      },
+      createUnifiedEntry: async () => createUnifiedEntry(events),
     })
 
-    await executor.execute(createCommand(createTaskId('task-002'), 'use tools'))
+    await executor.execute(createTaskRunCommand(createTaskId('task-002'), 'use tools'))
 
-    // ToolStarted + ToolCompleted + RunCompleted
     expect(emittedEvents.map((e) => e.type)).toEqual([
       'TaskStarted',
       'ToolStarted',
@@ -187,43 +151,103 @@ describe('TaskExecutor + InProcessAgentRunner integration', () => {
     ])
   })
 
-  it('deduplicates repeated RunCompleted events through the full pipeline', async () => {
+  it('preserves repeated RunCompleted events from unified entry stream', async () => {
     const events: DomainEvent[] = [runCompletedEvent(), runCompletedEvent(), runCompletedEvent()]
-    vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
-    vi.mocked(agentMock.createAgentSession).mockResolvedValue({
-      sessionId: SESSION_ID,
-      queryWithGraph: async function* () {
-        for (const e of events) yield e
-      },
-      abort: vi.fn(),
-      close: vi.fn(),
-    })
-
     const emittedEvents: DomainEvent[] = []
-    const baseContext = createFakeContext()
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: () => undefined,
       enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (event) => emittedEvents.push(event),
-      createRunner: async (cmd) => {
-        return new InProcessAgentRunner({
-          agentId: cmd.payload.agentId,
-          nativeAgentContext: baseContext,
-          defaultGraph: stubDefaultGraph,
-          executorFactory: stubExecutorFactory,
-        })
-      },
+      createUnifiedEntry: async () => createUnifiedEntry(events),
     })
 
-    await executor.execute(createCommand(createTaskId('task-003'), 'duplicate test'))
+    await executor.execute(createTaskRunCommand(createTaskId('task-003'), 'duplicate test'))
 
-    // InProcessAgentRunner 对 RunCompleted 去重：只 yield 第一个
     expect(emittedEvents.map((event) => event.type)).toEqual([
       'TaskStarted',
       'RunCompleted',
+      'RunCompleted',
+      'RunCompleted',
       'TaskCompleted',
     ])
+  })
+
+  it('maps cancel-triggered GraphRunCancelled from unified entry to TaskCancelled', async () => {
+    const stateChanges: string[] = []
+    const emittedEvents: DomainEvent[] = []
+
+    const createUnifiedEntryWithCancelableGraph = (): UnifiedRuntimeEntry => {
+      let cancelled = false
+      let resolveWaiter: (() => void) | undefined
+
+      return {
+        run: vi.fn(async () => ({
+          sessionId: 'session-test' as never,
+          runId: 'run-test' as never,
+          events: (async function* () {
+            const startedEvent: DomainEvent = {
+              type: 'GraphRunStarted',
+              runId: 'run-test' as never,
+              graphId: 'default',
+              graphVersion: 1,
+              timestamp: Date.now(),
+            }
+            yield startedEvent
+
+            if (!cancelled) {
+              await new Promise<void>((resolve) => {
+                resolveWaiter = resolve
+              })
+            }
+
+            const cancelledEvent: DomainEvent = {
+              type: 'GraphRunCancelled',
+              runId: 'run-test' as never,
+              graphId: 'default',
+              graphVersion: 1,
+              reason: 'abort',
+              timestamp: Date.now(),
+            }
+            yield cancelledEvent
+          })(),
+        })),
+        resume: vi.fn(),
+        cancel: vi.fn(async () => {
+          cancelled = true
+          resolveWaiter?.()
+        }),
+        stream: vi.fn(),
+      }
+    }
+
+    const executor = new TaskExecutor({
+      nodeId: createNodeId('node-test'),
+      onExecutionStateChange: (state) => stateChanges.push(state),
+      enterCorrelation: async (_correlationId, fn) => fn(),
+      emitEvent: (event) => emittedEvents.push(event),
+      createUnifiedEntry: async () => createUnifiedEntryWithCancelableGraph(),
+    })
+
+    const executionPromise = executor.execute(
+      createTaskRunCommand(createTaskId('task-cancel-graph'), 'cancel graph run')
+    )
+
+    while (!emittedEvents.some((event) => event.type === 'GraphRunStarted')) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    executor.cancel()
+
+    await executionPromise
+
+    expect(emittedEvents.map((event) => event.type)).toEqual([
+      'TaskStarted',
+      'GraphRunStarted',
+      'GraphRunCancelled',
+      'TaskCancelled',
+    ])
+    expect(stateChanges).toEqual(['busy', 'idle'])
   })
 })

@@ -1,3 +1,4 @@
+import type { UnifiedRuntimeEntry } from '@tianji/agent'
 import {
   CausalContext,
   NoopSequenceRecoverer,
@@ -16,7 +17,6 @@ import {
 } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
-import type { IAgentRunner } from '../../acp/index.js'
 import { createCliLogger } from '../../logger.js'
 import type { TaskExecutorConfig } from '../task-executor.js'
 
@@ -35,27 +35,37 @@ function createCommand(taskId: ReturnType<typeof createTaskId>, goal: string): C
   }
 }
 
-function createRunnerStub(): IAgentRunner {
-  return {
-    agentId: 'default',
-    connect: async () => undefined,
-    disconnect: async () => undefined,
-    async *query() {
-      yield {
-        type: 'RunStarted',
-        runId: 'run-test' as never,
-        sessionId: 'session-test' as never,
-        triggerType: 'new',
-        timestamp: Date.now(),
-      }
-      yield {
-        type: 'RunCompleted',
-        runId: 'run-test' as never,
-        sessionId: 'session-test' as never,
-        triggerType: 'new',
-        timestamp: Date.now(),
-      }
+function createUnifiedEntryStub(
+  events: readonly DomainEvent[] = [
+    {
+      type: 'RunStarted',
+      runId: 'run-test' as never,
+      sessionId: 'session-test' as never,
+      triggerType: 'new',
+      timestamp: Date.now(),
     },
+    {
+      type: 'RunCompleted',
+      runId: 'run-test' as never,
+      sessionId: 'session-test' as never,
+      triggerType: 'new',
+      timestamp: Date.now(),
+    },
+  ]
+): UnifiedRuntimeEntry {
+  return {
+    run: async () => ({
+      sessionId: 'session-test' as never,
+      runId: 'run-test' as never,
+      events: (async function* () {
+        for (const event of events) {
+          yield event
+        }
+      })(),
+    }),
+    resume: vi.fn(),
+    cancel: vi.fn(async () => undefined),
+    stream: vi.fn(),
   }
 }
 
@@ -66,7 +76,7 @@ function makeConfig(overrides: Partial<TaskExecutorConfig> = {}): TaskExecutorCo
     onExecutionStateChange: () => undefined,
     emitEvent: vi.fn(),
     enterCorrelation: async (_correlationId, fn) => fn(),
-    createRunner: async () => {
+    createUnifiedEntry: async () => {
       throw new Error('not implemented')
     },
     ...overrides,
@@ -136,7 +146,7 @@ describe('TaskExecutorConfig', () => {
     const taskId = createTaskId('task-001')
 
     const executor = new module.TaskExecutor(
-      makeConfig({ createRunner: async () => createRunnerStub() })
+      makeConfig({ createUnifiedEntry: async () => createUnifiedEntryStub() })
     )
 
     const first = executor.execute(createCommand(taskId, 'first'))
@@ -164,7 +174,7 @@ describe('TaskExecutorConfig', () => {
     })
 
     const executor = new module.TaskExecutor(
-      makeConfig({ logger, createRunner: async () => createRunnerStub() })
+      makeConfig({ logger, createUnifiedEntry: async () => createUnifiedEntryStub() })
     )
 
     await executor.execute(createCommand(createTaskId('task-001'), 'first'))
@@ -189,7 +199,7 @@ describe('TaskExecutorConfig', () => {
     const emitEvent = vi.fn()
 
     const executor = new module.TaskExecutor(
-      makeConfig({ emitEvent, createRunner: async () => createRunnerStub() })
+      makeConfig({ emitEvent, createUnifiedEntry: async () => createUnifiedEntryStub() })
     )
 
     await executor.execute(createCommand(createTaskId('task-001'), 'success'))
@@ -198,6 +208,121 @@ describe('TaskExecutorConfig', () => {
     expect(emittedTypes).toContain('TaskStarted')
     expect(emittedTypes).toContain('TaskCompleted')
     expect(emittedTypes).not.toContain('TaskFailed')
+  })
+
+  it('maps GraphRunCancelled to TaskCancelled instead of TaskFailed', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
+              type: 'RunStarted',
+              runId: 'run-test' as never,
+              sessionId: 'session-test' as never,
+              triggerType: 'new',
+              timestamp: Date.now(),
+            },
+            {
+              type: 'GraphRunCancelled',
+              runId: 'run-test' as never,
+              graphId: 'default',
+              graphVersion: 1,
+              reason: 'abort',
+              timestamp: Date.now(),
+            },
+          ]),
+      })
+    )
+
+    await executor.execute(createCommand(createTaskId('task-cancelled'), 'cancelled'))
+
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('GraphRunCancelled')
+    expect(emittedTypes).toContain('TaskCancelled')
+    expect(emittedTypes).not.toContain('TaskFailed')
+  })
+
+  it('maps GraphRunCompleted to TaskCompleted for unified graph runs', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
+              type: 'GraphRunStarted',
+              runId: 'run-graph-completed' as never,
+              graphId: 'default',
+              graphVersion: 1,
+              timestamp: Date.now(),
+            },
+            {
+              type: 'GraphRunCompleted',
+              runId: 'run-graph-completed' as never,
+              graphId: 'default',
+              graphVersion: 1,
+              finalState: { result: 'done' },
+              timestamp: Date.now(),
+            },
+          ]),
+      })
+    )
+
+    await executor.execute(createCommand(createTaskId('task-graph-completed'), 'completed'))
+
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('GraphRunCompleted')
+    expect(emittedTypes).toContain('TaskCompleted')
+    expect(emittedTypes).not.toContain('TaskFailed')
+  })
+
+  it('maps GraphRunFailed to TaskFailed for unified graph runs', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const graphFailedError = new ProviderError('GRAPH_FAILED', 'graph failed')
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
+              type: 'GraphRunStarted',
+              runId: 'run-graph-failed' as never,
+              graphId: 'default',
+              graphVersion: 1,
+              timestamp: Date.now(),
+            },
+            {
+              type: 'GraphRunFailed',
+              runId: 'run-graph-failed' as never,
+              graphId: 'default',
+              graphVersion: 1,
+              error: graphFailedError,
+              timestamp: Date.now(),
+            },
+          ]),
+      })
+    )
+
+    await executor.execute(createCommand(createTaskId('task-graph-failed'), 'failed'))
+
+    const emittedEvents = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e)
+    const emittedTypes = emittedEvents.map((event) => event.type)
+    expect(emittedTypes).toContain('GraphRunFailed')
+    expect(emittedTypes).toContain('TaskFailed')
+    expect(emittedTypes).not.toContain('TaskCompleted')
+
+    const failedEvent = emittedEvents.find((event) => event.type === 'TaskFailed') as
+      | Extract<DomainEvent, { type: 'TaskFailed' }>
+      | undefined
+    expect(failedEvent?.error).toBe(graphFailedError)
   })
 
   it('wraps task execution in a task correlation context', async () => {
@@ -211,7 +336,7 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         enterCorrelation,
-        createRunner: async () => createRunnerStub(),
+        createUnifiedEntry: async () => createUnifiedEntryStub(),
       })
     )
 
@@ -226,31 +351,35 @@ describe('TaskExecutorConfig', () => {
   it('emits TaskStarted then TaskFailed when runner query throws', async () => {
     const module = await import('../task-executor.js')
     const emitEvent = vi.fn()
-    const failure = new Error('runner exploded')
+    const failure = new Error('entry exploded')
 
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
-              type: 'RunStarted',
-              runId: 'run-test' as never,
-              sessionId: 'session-test' as never,
-              triggerType: 'new',
-              timestamp: Date.now(),
-            }
-            throw failure
-          },
+        createUnifiedEntry: async () => ({
+          run: async () => ({
+            sessionId: 'session-test' as never,
+            runId: 'run-test' as never,
+            events: (async function* () {
+              yield {
+                type: 'RunStarted',
+                runId: 'run-test' as never,
+                sessionId: 'session-test' as never,
+                triggerType: 'new',
+                timestamp: Date.now(),
+              }
+              throw failure
+            })(),
+          }),
+          resume: vi.fn(),
+          cancel: vi.fn(async () => undefined),
+          stream: vi.fn(),
         }),
       })
     )
 
     await expect(executor.execute(createCommand(createTaskId('task-001'), 'boom'))).rejects.toThrow(
-      'runner exploded'
+      'entry exploded'
     )
 
     const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
@@ -262,7 +391,7 @@ describe('TaskExecutorConfig', () => {
       (call) => (call[0] as DomainEvent).type === 'TaskFailed'
     )?.[0] as Extract<DomainEvent, { type: 'TaskFailed' }> | undefined
     expect(failedEvent?.error).toBeInstanceOf(TianjiError)
-    expect(failedEvent?.error.message).toBe('runner exploded')
+    expect(failedEvent?.error.message).toBe('entry exploded')
     expect(failedEvent?.error.code).toBe('Error')
   })
 
@@ -273,19 +402,23 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
-              type: 'RunStarted',
-              runId: 'run-test' as never,
-              sessionId: 'session-test' as never,
-              triggerType: 'new',
-              timestamp: Date.now(),
-            }
-          },
+        createUnifiedEntry: async () => ({
+          run: async () => ({
+            sessionId: 'session-test' as never,
+            runId: 'run-test' as never,
+            events: (async function* () {
+              yield {
+                type: 'RunStarted',
+                runId: 'run-test' as never,
+                sessionId: 'session-test' as never,
+                triggerType: 'new',
+                timestamp: Date.now(),
+              }
+            })(),
+          }),
+          resume: vi.fn(),
+          cancel: vi.fn(async () => undefined),
+          stream: vi.fn(),
         }),
       })
     )
@@ -311,7 +444,7 @@ describe('TaskExecutorConfig', () => {
           emitEvent(event)
           await emitEnvelopeEvent(event)
         },
-        createRunner: async () => createRunnerStub(),
+        createUnifiedEntry: async () => createUnifiedEntryStub(),
       })
     )
 
@@ -346,19 +479,16 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         logger,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'MessageCompleted',
               runId,
               messageId: 'msg-1',
@@ -369,32 +499,31 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'ToolCompleted',
               runId,
               toolCallId: 'tc-1',
               invocation: { toolCallId: 'tc-1', toolName: 'read_file', args: { path: '/a.ts' } },
               result: { toolCallId: 'tc-1', result: 'file content' },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'ToolFailed',
               runId,
               toolCallId: 'tc-2',
               invocation: { toolCallId: 'tc-2', toolName: 'write_file', args: { path: '/b.ts' } },
               error: new ToolError('WRITE_DENIED', 'permission denied'),
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -425,13 +554,9 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         logger,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            // 先发 message.completed，此时 turn 为 null，应被忽略
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'MessageCompleted',
               runId,
               messageId: 'msg-orphan',
@@ -442,23 +567,22 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -478,19 +602,16 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-mirror' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'MessageStarted',
               runId,
               messageId: 'msg-mirror-1',
@@ -501,16 +622,15 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-mirror' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -541,19 +661,16 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-mirror-2' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'MessageDelta',
               runId,
               messageId: 'msg-d-1',
@@ -561,16 +678,15 @@ describe('TaskExecutorConfig', () => {
               channel: 'thinking',
               payload: { content: 'pondering…' },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-mirror-2' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -604,34 +720,30 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-mirror-3' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'MessageCompleted',
               runId,
               messageId: 'msg-final',
               message: finalMessage,
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-mirror-3' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -661,20 +773,16 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-mirror-skip' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            // user 消息不应镜像
-            yield {
+            },
+            {
               type: 'MessageStarted',
               runId,
               messageId: 'msg-user-1',
@@ -685,8 +793,8 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'MessageCompleted',
               runId,
               messageId: 'msg-user-1',
@@ -697,9 +805,8 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            }
-            // tool 消息也不应镜像
-            yield {
+            },
+            {
               type: 'MessageStarted',
               runId,
               messageId: 'msg-tool-1',
@@ -710,16 +817,15 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-mirror-skip' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -748,27 +854,23 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-dispatch' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-dispatch' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -789,28 +891,24 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-dispatch-failed' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunFailed',
               runId,
               sessionId: 'session-dispatch-failed' as never,
               triggerType: 'new',
               error: runFailedError,
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -842,28 +940,24 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-dispatch-cancelled' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCancelled',
               runId,
               sessionId: 'session-dispatch-cancelled' as never,
               triggerType: 'new',
               reason: 'abort',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -894,20 +988,24 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
-              type: 'RunStarted',
-              runId,
-              sessionId: 'session-passthrough' as never,
-              triggerType: 'new',
-              timestamp: now,
-            }
-            throw boom
-          },
+        createUnifiedEntry: async () => ({
+          run: async () => ({
+            sessionId: 'session-passthrough' as never,
+            runId,
+            events: (async function* () {
+              yield {
+                type: 'RunStarted',
+                runId,
+                sessionId: 'session-passthrough' as never,
+                triggerType: 'new',
+                timestamp: now,
+              }
+              throw boom
+            })(),
+          }),
+          resume: vi.fn(),
+          cancel: vi.fn(async () => undefined),
+          stream: vi.fn(),
         }),
       })
     )
@@ -926,6 +1024,46 @@ describe('TaskExecutorConfig', () => {
     expect(failedEvent?.error.category).toBe('provider')
   })
 
+  it('for-await 直接抛 AbortError 时发 TaskCancelled 而非 TaskFailed', async () => {
+    const module = await import('../task-executor.js')
+    const emitEvent = vi.fn()
+    const runId = 'run-abort-error' as never
+    const now = Date.now()
+    const abortError = new Error('cancelled')
+    abortError.name = 'AbortError'
+
+    const executor = new module.TaskExecutor(
+      makeConfig({
+        emitEvent,
+        createUnifiedEntry: async () => ({
+          run: async () => ({
+            sessionId: 'session-abort' as never,
+            runId,
+            events: (async function* () {
+              yield {
+                type: 'GraphRunStarted',
+                runId,
+                graphId: 'default',
+                graphVersion: 1,
+                timestamp: now,
+              }
+              throw abortError
+            })(),
+          }),
+          resume: vi.fn(),
+          cancel: vi.fn(async () => undefined),
+          stream: vi.fn(),
+        }),
+      })
+    )
+
+    await executor.execute(createCommand(createTaskId('task-abort-error'), 'abort'))
+
+    const emittedTypes = (emitEvent.mock.calls as Array<[DomainEvent]>).map(([e]) => e.type)
+    expect(emittedTypes).toContain('TaskCancelled')
+    expect(emittedTypes).not.toContain('TaskFailed')
+  })
+
   it('一个 task 产出多条 assistant 消息时，各自保持独立的 TaskMessage* 链', async () => {
     const module = await import('../task-executor.js')
     const emitEvent = vi.fn()
@@ -936,27 +1074,23 @@ describe('TaskExecutorConfig', () => {
     const executor = new module.TaskExecutor(
       makeConfig({
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-mirror-multi' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            // 第一条消息
-            yield {
+            },
+            {
               type: 'MessageStarted',
               runId,
               messageId: 'msg-a',
               message: { id: 'msg-a', role: 'assistant', content: [], createdAt: now },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'MessageDelta',
               runId,
               messageId: 'msg-a',
@@ -964,8 +1098,8 @@ describe('TaskExecutorConfig', () => {
               channel: 'text',
               payload: { content: 'first ' },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'MessageCompleted',
               runId,
               messageId: 'msg-a',
@@ -976,16 +1110,15 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            }
-            // 第二条消息（不同 messageId）
-            yield {
+            },
+            {
               type: 'MessageStarted',
               runId,
               messageId: 'msg-b',
               message: { id: 'msg-b', role: 'assistant', content: [], createdAt: now },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'MessageDelta',
               runId,
               messageId: 'msg-b',
@@ -993,8 +1126,8 @@ describe('TaskExecutorConfig', () => {
               channel: 'text',
               payload: { content: 'second ' },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'MessageCompleted',
               runId,
               messageId: 'msg-b',
@@ -1005,16 +1138,15 @@ describe('TaskExecutorConfig', () => {
                 createdAt: now,
               },
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCompleted',
               runId,
               sessionId: 'session-mirror-multi' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -1066,28 +1198,24 @@ describe('TaskExecutorConfig', () => {
       makeConfig({
         logger,
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunFailed',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               error: new TianjiError('internal', 'FAIL', 'failed'),
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -1127,28 +1255,24 @@ describe('TaskExecutorConfig', () => {
       makeConfig({
         logger,
         emitEvent,
-        createRunner: async () => ({
-          agentId: 'default',
-          connect: async () => undefined,
-          disconnect: async () => undefined,
-          async *query() {
-            yield {
+        createUnifiedEntry: async () =>
+          createUnifiedEntryStub([
+            {
               type: 'RunStarted',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               timestamp: now,
-            }
-            yield {
+            },
+            {
               type: 'RunCancelled',
               runId,
               sessionId: 'session-test' as never,
               triggerType: 'new',
               reason: 'abort',
               timestamp: now,
-            }
-          },
-        }),
+            },
+          ]),
       })
     )
 
@@ -1179,51 +1303,58 @@ describe('TaskExecutor.cancel', () => {
    * - query 返回一个挂起的 async generator，直到 disconnect 被调用才通过 abortController 信号退出
    * - disconnect 会触发 abort 信号并被 vi.spyOn 监视
    */
-  function createHangingRunner(): {
-    runner: IAgentRunner
-    disconnectSpy: ReturnType<typeof vi.fn>
-    triggerDisconnect: () => void
+  function createHangingEntry(): {
+    entry: UnifiedRuntimeEntry
+    cancelSpy: ReturnType<typeof vi.fn>
   } {
-    let resolveDisconnect!: () => void
-    const disconnectPromise = new Promise<void>((resolve) => {
-      resolveDisconnect = resolve
+    let releaseCancel!: () => void
+    const cancelPromise = new Promise<void>((resolve) => {
+      releaseCancel = resolve
     })
 
-    const disconnectSpy = vi.fn(async () => {
-      resolveDisconnect()
+    const cancelSpy = vi.fn(async () => {
+      releaseCancel()
     })
 
-    const runner: IAgentRunner = {
-      agentId: 'default',
-      connect: async () => undefined,
-      disconnect: disconnectSpy,
-      async *query() {
-        yield {
-          type: 'RunStarted' as const,
-          runId: 'run-cancel-test' as never,
-          sessionId: 'session-cancel' as never,
-          triggerType: 'new' as const,
-          timestamp: Date.now(),
-        }
-
-        // 挂起，直到 disconnect 被调用
-        await disconnectPromise
-        // disconnect 触发后抛出错误，让 for-await 循环退出
-        throw new Error('runner disconnected by cancel')
-      },
+    const entry: UnifiedRuntimeEntry = {
+      run: async () => ({
+        sessionId: 'session-cancel' as never,
+        runId: 'run-cancel-test' as never,
+        events: (async function* () {
+          yield {
+            type: 'RunStarted' as const,
+            runId: 'run-cancel-test' as never,
+            sessionId: 'session-cancel' as never,
+            triggerType: 'new' as const,
+            timestamp: Date.now(),
+          }
+          await cancelPromise
+          yield {
+            type: 'RunCancelled' as const,
+            runId: 'run-cancel-test' as never,
+            sessionId: 'session-cancel' as never,
+            triggerType: 'new' as const,
+            reason: 'abort',
+            timestamp: Date.now(),
+          }
+        })(),
+      }),
+      resume: vi.fn(),
+      cancel: cancelSpy,
+      stream: vi.fn(),
     }
 
-    return { runner, disconnectSpy, triggerDisconnect: resolveDisconnect }
+    return { entry, cancelSpy }
   }
 
-  it('在 busy 状态下 cancel 触发 runner.disconnect', async () => {
+  it('在 busy 状态下 cancel 触发 unified entry cancel', async () => {
     const { TaskExecutor } = await import('../task-executor.js')
     const taskId = createTaskId('task-cancel-busy')
-    const { runner, disconnectSpy } = createHangingRunner()
+    const { entry, cancelSpy } = createHangingEntry()
 
     const executor = new TaskExecutor(
       makeConfig({
-        createRunner: async () => runner,
+        createUnifiedEntry: async () => entry,
       })
     )
 
@@ -1237,14 +1368,16 @@ describe('TaskExecutor.cancel', () => {
     // 此时 executor 应处于 busy 状态
     expect(executor.executionState).toBe('busy')
 
-    // 调用 cancel，应触发 runner.disconnect
+    // 调用 cancel，应触发 entry.cancel
     executor.cancel()
 
-    // 断言 disconnect 被调用一次
-    expect(disconnectSpy).toHaveBeenCalledTimes(1)
+    expect(cancelSpy).toHaveBeenCalledTimes(1)
+    expect(cancelSpy).toHaveBeenCalledWith({
+      source: 'controlplane',
+      runId: 'run-cancel-test',
+    })
 
-    // 清理：等待 execute 完成（因错误 reject，忽略）
-    await running.catch(() => undefined)
+    await running
   })
 
   it('在 idle 状态下调 cancel 抛错（Let it crash）', async () => {
@@ -1259,11 +1392,11 @@ describe('TaskExecutor.cancel', () => {
     const { TaskExecutor } = await import('../task-executor.js')
     const taskId = createTaskId('task-cancel-idempotent')
 
-    const { runner, disconnectSpy } = createHangingRunner()
+    const { entry, cancelSpy } = createHangingEntry()
 
     const executor = new TaskExecutor(
       makeConfig({
-        createRunner: async () => runner,
+        createUnifiedEntry: async () => entry,
       })
     )
 
@@ -1280,10 +1413,8 @@ describe('TaskExecutor.cancel', () => {
     executor.cancel()
     executor.cancel()
 
-    // disconnect 只应被调用一次
-    expect(disconnectSpy).toHaveBeenCalledTimes(1)
+    expect(cancelSpy).toHaveBeenCalledTimes(1)
 
-    // 清理
-    await running.catch(() => undefined)
+    await running
   })
 })

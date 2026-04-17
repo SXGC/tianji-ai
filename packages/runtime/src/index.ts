@@ -36,13 +36,19 @@ export {
 export { resolveAgentModel } from './model-resolver.js'
 export * from './bus/index.js'
 export {
+  createGraphRuntime,
   createSessionRuntime,
+  type CancelGraphRunRequest,
   type CreateSessionOptions,
   type DeepagentsInterruptRecord,
   type ObserverLogger,
   type DeepagentsRunWorkflowState,
+  type GraphRunHandle,
+  type GraphRunRequest,
+  type GraphRuntime,
   type RunRuntimeMetadata,
   type ResumeRunOptions,
+  type ResumeGraphRunRequest,
   type RuntimeProviderConfig,
   type RunTurnOptions,
   type SessionRuntimeDeepagentsConfig,
@@ -50,6 +56,7 @@ export {
   type SessionRuntimeMetadata,
   type SessionRuntime,
   type SessionRuntimeOptions,
+  type StreamGraphRunRequest,
   readDeepagentsRunWorkflowState,
   readRunRuntimeMetadata,
   readSessionRuntimeMetadata,

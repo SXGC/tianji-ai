@@ -1,7 +1,6 @@
-import type { AgentSession, LoadedAgentContext } from '@tianji/agent'
+import type { AgentSession, LoadedAgentContext, UnifiedRuntimeEntry } from '@tianji/agent'
 import type { TianjiConfig } from '@tianji/shared'
 
-import type { AgentRunner } from '../acp/index.js'
 import type { UserConfigPaths } from '../config.js'
 import type { I18n, MessageKey } from '../i18n/index.js'
 import type { FollowCliLogOptions } from '../log-follow.js'
@@ -16,7 +15,7 @@ import type {
 export interface CliDependencies {
   readonly loadContext?: () => Promise<LoadedAgentContext>
   readonly createSession?: (context: LoadedAgentContext) => AgentSession
-  readonly createAgentRunner?: (context: LoadedAgentContext) => AgentRunner
+  readonly createUnifiedEntry?: (context: LoadedAgentContext) => Promise<UnifiedRuntimeEntry>
   readonly getUserConfigPaths?: () => UserConfigPaths
   readonly followCliLog?: (
     logFilePath: string,

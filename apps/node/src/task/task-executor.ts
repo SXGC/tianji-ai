@@ -4,9 +4,9 @@
  * @module task/task-executor
  */
 
-import type { IAgentRunner } from '../acp/index.js'
 import type { RuntimeLogger } from '../logger.js'
 
+import type { UnifiedRunHandle, UnifiedRuntimeEntry } from '@tianji/agent'
 import type { ObserverLogScope } from '@tianji/observer'
 import type {
   DomainEvent,
@@ -26,6 +26,10 @@ import type {
 
 import { toPassThroughTianjiError } from './error-passthrough.js'
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 interface TurnSummary {
   runId: string
   eventCount: number
@@ -36,7 +40,7 @@ interface TurnSummary {
 export interface TaskExecutorConfig {
   readonly nodeId: NodeId
   readonly onExecutionStateChange: (state: NodeExecutionState) => void
-  readonly createRunner: (command: TaskRunCommand) => Promise<IAgentRunner>
+  readonly createUnifiedEntry: (command: TaskRunCommand) => Promise<UnifiedRuntimeEntry>
   /** 在任务级入口建立独立因果链上下文。 */
   readonly enterCorrelation: <T>(correlationId: string, fn: () => Promise<T>) => Promise<T>
   /**
@@ -52,11 +56,11 @@ export class TaskExecutor {
   readonly #scope = ['daemon', 'task'] as const
   #executionState: NodeExecutionState = 'idle'
   #currentTaskId: string | null = null
-  /** 当前正在运行的 runner 实例，idle 时为 null。 */
-  #currentRunner: IAgentRunner | null = null
+  /** 当前正在运行的 unified entry 句柄，idle 时为 null。 */
+  #currentHandle: UnifiedRunHandle | null = null
+  #currentEntry: UnifiedRuntimeEntry | null = null
   /**
-   * cancel 幂等标志：首次 cancel 后置 true，防止重复触发 disconnect。
-   * finally 块读取此标志决定是否需要执行 disconnect。
+   * cancel 幂等标志：首次 cancel 后置 true，防止重复触发统一入口取消。
    */
   #cancelled = false
 
@@ -73,7 +77,7 @@ export class TaskExecutor {
   }
 
   /**
-   * 向当前正在运行的 runner 发送取消信号。
+   * 向当前正在运行的 unified entry 发送取消信号。
    *
    * @throws 若 executor 处于 idle 状态（调用方状态机出错，Let it crash）
    * @remarks
@@ -88,7 +92,11 @@ export class TaskExecutor {
       return
     }
     this.#cancelled = true
-    void this.#currentRunner?.disconnect()
+    const runId = this.#currentHandle?.runId
+    if (runId === undefined || this.#currentEntry === null) {
+      throw new Error('Cannot cancel: active unified entry handle is missing runId')
+    }
+    void this.#currentEntry.cancel({ source: 'controlplane', runId })
   }
 
   async execute(command: TaskRunCommand): Promise<void> {
@@ -112,8 +120,8 @@ export class TaskExecutor {
         command,
       })
 
-      this.#currentRunner = await this.#config.createRunner(command)
-      await this.#config.logger?.logDebug(this.#scope, 'Created task runner', {
+      this.#currentEntry = await this.#config.createUnifiedEntry(command)
+      await this.#config.logger?.logDebug(this.#scope, 'Created unified task entry', {
         taskId,
         agentId: command.payload.agentId,
       })
@@ -126,20 +134,36 @@ export class TaskExecutor {
         })
         this.#config.emitEvent({ type: 'TaskStarted', taskId, timestamp: now() })
 
-        await this.#currentRunner.connect()
-        await this.#config.logger?.logDebug(this.#scope, 'Connected task runner', {
+        this.#currentHandle = await this.#currentEntry.run({
+          source: 'controlplane',
+          agentId: command.payload.agentId,
+          input: command.payload.goal,
+          sessionId: command.payload.sessionIds?.[0],
+        })
+        await this.#config.logger?.logDebug(this.#scope, 'Started unified task run', {
           taskId,
+          runId: this.#currentHandle.runId,
         })
 
         let turn: TurnSummary | null = null
-        let lastRunTerminal: RunFailedEvent | RunCancelledEvent | RunCompletedEvent | null = null
+        let lastRunTerminal:
+          | RunFailedEvent
+          | RunCancelledEvent
+          | RunCompletedEvent
+          | Extract<DomainEvent, { type: 'GraphRunCompleted' }>
+          | Extract<DomainEvent, { type: 'GraphRunFailed' }>
+          | Extract<DomainEvent, { type: 'GraphRunCancelled' }>
+          | null = null
 
-        for await (const event of this.#currentRunner.query(command.payload.goal)) {
+        for await (const event of this.#currentHandle.events) {
           turn = await handleEvent(this.#config.logger, this.#scope, taskId, turn, event)
           if (
             event.type === 'RunCompleted' ||
             event.type === 'RunFailed' ||
-            event.type === 'RunCancelled'
+            event.type === 'RunCancelled' ||
+            event.type === 'GraphRunCompleted' ||
+            event.type === 'GraphRunFailed' ||
+            event.type === 'GraphRunCancelled'
           ) {
             lastRunTerminal = event
           }
@@ -157,7 +181,8 @@ export class TaskExecutor {
         }
 
         switch (lastRunTerminal.type) {
-          case 'RunCompleted': {
+          case 'RunCompleted':
+          case 'GraphRunCompleted': {
             await this.#config.logger?.logDebug(
               this.#scope,
               'Emitting TaskCompleted lifecycle event',
@@ -171,7 +196,8 @@ export class TaskExecutor {
             )
             break
           }
-          case 'RunFailed': {
+          case 'RunFailed':
+          case 'GraphRunFailed': {
             await this.#config.logger?.logDebug(
               this.#scope,
               'Emitting TaskFailed lifecycle event from RunFailed',
@@ -185,10 +211,11 @@ export class TaskExecutor {
             })
             break
           }
-          case 'RunCancelled': {
+          case 'RunCancelled':
+          case 'GraphRunCancelled': {
             await this.#config.logger?.logDebug(
               this.#scope,
-              'Emitting TaskCancelled lifecycle event from RunCancelled',
+              'Emitting TaskCancelled lifecycle event from cancelled run terminal',
               { taskId }
             )
             this.#config.emitEvent({ type: 'TaskCancelled', taskId, timestamp: now() })
@@ -196,6 +223,16 @@ export class TaskExecutor {
           }
         }
       } catch (error) {
+        if (isAbortError(error)) {
+          await this.#config.logger?.logDebug(
+            this.#scope,
+            'Emitting TaskCancelled lifecycle event from AbortError',
+            { taskId }
+          )
+          this.#config.emitEvent({ type: 'TaskCancelled', taskId, timestamp: now() })
+          return
+        }
+
         const resolvedError = toPassThroughTianjiError(error)
         await this.#config.logger?.logError(this.#scope, 'Task execution failed', {
           taskId,
@@ -214,12 +251,8 @@ export class TaskExecutor {
         await this.#config.logger?.logDebug(this.#scope, 'Cleaning up task execution resources', {
           taskId,
         })
-        // cancel 路径已经在 cancel() 中调用了 disconnect，此处不重复调用。
-        // 非 cancel 路径（正常结束或异常）才需要在 finally 中 disconnect。
-        if (!this.#cancelled) {
-          await this.#currentRunner?.disconnect()
-        }
-        this.#currentRunner = null
+        this.#currentHandle = null
+        this.#currentEntry = null
         this.#cancelled = false
         this.#executionState = 'idle'
         this.#currentTaskId = null

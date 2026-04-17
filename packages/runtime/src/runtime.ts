@@ -14,11 +14,17 @@ export type { ObserverLogger } from '@tianji/observer'
 export type {
   AbortSignalScope,
   ActiveRun,
+  CancelGraphRunRequest,
   CreateSessionOptions,
   DeepagentsInterruptRecord,
   DeepagentsRunWorkflowState,
   ExecuteRunInput,
+  GraphRunHandle,
+  GraphRunRequest,
+  GraphRuntime,
+  GraphRuntimeDeps,
   ResumeRunOptions,
+  ResumeGraphRunRequest,
   RunExecutionContext,
   RunLineageFields,
   RunRuntimeMetadata,
@@ -27,6 +33,7 @@ export type {
   SessionRuntimeEngine,
   SessionRuntimeMetadata,
   SessionRuntimeOptions,
+  StreamGraphRunRequest,
 } from './runtime/types.js'
 export {
   readDeepagentsRunWorkflowState,
@@ -34,3 +41,4 @@ export {
   readSessionRuntimeMetadata,
 } from './runtime/metadata.js'
 export { createSessionRuntime } from './runtime/session-runtime.js'
+export { createGraphRuntime } from './runtime/graph-runtime.js'

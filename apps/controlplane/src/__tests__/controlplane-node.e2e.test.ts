@@ -1,6 +1,11 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { access } from 'node:fs/promises'
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import {
+  type IncomingMessage,
+  type ServerResponse,
+  createServer as createHttpServer,
+} from 'node:http'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,7 +24,31 @@ import { subscribeEventLog } from '../storage/event-log-subscriber.js'
 
 const nodeAppDir = fileURLToPath(new URL('../../../../apps/node', import.meta.url))
 const nodeDistBinPath = fileURLToPath(new URL('../../../../apps/node/dist/bin.js', import.meta.url))
-const fakeAcpAgentPath = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url))
+const TEST_OPENAI_API_KEY = 'test-key'
+const TEST_DEFAULT_GRAPH = {
+  id: 'default',
+  name: 'default',
+  version: 1,
+  source: 'static',
+  locked: false,
+  state: {
+    input: { type: 'string' },
+    output: { type: 'string' },
+  },
+  nodes: [
+    {
+      id: 'agent',
+      type: 'agent',
+      agent: 'default',
+      input: ['input'],
+      output: ['output'],
+    },
+  ],
+  edges: [
+    { from: '__start__', to: 'agent' },
+    { from: 'agent', to: '__end__' },
+  ],
+} as const
 
 describe('controlplane <-> node e2e', () => {
   let nodeProcess: ChildProcess | null = null
@@ -40,7 +69,10 @@ describe('controlplane <-> node e2e', () => {
 
     try {
       nodeProcess = env.nodeProcess
-      await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-001')
+      await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-001', {
+        stdoutChunks: env.stdoutChunks,
+        stderrChunks: env.stderrChunks,
+      })
 
       const response = await fetch(`${env.baseUrl}/api/ui/nodes`)
       const nodes = (await response.json()) as Array<{
@@ -61,20 +93,21 @@ describe('controlplane <-> node e2e', () => {
       await stopProcess(nodeProcess)
       nodeProcess = null
       env.monitor.stop()
+      await env.closeLlmServer()
       env.db.close()
       env.server.close()
     }
   }, 20000)
 
   it('cancel 命令链路：POST cancel → node disconnect → TaskCancelled 落入 event_log，总延迟 < 3s', async () => {
-    const slowAgentPath = fileURLToPath(
-      new URL('./fixtures/fake-acp-agent-slow.mjs', import.meta.url)
-    )
-    const env = await setupTestEnv('node-e2e-cancel', { agentPath: slowAgentPath })
+    const env = await setupTestEnv('node-e2e-cancel', { llmMode: 'hang' })
 
     try {
       nodeProcess = env.nodeProcess
-      await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-cancel')
+      await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-cancel', {
+        stdoutChunks: env.stdoutChunks,
+        stderrChunks: env.stderrChunks,
+      })
 
       // 1. 发 task.run，启动一个永不完成的任务
       const runResponse = await fetch(`${env.baseUrl}/api/copilot`, {
@@ -138,22 +171,74 @@ describe('controlplane <-> node e2e', () => {
       })
       expect(cancelResponse.status).toBe(202)
 
+      let cancelCommandInsertedAt: number | null = null
+      let cancelCommandConsumedAt: number | null = null
+      const cancelCommandDeadline = cancelStart + 3000
+      const cancelCommandSql =
+        "SELECT state FROM commands WHERE type = 'task.cancel' AND json_extract(payload, '$.taskId') = ? ORDER BY created_at DESC LIMIT 1"
+      while (Date.now() < cancelCommandDeadline && cancelCommandConsumedAt === null) {
+        const row = env.db.raw.prepare(cancelCommandSql).get(taskId) as
+          | { state: string }
+          | undefined
+        if (row !== undefined) {
+          cancelCommandInsertedAt ??= Date.now()
+          if (row.state !== 'pending') {
+            cancelCommandConsumedAt = Date.now()
+            break
+          }
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25))
+      }
+
       // 5. 轮询 event_log，等待 TaskCancelled 落表，限 3 秒内完成
       const cancelDeadline = cancelStart + 3000
       let cancelled = false
+      let taskCancelledAt: number | null = null
       const taskCancelledSql =
         "SELECT COUNT(*) AS c FROM event_log WHERE aggregate_id = ? AND type = 'TaskCancelled'"
       while (Date.now() < cancelDeadline && !cancelled) {
         const row = env.db.raw.prepare(taskCancelledSql).get(taskId) as { c: number }
         if (row.c > 0) {
           cancelled = true
+          taskCancelledAt = Date.now()
           break
         }
         await new Promise((resolve) => setTimeout(resolve, 50))
       }
 
       const totalLatencyMs = Date.now() - cancelStart
-      const cancelMessage = `TaskCancelled 事件未在 3 秒内落入 event_log（实际等待 ${totalLatencyMs}ms）`
+      const insertLatencyMs =
+        cancelCommandInsertedAt === null ? 'missing' : String(cancelCommandInsertedAt - cancelStart)
+      const consumeLatencyMs =
+        cancelCommandConsumedAt === null ? 'missing' : String(cancelCommandConsumedAt - cancelStart)
+      const eventLatencyMs =
+        taskCancelledAt === null ? 'missing' : String(taskCancelledAt - cancelStart)
+      const recentTaskEvents = env.db.raw
+        .prepare(
+          'SELECT type, aggregate_type, aggregate_id, payload_json FROM event_log WHERE aggregate_id = ? ORDER BY rowid DESC LIMIT 12'
+        )
+        .all(taskId) as Array<{
+        type: string
+        aggregate_type: string
+        aggregate_id: string
+        payload_json: string
+      }>
+      const cancelLogLines = Buffer.concat(env.stderrChunks)
+        .toString('utf8')
+        .split('\n')
+        .filter(
+          (line) =>
+            line.includes('TaskCancelled') ||
+            line.includes('RunCancelled') ||
+            line.includes('cancel') ||
+            line.includes('Cleaning up task execution resources')
+        )
+        .join('\n')
+      const cancelMessage =
+        `TaskCancelled 事件未在 3 秒内落入 event_log（总等待 ${totalLatencyMs}ms，` +
+        `命令入表 ${insertLatencyMs}ms，命令消费 ${consumeLatencyMs}ms，事件落表 ${eventLatencyMs}ms）` +
+        `\nrecent task events:\n${recentTaskEvents.map((event) => `${event.aggregate_type}:${event.type}:${event.aggregate_id}:${event.payload_json}`).join('\n')}` +
+        `\nnode stderr(cancel):\n${cancelLogLines}`
       expect(cancelled, cancelMessage).toBe(true)
       expect(totalLatencyMs).toBeLessThan(3000)
     } finally {
@@ -161,6 +246,7 @@ describe('controlplane <-> node e2e', () => {
       nodeProcess = null
       env.monitor.stop()
       await env.closeEventLog()
+      await env.closeLlmServer()
       env.db.close()
       env.server.close()
     }
@@ -171,7 +257,10 @@ describe('controlplane <-> node e2e', () => {
 
     try {
       nodeProcess = env.nodeProcess
-      await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-002')
+      await waitForNode(`${env.baseUrl}/api/ui/nodes`, 'node-e2e-002', {
+        stdoutChunks: env.stdoutChunks,
+        stderrChunks: env.stderrChunks,
+      })
 
       const createTaskResponse = await fetch(`${env.baseUrl}/api/copilot`, {
         method: 'POST',
@@ -224,6 +313,7 @@ describe('controlplane <-> node e2e', () => {
       await stopProcess(nodeProcess)
       nodeProcess = null
       env.monitor.stop()
+      await env.closeLlmServer()
       env.db.close()
       env.server.close()
     }
@@ -231,8 +321,8 @@ describe('controlplane <-> node e2e', () => {
 })
 
 interface SetupTestEnvOptions {
-  /** 覆盖 fake ACP agent 脚本路径，默认使用 fake-acp-agent.mjs（快速完成型） */
-  readonly agentPath?: string
+  readonly model?: string
+  readonly llmMode?: 'complete' | 'hang'
 }
 
 async function setupTestEnv(
@@ -247,13 +337,15 @@ async function setupTestEnv(
   stdoutChunks: Buffer[]
   stderrChunks: Buffer[]
   closeEventLog: () => Promise<void>
+  closeLlmServer: () => Promise<void>
 }> {
   const baseDir = await mkdtemp(join(tmpdir(), 'tianji-cp-node-e2e-'))
-  const configDir = join(baseDir, 'config')
   const homeDir = join(baseDir, 'home')
+  const configDir = join(homeDir, '.config', 'tianji-ai')
   const port = await allocatePort()
   const db = createDatabase(':memory:')
   const now = Date.now()
+  const llmServer = await startFakeOpenAiServer(options.llmMode ?? 'complete')
 
   await assertNodeDistReady(nodeDistBinPath)
 
@@ -278,12 +370,21 @@ async function setupTestEnv(
 
   await mkdir(configDir, { recursive: true })
   await mkdir(homeDir, { recursive: true })
-  await writeFile(join(configDir, 'tianji.json'), '{}', 'utf8')
+  await writeFile(
+    join(configDir, 'tianji.json'),
+    JSON.stringify({
+      providers: {
+        openai: {
+          apiKey: TEST_OPENAI_API_KEY,
+          baseUrl: llmServer.baseUrl,
+        },
+      },
+    }),
+    'utf8'
+  )
 
   const configPath = join(configDir, 'tianji.json')
   const registerUrl = `http://127.0.0.1:${port}/register?enrollment-token=e2e-token`
-
-  await writeFile(configPath, '{}', 'utf8')
 
   const registerProcess = spawn(
     '/usr/bin/env',
@@ -303,17 +404,26 @@ async function setupTestEnv(
   await waitForProcessOutput(registerProcess, 'Daemon listening on port')
   await stopProcess(registerProcess)
 
-  const agentScriptPath = options.agentPath ?? fakeAcpAgentPath
+  await writeFile(
+    join(configDir, 'default-orchestration.json'),
+    JSON.stringify(TEST_DEFAULT_GRAPH),
+    'utf8'
+  )
 
   await writeFile(
     configPath,
     JSON.stringify({
+      providers: {
+        openai: {
+          apiKey: TEST_OPENAI_API_KEY,
+          baseUrl: llmServer.baseUrl,
+        },
+      },
       agents: {
         defaultAgent: 'default',
         items: {
           default: {
-            command: '/usr/bin/env',
-            args: ['node', agentScriptPath],
+            model: options.model ?? 'openai/gpt-4.1',
           },
         },
       },
@@ -358,6 +468,85 @@ async function setupTestEnv(
       await eventLogHandle.close()
       await bus.close()
     },
+    closeLlmServer: async () => {
+      await llmServer.close()
+    },
+  }
+}
+
+async function startFakeOpenAiServer(
+  mode: 'complete' | 'hang'
+): Promise<{ baseUrl: string; close: () => Promise<void> }> {
+  const port = await allocatePort()
+  const sockets = new Set<import('node:net').Socket>()
+  const server = createHttpServer(
+    async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
+      if (req.method !== 'POST' || req.url !== '/v1/chat/completions') {
+        res.statusCode = 404
+        res.end('not found')
+        return
+      }
+
+      if (mode === 'hang') {
+        req.on('close', () => {
+          if (!res.writableEnded) {
+            res.end()
+          }
+        })
+        return
+      }
+
+      res.setHeader('Content-Type', 'application/json')
+      res.end(
+        JSON.stringify({
+          id: 'chatcmpl-test',
+          object: 'chat.completion',
+          created: Math.floor(Date.now() / 1000),
+          model: 'gpt-4.1',
+          choices: [
+            {
+              index: 0,
+              message: { role: 'assistant', content: 'ok' },
+              finish_reason: 'stop',
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        })
+      )
+    }
+  )
+
+  server.on('connection', (socket) => {
+    sockets.add(socket)
+    socket.on('close', () => {
+      sockets.delete(socket)
+    })
+  })
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(port, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+
+  return {
+    baseUrl: `http://127.0.0.1:${port}/v1`,
+    close: async () => {
+      for (const socket of sockets) {
+        socket.destroy()
+      }
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
+        })
+      })
+    },
   }
 }
 
@@ -374,7 +563,11 @@ async function assertNodeDistReady(entrypointPath: string): Promise<void> {
   }
 }
 
-async function waitForNode(url: string, nodeId: string): Promise<void> {
+async function waitForNode(
+  url: string,
+  nodeId: string,
+  logs?: { stdoutChunks: Buffer[]; stderrChunks: Buffer[] }
+): Promise<void> {
   const deadline = Date.now() + 8000
 
   while (Date.now() < deadline) {
@@ -386,7 +579,9 @@ async function waitForNode(url: string, nodeId: string): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 200))
   }
 
-  throw new Error(`Timed out waiting for node ${nodeId}`)
+  const stdout = logs ? Buffer.concat(logs.stdoutChunks).toString('utf8') : ''
+  const stderr = logs ? Buffer.concat(logs.stderrChunks).toString('utf8') : ''
+  throw new Error(`Timed out waiting for node ${nodeId}\nstdout:\n${stdout}\nstderr:\n${stderr}`)
 }
 
 async function stopProcess(process: ChildProcess | null): Promise<void> {

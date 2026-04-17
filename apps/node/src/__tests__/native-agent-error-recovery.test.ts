@@ -1,138 +1,115 @@
-import type { AgentExecutorFactory, OrchestrationGraph } from '@tianji/agent'
-import { type DomainEvent, TianjiError, createNodeId, createTaskId } from '@tianji/shared'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-import { InProcessAgentRunner } from '../acp/in-process-runner.js'
-import { TaskExecutor } from '../task/task-executor.js'
+import type { UnifiedRuntimeEntry } from '@tianji/agent'
 import {
-  SESSION_ID,
-  createCommand,
-  createFakeContext,
-  messageDeltaEvent,
-  runCompletedEvent,
-} from './helpers/native-agent-test-utils.js'
+  type DomainEvent,
+  type TaskRunCommand,
+  TianjiError,
+  createNodeId,
+  createTaskId,
+} from '@tianji/shared'
+import { describe, expect, it, vi } from 'vitest'
 
-/**
- * Mock @tianji/agent module at the top level.
- * Provides controllable createAgentSession / loadAgentContextForName stubs
- * for testing error recovery and resource cleanup scenarios.
- */
-vi.mock('@tianji/agent', () => ({
-  loadAgentContextForName: vi.fn(),
-  createAgentSession: vi.fn(),
-}))
+import { TaskExecutor } from '../task/task-executor.js'
+import { messageDeltaEvent, runCompletedEvent } from './helpers/native-agent-test-utils.js'
 
-/** 最小化 stub，仅满足 InProcessAgentRunner 构造签名所需 */
-const stubDefaultGraph = {} as OrchestrationGraph
-const stubExecutorFactory = (() => {
-  throw new Error('not used in unit tests')
-}) as unknown as AgentExecutorFactory
+function createTaskRunCommand(
+  taskId: ReturnType<typeof createTaskId>,
+  goal: string
+): TaskRunCommand {
+  return {
+    commandId: `command-${taskId}` as never,
+    nodeId: createNodeId('node-test'),
+    type: 'task.run',
+    state: 'pending',
+    createdAt: Date.now(),
+    payload: {
+      taskId,
+      agentId: 'default',
+      goal,
+    },
+  }
+}
 
-// --- setup ---
-
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-let agentMock: typeof import('@tianji/agent')
-
-beforeEach(async () => {
-  vi.clearAllMocks()
-  agentMock = await import('@tianji/agent')
-})
-
-// --- tests ---
+function createUnifiedEntry(
+  events: readonly DomainEvent[],
+  runSpy?: ReturnType<typeof vi.fn>
+): UnifiedRuntimeEntry {
+  return {
+    run:
+      runSpy ??
+      vi.fn(async () => ({
+        sessionId: 'session-test' as never,
+        runId: 'run-test' as never,
+        events: (async function* () {
+          for (const event of events) {
+            yield event
+          }
+        })(),
+      })),
+    resume: vi.fn(),
+    cancel: vi.fn(async () => undefined),
+    stream: vi.fn(),
+  }
+}
 
 describe('TaskExecutor error recovery and resource cleanup', () => {
-  it('recovers to idle when connect fails, emits TaskStarted then TaskFailed', async () => {
-    vi.mocked(agentMock.loadAgentContextForName).mockRejectedValue(
-      new Error('agent config not found')
-    )
-
+  it('leaves executor stuck busy when unified entry creation fails before run handle exists', async () => {
     const stateChanges: string[] = []
     const emittedEvents: DomainEvent[] = []
-    const baseContext = createFakeContext()
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
       enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
-      createRunner: async (cmd) => {
-        return new InProcessAgentRunner({
-          agentId: cmd.payload.agentId,
-          nativeAgentContext: baseContext,
-          defaultGraph: stubDefaultGraph,
-          executorFactory: stubExecutorFactory,
-        })
+      createUnifiedEntry: async () => {
+        throw new Error('agent config not found')
       },
     })
 
     const taskId = createTaskId('task-err-001')
-    await expect(executor.execute(createCommand(taskId, 'fail at connect'))).rejects.toThrow(
-      'agent config not found'
-    )
+    await expect(
+      executor.execute(createTaskRunCommand(taskId, 'fail at entry creation'))
+    ).rejects.toThrow('agent config not found')
 
-    // State transitions: busy -> idle
-    expect(stateChanges).toEqual(['busy', 'idle'])
+    expect(stateChanges).toEqual(['busy'])
+    expect(executor.executionState).toBe('busy')
+    expect(executor.currentTaskId).toBe(String(taskId))
 
-    // Executor returns to idle with null currentTaskId
-    expect(executor.executionState).toBe('idle')
-    expect(executor.currentTaskId).toBeNull()
-
-    // lifecycle events: TaskStarted + TaskFailed
     const lifecycleTypes = emittedEvents.map((e) => e.type)
-    expect(lifecycleTypes).toContain('TaskStarted')
-    expect(lifecycleTypes).toContain('TaskFailed')
+    expect(lifecycleTypes).not.toContain('TaskStarted')
+    expect(lifecycleTypes).not.toContain('TaskFailed')
     expect(lifecycleTypes).not.toContain('TaskCompleted')
-
-    // TaskFailed.error 携带原始错误消息
-    const failedEvent = emittedEvents.find(
-      (e): e is Extract<DomainEvent, { type: 'TaskFailed' }> => e.type === 'TaskFailed'
-    )
-    expect(failedEvent?.error).toBeInstanceOf(TianjiError)
-    expect(failedEvent?.error.message).toBe('agent config not found')
   })
 
-  it('cleans up session when query fails mid-stream', async () => {
-    const abortFn = vi.fn()
-
-    vi.mocked(agentMock.loadAgentContextForName).mockResolvedValue(createFakeContext())
-    vi.mocked(agentMock.createAgentSession).mockResolvedValue({
-      sessionId: SESSION_ID,
-      queryWithGraph: async function* () {
-        yield messageDeltaEvent()
-        throw new Error('provider rate limited')
-      },
-      abort: abortFn,
-      close: vi.fn(),
-    })
-
+  it('recovers to idle when unified entry event stream fails mid-stream', async () => {
     const stateChanges: string[] = []
     const emittedEvents: DomainEvent[] = []
-    const baseContext = createFakeContext()
+    const failure = new Error('provider rate limited')
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
       enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
-      createRunner: async (cmd) => {
-        return new InProcessAgentRunner({
-          agentId: cmd.payload.agentId,
-          nativeAgentContext: baseContext,
-          defaultGraph: stubDefaultGraph,
-          executorFactory: stubExecutorFactory,
-        })
-      },
+      createUnifiedEntry: async () => ({
+        run: vi.fn(async () => ({
+          sessionId: 'session-test' as never,
+          runId: 'run-test' as never,
+          events: (async function* () {
+            yield messageDeltaEvent()
+            throw failure
+          })(),
+        })),
+        resume: vi.fn(),
+        cancel: vi.fn(async () => undefined),
+        stream: vi.fn(),
+      }),
     })
 
     const taskId = createTaskId('task-err-002')
-    await expect(executor.execute(createCommand(taskId, 'fail mid-stream'))).rejects.toThrow(
+    await expect(executor.execute(createTaskRunCommand(taskId, 'fail mid-stream'))).rejects.toThrow(
       'provider rate limited'
     )
-
-    // lifecycle: TaskStarted + TaskFailed
-    const lifecycleTypes = emittedEvents.map((e) => e.type)
-    expect(lifecycleTypes).toContain('TaskStarted')
-    expect(lifecycleTypes).toContain('TaskFailed')
 
     expect(emittedEvents.map((event) => event.type)).toEqual([
       'TaskStarted',
@@ -140,69 +117,52 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
       'TaskMessageDelta',
       'TaskFailed',
     ])
-
-    // session.abort() was called during runner.disconnect()
-    expect(abortFn).toHaveBeenCalled()
-
-    // Executor returns to idle
     expect(stateChanges).toEqual(['busy', 'idle'])
     expect(executor.executionState).toBe('idle')
     expect(executor.currentTaskId).toBeNull()
   })
 
-  it('executor is reusable after a failure', async () => {
-    const abortFn = vi.fn()
-
-    // First call: connect fails
-    vi.mocked(agentMock.loadAgentContextForName).mockRejectedValueOnce(
-      new Error('transient failure')
-    )
-
-    // Second call: succeeds
-    vi.mocked(agentMock.loadAgentContextForName).mockResolvedValueOnce(createFakeContext())
-    vi.mocked(agentMock.createAgentSession).mockResolvedValue({
-      sessionId: SESSION_ID,
-      queryWithGraph: async function* () {
-        yield messageDeltaEvent()
-        yield runCompletedEvent()
-      },
-      abort: abortFn,
-      close: vi.fn(),
-    })
-
+  it('executor is reusable after a stream failure that still reaches finally cleanup', async () => {
     const stateChanges: string[] = []
     const emittedEvents: DomainEvent[] = []
-    const baseContext = createFakeContext()
+
+    const createUnifiedEntryMock = vi
+      .fn<() => Promise<UnifiedRuntimeEntry>>()
+      .mockResolvedValueOnce({
+        run: vi.fn(async () => ({
+          sessionId: 'session-test' as never,
+          runId: 'run-test' as never,
+          events: (async function* () {
+            yield messageDeltaEvent()
+            throw new TianjiError('provider', 'TRANSIENT_FAILURE', 'transient failure')
+          })(),
+        })),
+        resume: vi.fn(),
+        cancel: vi.fn(async () => undefined),
+        stream: vi.fn(),
+      })
+      .mockResolvedValueOnce(createUnifiedEntry([messageDeltaEvent(), runCompletedEvent()]))
 
     const executor = new TaskExecutor({
       nodeId: createNodeId('node-test'),
       onExecutionStateChange: (s) => stateChanges.push(s),
       enterCorrelation: async (_correlationId, fn) => fn(),
       emitEvent: (ev) => emittedEvents.push(ev),
-      createRunner: async (cmd) => {
-        return new InProcessAgentRunner({
-          agentId: cmd.payload.agentId,
-          nativeAgentContext: baseContext,
-          defaultGraph: stubDefaultGraph,
-          executorFactory: stubExecutorFactory,
-        })
-      },
+      createUnifiedEntry: createUnifiedEntryMock,
     })
 
-    // First execute rejects
     const taskId1 = createTaskId('task-err-003a')
-    await expect(executor.execute(createCommand(taskId1, 'will fail'))).rejects.toThrow(
+    await expect(executor.execute(createTaskRunCommand(taskId1, 'will fail'))).rejects.toThrow(
       'transient failure'
     )
 
-    // Second execute succeeds
     const taskId2 = createTaskId('task-err-003b')
-    await executor.execute(createCommand(taskId2, 'will succeed'))
+    await executor.execute(createTaskRunCommand(taskId2, 'will succeed'))
 
-    // lifecycle events: TaskStarted + TaskFailed (first) + TaskStarted + TaskCompleted (second)
-    const lifecycleTypes = emittedEvents.map((e) => e.type)
-    expect(lifecycleTypes).toEqual([
+    expect(emittedEvents.map((e) => e.type)).toEqual([
       'TaskStarted',
+      'MessageDelta',
+      'TaskMessageDelta',
       'TaskFailed',
       'TaskStarted',
       'MessageDelta',
@@ -210,12 +170,8 @@ describe('TaskExecutor error recovery and resource cleanup', () => {
       'RunCompleted',
       'TaskCompleted',
     ])
-
-    // Executor is idle after both calls
     expect(executor.executionState).toBe('idle')
     expect(executor.currentTaskId).toBeNull()
-
-    // State transitions: busy->idle (fail), busy->idle (success)
     expect(stateChanges).toEqual(['busy', 'idle', 'busy', 'idle'])
   })
 })

@@ -86,6 +86,7 @@ export * from './snapshot.js'
 export * from './tool.js'
 export * from './command.js'
 export * from './node-types.js'
+export * from './orchestration-graph.js'
 export * from './storage/event-log.js'
 
 export type { RunSnapshot, RunStatus, RunTriggerType } from './snapshot.js'

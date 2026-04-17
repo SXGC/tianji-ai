@@ -382,4 +382,65 @@ describe('agent session queryWithGraph', () => {
 
     createSessionRuntimeSpy.mockRestore()
   })
+
+  it('session.abort() 触发的 signal 中止应产出 GraphRunCancelled', async () => {
+    const { session, createSessionRuntimeSpy } = await prepareSession()
+
+    const abortableFactory: AgentExecutorFactory =
+      (node, ctx: NodeExecutorContext): NodeAction =>
+      async () => {
+        ctx.emitGraphEvent({
+          type: 'GraphNodeStarted',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          nodeKind: 'agent',
+          timestamp: Date.now(),
+        })
+        return new Promise((_resolve, reject) => {
+          if (!ctx.abortSignal) {
+            reject(new Error('abortSignal should be wired through from session'))
+            return
+          }
+          ctx.abortSignal.addEventListener('abort', () => {
+            reject(new Error('aborted by session'))
+          })
+        })
+      }
+
+    const collectUntilFinish = async (): Promise<GraphRunDomainEvent[]> => {
+      const events: GraphRunDomainEvent[] = []
+      for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
+        compileOptions: { agentExecutorFactory: abortableFactory },
+      })) {
+        events.push(event as GraphRunDomainEvent)
+        if (event.type === 'GraphNodeStarted') {
+          session.abort()
+        }
+      }
+      return events
+    }
+
+    const outcome = await (async () => {
+      const events: GraphRunDomainEvent[] = []
+      try {
+        for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
+          compileOptions: { agentExecutorFactory: abortableFactory },
+        })) {
+          events.push(event as GraphRunDomainEvent)
+          if (event.type === 'GraphNodeStarted') {
+            session.abort()
+          }
+        }
+        return { events, error: undefined }
+      } catch (error) {
+        return { events, error }
+      }
+    })()
+
+    expect(outcome.error).toBeDefined()
+    expect(outcome.events.map((event) => event.type)).toContain('GraphRunCancelled')
+
+    createSessionRuntimeSpy.mockRestore()
+  })
 })

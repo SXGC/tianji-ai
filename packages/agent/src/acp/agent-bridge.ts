@@ -22,33 +22,21 @@ import type {
 
 import type { DomainEvent, DomainEventEnvelope } from '@tianji/shared'
 
-import type { AgentExecutorFactory, OrchestrationGraph } from '../orchestration/index.js'
-import type { AgentSession } from '../session.js'
+import type { UnifiedRuntimeEntry } from '../unified-entry.js'
 import { mapRuntimeEventToSessionUpdate } from './event-mapper.js'
-
-type SessionFactory = () => AgentSession | Promise<AgentSession>
 
 /**
  * ACP 协议到 AgentSession 的桥接实现。
  */
 export class TianjiAcpAgent {
   readonly #connection: AgentSideConnection
-  readonly #sessionFactory: SessionFactory
-  readonly #defaultGraph: OrchestrationGraph
-  readonly #executorFactory: AgentExecutorFactory
-  #currentSession: AgentSession | null = null
+  readonly #entry: UnifiedRuntimeEntry
+  #currentSessionId: string | null = null
   #abortController: AbortController | null = null
 
-  constructor(
-    connection: AgentSideConnection,
-    sessionFactory: SessionFactory,
-    defaultGraph: OrchestrationGraph,
-    executorFactory: AgentExecutorFactory
-  ) {
+  constructor(connection: AgentSideConnection, entry: UnifiedRuntimeEntry) {
     this.#connection = connection
-    this.#sessionFactory = sessionFactory
-    this.#defaultGraph = defaultGraph
-    this.#executorFactory = executorFactory
+    this.#entry = entry
   }
 
   async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
@@ -62,12 +50,12 @@ export class TianjiAcpAgent {
   }
 
   async newSession(_params: NewSessionRequest): Promise<NewSessionResponse> {
-    this.#currentSession = await this.#sessionFactory()
+    this.#currentSessionId = `session_${Date.now()}`
 
-    console.error('[acp-agent] New session created:', this.#currentSession.sessionId)
+    console.error('[acp-agent] New session created:', this.#currentSessionId)
 
     return {
-      sessionId: this.#currentSession.sessionId,
+      sessionId: this.#currentSessionId,
     }
   }
 
@@ -78,11 +66,11 @@ export class TianjiAcpAgent {
   async prompt(params: PromptRequest): Promise<PromptResponse> {
     console.error('[acp-agent] Received prompt request, session:', params.sessionId)
 
-    if (!this.#currentSession) {
+    if (!this.#currentSessionId) {
       throw new Error('No active session. Call newSession first.')
     }
 
-    if (params.sessionId !== this.#currentSession.sessionId) {
+    if (params.sessionId !== this.#currentSessionId) {
       throw new Error(`Session not found: ${params.sessionId}`)
     }
 
@@ -98,10 +86,12 @@ export class TianjiAcpAgent {
     this.#abortController = new AbortController()
 
     try {
-      for await (const event of this.#currentSession.queryWithGraph(this.#defaultGraph, {
-        initialState: { input: promptText },
-        compileOptions: { agentExecutorFactory: this.#executorFactory },
-      })) {
+      const handle = await this.#entry.run({
+        source: 'acp',
+        input: promptText,
+        sessionId: params.sessionId as never,
+      })
+      for await (const event of handle.events) {
         if (this.#abortController.signal.aborted) {
           console.error('[acp-agent] Prompt cancelled')
           return { stopReason: 'cancelled' }

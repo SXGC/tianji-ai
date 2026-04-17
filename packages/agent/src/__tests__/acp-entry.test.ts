@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { LoadedAgentContext } from '../context.js'
 
@@ -26,7 +26,7 @@ function createDeferred<T>(): { promise: Promise<T>; resolve: (v: T) => void } {
   return { promise, resolve }
 }
 
-const mockConnectionClosed = createDeferred<void>()
+let mockConnectionClosed: ReturnType<typeof createDeferred<void>>
 
 vi.mock('@agentclientprotocol/sdk', () => ({
   AgentSideConnection: vi.fn().mockImplementation((_factory: unknown, _stream: unknown) => ({
@@ -36,6 +36,10 @@ vi.mock('@agentclientprotocol/sdk', () => ({
 }))
 
 describe('runAcpAgent', () => {
+  beforeEach(() => {
+    mockConnectionClosed = createDeferred<void>()
+  })
+
   it('creates an AgentSideConnection and awaits its closed promise', async () => {
     const { loadAgentContext } = await import('../context.js')
     const { AgentSideConnection, ndJsonStream } = await import('@agentclientprotocol/sdk')
@@ -57,11 +61,16 @@ describe('runAcpAgent', () => {
       snapshotStore: {} as never,
     } satisfies LoadedAgentContext)
 
-    // Resolve closed immediately so runAcpAgent completes
+    const { runAcpAgent } = await import('../acp-entry.js')
+    const runPromise = runAcpAgent()
+
+    await vi.waitFor(() => {
+      expect(AgentSideConnection).toHaveBeenCalledTimes(1)
+    })
+
     mockConnectionClosed.resolve()
 
-    const { runAcpAgent } = await import('../acp-entry.js')
-    await runAcpAgent()
+    await runPromise
 
     expect(loadAgentContext).toHaveBeenCalled()
     expect(ndJsonStream).toHaveBeenCalled()
