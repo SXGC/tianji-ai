@@ -6,6 +6,7 @@ import type {
   ObserverLogger,
 } from '@tianji/observer'
 import { createJsonlFileSink, createObserverLogger, createStderrSink } from '@tianji/observer'
+
 import type { UserConfigPaths } from './config.js'
 
 export type CliLogLevel = Extract<ObserverLogLevel, 'debug' | 'info' | 'warn' | 'error'>
@@ -44,6 +45,9 @@ export interface CreateCliLoggerOptions {
   readonly sink: ObserverLogSink
 }
 
+/** Sensitive field names that are redacted by all CLI loggers. */
+const CLI_SENSITIVE_KEYS = ['prompt', 'soul'] as const
+
 /**
  * Creates a CLI logger adapter backed by the observer logger.
  *
@@ -51,15 +55,30 @@ export interface CreateCliLoggerOptions {
  * @returns Logger helpers with the existing CLI-facing method names
  */
 export function createCliLogger(options: CreateCliLoggerOptions): CliLogger {
+  return createCliLoggerWithSinks([options.sink])
+}
+
+/**
+ * Creates a CLI logger backed by an ordered list of observer sinks.
+ * The first sink is treated as the primary sink for `appendCliLog` direct writes.
+ *
+ * @param sinks - Ordered sink list; index 0 is the primary (file) sink; must be non-empty
+ */
+export function createCliLoggerWithSinks(sinks: readonly ObserverLogSink[]): CliLogger {
+  if (sinks.length === 0) {
+    throw new Error('createCliLoggerWithSinks requires at least one sink')
+  }
+
+  const [primarySink] = sinks
   const observerLogger = createObserverLogger({
-    sinks: [options.sink],
-    sensitiveKeys: ['prompt', 'soul'],
+    sinks,
+    sensitiveKeys: [...CLI_SENSITIVE_KEYS],
   })
 
   return {
     observerLogger,
     appendCliLog(entry) {
-      return options.sink.write(entry)
+      return primarySink.write(entry)
     },
     logDebug(scope, message, data) {
       return observerLogger.debug(scope, message, data)
@@ -161,41 +180,5 @@ export function getCliLogger(paths: UserConfigPaths): CliLogger {
 function createCliLoggerFromPaths(paths: UserConfigPaths): CliLogger {
   const fileSink = createJsonlFileSink({ filePath: paths.cliLogFilePath })
   const stderrSink = createStderrSink({ minLevel: 'warn' })
-  return createCliLoggerWithSinks(paths, [fileSink, stderrSink])
-}
-
-/**
- * Creates a CLI logger backed by an ordered list of observer sinks.
- * The first sink is treated as the primary sink for `appendCliLog` direct writes.
- *
- * @param _paths - Reserved for future path-aware sink configuration
- * @param sinks - Ordered sink list; index 0 is the primary (file) sink
- */
-function createCliLoggerWithSinks(
-  _paths: UserConfigPaths,
-  sinks: readonly ObserverLogSink[]
-): CliLogger {
-  const observerLogger = createObserverLogger({
-    sinks,
-    sensitiveKeys: ['prompt', 'soul'],
-  })
-  const primarySink = sinks[0]
-  return {
-    observerLogger,
-    appendCliLog(entry) {
-      return primarySink !== undefined ? primarySink.write(entry) : Promise.resolve()
-    },
-    logDebug(scope, message, data) {
-      return observerLogger.debug(scope, message, data)
-    },
-    logInfo(scope, message, data) {
-      return observerLogger.info(scope, message, data)
-    },
-    logWarn(scope, message, data) {
-      return observerLogger.warn(scope, message, data)
-    },
-    logError(scope, message, data) {
-      return observerLogger.error(scope, message, data)
-    },
-  }
+  return createCliLoggerWithSinks([fileSink, stderrSink])
 }

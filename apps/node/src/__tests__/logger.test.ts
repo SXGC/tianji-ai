@@ -1,15 +1,13 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { readFile } from 'node:fs/promises'
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ObserverLogEntry } from '@tianji/observer'
 
-import type { UserConfigPaths } from '../config.js'
 import {
   appendCliLog,
   createCliLogger,
+  createCliLoggerWithSinks,
   getCliLogger,
   logDebug,
   logError,
@@ -184,23 +182,29 @@ describe('path-based log helpers', () => {
   })
 })
 
+describe('createCliLoggerWithSinks', () => {
+  it('throws when sinks array is empty', () => {
+    expect(() => createCliLoggerWithSinks([])).toThrow(
+      'createCliLoggerWithSinks requires at least one sink'
+    )
+  })
+})
+
 describe('getCliLogger sinks', () => {
-  let tmpRoot: string
-  let paths: UserConfigPaths
+  let cleanup: () => Promise<void>
+  let paths: Awaited<ReturnType<typeof createTempCliPaths>>['paths']
   let stderrSpy: ReturnType<typeof vi.spyOn>
 
   beforeEach(async () => {
-    tmpRoot = await mkdtemp(join(tmpdir(), 'tianji-cli-log-'))
-    paths = {
-      logsDir: join(tmpRoot, 'logs'),
-      cliLogFilePath: join(tmpRoot, 'logs', 'cli.jsonl'),
-    } as UserConfigPaths
+    const tmp = await createTempCliPaths()
+    paths = tmp.paths
+    cleanup = tmp.cleanup
     stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
   })
 
   afterEach(async () => {
     stderrSpy.mockRestore()
-    await rm(tmpRoot, { recursive: true, force: true })
+    await cleanup()
   })
 
   it('writes jsonl file for all levels and stderr only for warn/error', async () => {

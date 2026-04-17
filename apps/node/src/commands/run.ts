@@ -1,11 +1,9 @@
-import { appendFile, mkdir } from 'node:fs/promises'
-
 import { buildDefaultGraph, createAgentSession, createUnifiedRuntimeEntry } from '@tianji/agent'
 import type { DomainEvent, RunId } from '@tianji/shared'
 
-import { type UserConfigPaths, getUserConfigPaths, loadUserConfigContext } from '../config.js'
-import type { CliLogEntry, CliLogScope, CliLogger } from '../logger.js'
-import { createCliLogger } from '../logger.js'
+import { getUserConfigPaths, loadUserConfigContext } from '../config.js'
+import type { CliLogScope, CliLogger } from '../logger.js'
+import { getCliLogger } from '../logger.js'
 
 import type { CommandDefinition } from './types.js'
 
@@ -25,7 +23,7 @@ export const runCommand: CommandDefinition = {
     const prompt = args.prompt
     const resolveUserConfigPaths = deps?.getUserConfigPaths ?? getUserConfigPaths
     const paths = resolveUserConfigPaths()
-    const logger = createCliLoggerFromPaths(paths)
+    const logger = getCliLogger(paths)
 
     await logger.logInfo(CLI_RUN_SCOPE, 'Received run command', {
       promptLength: prompt.length,
@@ -123,21 +121,6 @@ async function handleRuntimeEvent(event: DomainEvent, logger: CliLogger): Promis
       })
       break
   }
-}
-
-function createCliLoggerFromPaths(paths: UserConfigPaths): CliLogger {
-  return createCliLogger({
-    sink: {
-      write(entry: CliLogEntry) {
-        return appendCliLogEntry(paths, entry)
-      },
-    },
-  })
-}
-
-async function appendCliLogEntry(paths: UserConfigPaths, entry: CliLogEntry): Promise<void> {
-  await mkdir(paths.logsDir, { recursive: true })
-  await appendFile(paths.cliLogFilePath, `${JSON.stringify(entry)}\n`, 'utf8')
 }
 
 async function createDefaultUnifiedEntry(
