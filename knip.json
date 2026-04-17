@@ -8,7 +8,7 @@
     },
     "apps/controlplane": {
       "entry": ["src/server.ts", "src/migrate-cli.ts", "src/token-cli.ts", "src/index.ts"],
-      "ignoreDependencies": ["@testing-library/react", "@testing-library/jest-dom"]
+      "ignoreDependencies": ["@testing-library/jest-dom"]
     }
   },
   "ignoreIssues": {
@@ -20,6 +20,8 @@
     "packages/runtime/src/__tests__/helpers/**": ["exports", "types"],
     "apps/node/src/logger.ts": ["types"],
     "packages/agent/src/orchestration/executors/acp-executor.ts": ["files"],
-    "apps/controlplane/src/web/services/debug-api.ts": ["exports"]
+    "apps/controlplane/src/web/services/debug-api.ts": ["exports"],
+    "apps/controlplane/src/web/components/debug/debug-panel.tsx": ["exports"],
+    "apps/controlplane/src/web/components/debug/debug-toggle-button.tsx": ["exports"]
   }
 }
