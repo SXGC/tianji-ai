@@ -152,6 +152,26 @@ export function createCrashHandlers(options: CrashHandlerOptions): CrashHandlers
   const exit = options.exit ?? ((code) => process.exit(code))
   const pending = new Set<Promise<unknown>>()
 
+  // 幂等保护：并发信号或异常不重复触发 shutdown/exit
+  let shutdownStarted = false
+  let shutdownPromise: Promise<void> | undefined
+  let exitCalled = false
+
+  const ensureShutdown = (): Promise<void> => {
+    if (!shutdownStarted) {
+      shutdownStarted = true
+      shutdownPromise = options.shutdown()
+    }
+    return shutdownPromise!
+  }
+
+  const ensureExit = (code: number): void => {
+    if (!exitCalled) {
+      exitCalled = true
+      exit(code)
+    }
+  }
+
   const track = <T>(p: Promise<T>): Promise<T> => {
     pending.add(p)
     void p.finally(() => pending.delete(p))
@@ -159,16 +179,24 @@ export function createCrashHandlers(options: CrashHandlerOptions): CrashHandlers
   }
 
   const runShutdownWithTimeout = async (): Promise<void> => {
-    await Promise.race([
-      options.shutdown().catch((shutdownErr) => {
-        void options.logger.error(SCOPE_SERVER, 'Shutdown step threw', {
-          error: errorToLogData(shutdownErr),
-        })
-      }),
-      new Promise<void>((resolve) => {
-        setTimeout(() => resolve(), timeoutMs)
-      }),
-    ])
+    let timer: NodeJS.Timeout | undefined
+    try {
+      await Promise.race([
+        ensureShutdown().catch((shutdownErr) => {
+          void options.logger.error(SCOPE_SERVER, 'Shutdown step threw', {
+            error: errorToLogData(shutdownErr),
+          })
+        }),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, timeoutMs)
+        }),
+      ])
+    } finally {
+      // 无论 shutdown 先完成还是超时先触发，都清除定时器，避免事件循环泄漏
+      if (timer !== undefined) {
+        clearTimeout(timer)
+      }
+    }
   }
 
   const onUncaughtException = async (err: unknown): Promise<void> => {
@@ -178,9 +206,11 @@ export function createCrashHandlers(options: CrashHandlerOptions): CrashHandlers
       })
     )
     await runShutdownWithTimeout()
-    exit(1)
+    ensureExit(1)
   }
 
+  // 故意不 exit：Node 的默认行为是记录并继续，daemon-entry.ts 也遵守同样策略；
+  // 如果 promise 的拒绝对进程致命，应在 await 点本地 throw 而非依赖全局 handler。
   const onUnhandledRejection = async (err: unknown): Promise<void> => {
     await track(
       options.logger.error(SCOPE_SERVER, 'Control plane caught unhandled rejection', {
@@ -194,7 +224,7 @@ export function createCrashHandlers(options: CrashHandlerOptions): CrashHandlers
       options.logger.info(SCOPE_SERVER, 'Control plane shutdown signal received', { signal })
     )
     await runShutdownWithTimeout()
-    exit(0)
+    ensureExit(0)
   }
 
   const flush = async (): Promise<void> => {
