@@ -19,11 +19,16 @@ import type {
   PromptRequest,
   PromptResponse,
 } from '@agentclientprotocol/sdk'
+import type { ObserverLogger } from '@tianji/observer'
 
 import type { DomainEvent, DomainEventEnvelope } from '@tianji/shared'
 
 import type { UnifiedRuntimeEntry } from '../unified-entry.js'
 import { mapRuntimeEventToSessionUpdate } from './event-mapper.js'
+
+export interface TianjiAcpAgentOptions {
+  readonly logger?: ObserverLogger
+}
 
 /**
  * ACP 协议到 AgentSession 的桥接实现。
@@ -31,16 +36,22 @@ import { mapRuntimeEventToSessionUpdate } from './event-mapper.js'
 export class TianjiAcpAgent {
   readonly #connection: AgentSideConnection
   readonly #entry: UnifiedRuntimeEntry
+  readonly #logger: ObserverLogger | undefined
   #currentSessionId: string | null = null
   #abortController: AbortController | null = null
 
-  constructor(connection: AgentSideConnection, entry: UnifiedRuntimeEntry) {
+  constructor(
+    connection: AgentSideConnection,
+    entry: UnifiedRuntimeEntry,
+    options: TianjiAcpAgentOptions = {}
+  ) {
     this.#connection = connection
     this.#entry = entry
+    this.#logger = options.logger
   }
 
   async initialize(_params: InitializeRequest): Promise<InitializeResponse> {
-    console.error('[acp-agent] Received initialize request')
+    void this.#logger?.debug(['acp', 'bridge'], 'received initialize request')
     return {
       protocolVersion: PROTOCOL_VERSION,
       agentCapabilities: {
@@ -52,7 +63,9 @@ export class TianjiAcpAgent {
   async newSession(_params: NewSessionRequest): Promise<NewSessionResponse> {
     this.#currentSessionId = `session_${Date.now()}`
 
-    console.error('[acp-agent] New session created:', this.#currentSessionId)
+    void this.#logger?.info(['acp', 'bridge'], 'new session created', {
+      sessionId: this.#currentSessionId,
+    })
 
     return {
       sessionId: this.#currentSessionId,
@@ -64,7 +77,9 @@ export class TianjiAcpAgent {
   }
 
   async prompt(params: PromptRequest): Promise<PromptResponse> {
-    console.error('[acp-agent] Received prompt request, session:', params.sessionId)
+    void this.#logger?.debug(['acp', 'bridge'], 'received prompt request', {
+      sessionId: params.sessionId,
+    })
 
     if (!this.#currentSessionId) {
       throw new Error('No active session. Call newSession first.')
@@ -93,7 +108,9 @@ export class TianjiAcpAgent {
       })
       for await (const event of handle.events) {
         if (this.#abortController.signal.aborted) {
-          console.error('[acp-agent] Prompt cancelled')
+          void this.#logger?.debug(['acp', 'bridge'], 'prompt cancelled', {
+            sessionId: params.sessionId,
+          })
           return { stopReason: 'cancelled' }
         }
 
@@ -104,7 +121,9 @@ export class TianjiAcpAgent {
         }
       }
 
-      console.error('[acp-agent] Prompt completed')
+      void this.#logger?.debug(['acp', 'bridge'], 'prompt completed', {
+        sessionId: params.sessionId,
+      })
       return { stopReason: 'end_turn' }
     } finally {
       this.#abortController = null
@@ -112,7 +131,7 @@ export class TianjiAcpAgent {
   }
 
   async cancel(_params: CancelNotification): Promise<void> {
-    console.error('[acp-agent] Received cancel request')
+    void this.#logger?.debug(['acp', 'bridge'], 'received cancel request')
     this.#abortController?.abort()
   }
 }

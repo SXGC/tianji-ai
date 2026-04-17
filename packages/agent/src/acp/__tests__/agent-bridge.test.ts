@@ -1,5 +1,6 @@
 import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk'
 import type { AgentSideConnection } from '@agentclientprotocol/sdk'
+import type { ObserverLogger } from '@tianji/observer'
 import { createRunId, createSessionId } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
@@ -137,5 +138,68 @@ describe('TianjiAcpAgent', () => {
 
     const result = await agent.authenticate({ methodId: 'none' })
     expect(result).toEqual({})
+  })
+})
+
+describe('TianjiAcpAgent logger injection', () => {
+  function createMockLogger(): ObserverLogger {
+    return {
+      log: vi.fn().mockResolvedValue(undefined),
+      trace: vi.fn().mockResolvedValue(undefined),
+      debug: vi.fn().mockResolvedValue(undefined),
+      info: vi.fn().mockResolvedValue(undefined),
+      warn: vi.fn().mockResolvedValue(undefined),
+      error: vi.fn().mockResolvedValue(undefined),
+      fatal: vi.fn().mockResolvedValue(undefined),
+      child: vi.fn(),
+    } as unknown as ObserverLogger
+  }
+
+  it('routes cancel to logger.debug when logger is provided', async () => {
+    const logger = createMockLogger()
+    const conn = createMockConnection()
+    const entry = createMockEntry()
+
+    const agent = new TianjiAcpAgent(conn, entry, { logger })
+    await agent.cancel({ sessionId: 'unused' } as never)
+
+    expect(logger.debug).toHaveBeenCalledWith(['acp', 'bridge'], 'received cancel request')
+  })
+
+  it('routes initialize to logger.debug when logger is provided', async () => {
+    const logger = createMockLogger()
+    const conn = createMockConnection()
+    const entry = createMockEntry()
+
+    const agent = new TianjiAcpAgent(conn, entry, { logger })
+    await agent.initialize({ protocolVersion: PROTOCOL_VERSION, clientCapabilities: {} })
+
+    expect(logger.debug).toHaveBeenCalledWith(['acp', 'bridge'], 'received initialize request')
+  })
+
+  it('routes newSession to logger.info when logger is provided', async () => {
+    const logger = createMockLogger()
+    const conn = createMockConnection()
+    const entry = createMockEntry()
+    vi.spyOn(Date, 'now').mockReturnValue(999)
+
+    const agent = new TianjiAcpAgent(conn, entry, { logger })
+    await agent.newSession({ cwd: '/tmp', mcpServers: [] })
+
+    expect(logger.info).toHaveBeenCalledWith(
+      ['acp', 'bridge'],
+      'new session created',
+      expect.objectContaining({ sessionId: 'session_999' })
+    )
+    vi.restoreAllMocks()
+  })
+
+  it('still works without logger (backward compat)', async () => {
+    const conn = createMockConnection()
+    const entry = createMockEntry()
+
+    // 不传 logger，不应该抛错
+    const agent = new TianjiAcpAgent(conn, entry)
+    await expect(agent.cancel({ sessionId: 'x' } as never)).resolves.toBeUndefined()
   })
 })

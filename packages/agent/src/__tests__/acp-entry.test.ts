@@ -56,7 +56,15 @@ describe('runAcpAgent', () => {
         soul: 'test',
         workspace: undefined,
       },
-      paths: {} as never,
+      paths: {
+        configDir: '/tmp/tianji-test',
+        agentsDir: '/tmp/tianji-test/agents',
+        logsDir: '/tmp/tianji-test/logs',
+        configFilePath: '/tmp/tianji-test/tianji.json',
+        cliLogFilePath: '/tmp/tianji-test/logs/tianji.log',
+        daemonPortPath: '/tmp/tianji-test/daemon.port',
+        daemonPidPath: '/tmp/tianji-test/daemon.pid',
+      },
       resolvedEnvVars: [],
       snapshotStore: {} as never,
     } satisfies LoadedAgentContext)

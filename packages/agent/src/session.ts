@@ -1,5 +1,6 @@
 import { LocalShellBackend } from 'deepagents'
 
+import { errorToLogData } from '@tianji/observer'
 import {
   type ObserverLogger,
   type SessionRuntime,
@@ -152,7 +153,7 @@ export async function createAgentSession(
         result.catch((err: unknown) => {
           void options?.logger?.error(['agent', 'session'], 'SessionClosed emitEvent failed', {
             sessionId,
-            error: err instanceof Error ? err.message : String(err),
+            ...errorToLogData(err),
           })
         })
       }
@@ -252,7 +253,7 @@ export async function resumeAgentSession(
           void runtimeOptions?.logger?.error(
             ['agent', 'session'],
             'SessionClosed emitEvent failed',
-            { sessionId, error: err instanceof Error ? err.message : String(err) }
+            { sessionId, ...errorToLogData(err) }
           )
         })
       }

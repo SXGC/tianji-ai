@@ -10,22 +10,43 @@
 import { Readable, Writable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
 import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk'
+import type { ObserverLogger } from '@tianji/observer'
+import {
+  createJsonlFileSink,
+  createObserverLogger,
+  createStderrSink,
+  errorToLogData,
+} from '@tianji/observer'
 
 import { TianjiAcpAgent } from './acp/agent-bridge.js'
-import { loadAgentContext } from './context.js'
+import { type LoadedAgentContext, loadAgentContext } from './context.js'
 import { buildDefaultGraph } from './default-graph-builder.js'
 import { createUnifiedRuntimeEntry } from './unified-entry.js'
+
+/**
+ * 为 ACP 子进程创建结构化 logger。
+ * stdout 被 JSON-RPC 占用，stderr 作为日志通道；同时写 JSONL 文件便于后续检索。
+ */
+function createAcpLogger(context: LoadedAgentContext): ObserverLogger {
+  return createObserverLogger({
+    sinks: [
+      createJsonlFileSink({ filePath: context.paths.cliLogFilePath }),
+      createStderrSink({ minLevel: 'info', pretty: true }),
+    ],
+  })
+}
 
 /**
  * 启动 ACP agent 进程。
  * 从 stdin 读取 JSON-RPC 请求，通过 stdout 返回响应和通知。
  */
 export async function runAcpAgent(): Promise<void> {
-  console.error('[acp-agent] Starting ACP agent process')
-
   const context = await loadAgentContext()
+  const logger = createAcpLogger(context)
 
-  console.error('[acp-agent] Agent context loaded:', context.agent.agentName)
+  await logger.info(['acp', 'entry'], 'acp agent starting', {
+    agentName: context.agent.agentName,
+  })
 
   const built = await buildDefaultGraph(
     { source: 'acp', input: '', agentId: context.agent.agentName },
@@ -62,14 +83,14 @@ export async function runAcpAgent(): Promise<void> {
   const stream = ndJsonStream(output, input)
 
   const connection = new AgentSideConnection((conn) => {
-    return new TianjiAcpAgent(conn, entry)
+    return new TianjiAcpAgent(conn, entry, { logger })
   }, stream)
 
-  console.error('[acp-agent] ACP connection established, waiting for requests')
+  await logger.info(['acp', 'entry'], 'acp connection established')
 
   await connection.closed
 
-  console.error('[acp-agent] ACP connection closed, agent exiting')
+  await logger.info(['acp', 'entry'], 'acp connection closed')
 }
 
 const isMain =
@@ -79,7 +100,13 @@ if (isMain) {
   try {
     await runAcpAgent()
   } catch (error: unknown) {
-    console.error('ACP agent fatal error:', error)
+    const data = errorToLogData(error)
+    process.stderr.write(
+      `[acp-agent] Fatal: ${typeof data.message === 'string' ? data.message : String(error)}\n`
+    )
+    if (typeof data.stack === 'string') {
+      process.stderr.write(`${data.stack}\n`)
+    }
     process.exit(1)
   }
 }
