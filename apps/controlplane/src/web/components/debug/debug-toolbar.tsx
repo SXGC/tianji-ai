@@ -36,22 +36,27 @@ export function DebugToolbar(): JSX.Element {
   const pause = useDebugStore((s) => s.pause)
   const resume = useDebugStore((s) => s.resume)
   const appendEvents = useDebugStore((s) => s.appendEvents)
+  const reportFailure = useDebugStore((s) => s.reportFailure)
 
   /**
    * 历史模式下手动查询第一页：清空旧列表后发起请求，结果追加到 store。
-   * 异常不捕获，让错误自然抛出。
+   * 异常通过 reportFailure 上报到错误 banner，不做降级兜底。
    */
   async function runHistoryQuery(): Promise<void> {
     clearEvents()
-    const res = await fetchDebugEvents({
-      mode: 'history',
-      startTime: startTime === '' ? undefined : startTime,
-      endTime: endTime === '' ? undefined : endTime,
-      aggregateType: aggregateType ?? undefined,
-      aggregateId: aggregateId === '' ? undefined : aggregateId,
-      limit: 200,
-    })
-    appendEvents(res.events, res.minCursor, res.hasMore)
+    try {
+      const res = await fetchDebugEvents({
+        mode: 'history',
+        startTime: startTime === '' ? undefined : startTime,
+        endTime: endTime === '' ? undefined : endTime,
+        aggregateType: aggregateType ?? undefined,
+        aggregateId: aggregateId === '' ? undefined : aggregateId,
+        limit: 200,
+      })
+      appendEvents(res.events, res.minCursor, res.hasMore)
+    } catch (err) {
+      reportFailure(err instanceof Error ? err.message : 'unknown')
+    }
   }
 
   function handleAggregateTypeChange(e: ChangeEvent<HTMLSelectElement>): void {
