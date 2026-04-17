@@ -9,6 +9,7 @@
 import { CopilotRuntime, copilotRuntimeNodeHttpEndpoint } from '@copilotkit/runtime'
 import type { ObserverLogger } from '@tianji/observer'
 import type { EventBus } from '@tianji/shared'
+import { createSessionId } from '@tianji/shared'
 import { Hono } from 'hono'
 
 import { TianjiAgent } from '../agents/tianji-agent.js'
@@ -43,7 +44,7 @@ export function createCopilotRoute(
 
   function getSessionOwner(sessionId: string): { nodeId: string; agentId: string } | undefined {
     return db.raw
-      .prepare('SELECT node_id, agent_id FROM sessions WHERE session_id = ?')
+      .prepare('SELECT node_id as nodeId, agent_id as agentId FROM sessions WHERE session_id = ?')
       .get(sessionId) as { nodeId: string; agentId: string } | undefined
   }
 
@@ -57,6 +58,54 @@ export function createCopilotRoute(
       )
       .run(sessionId, nodeId, agentId, now, now)
   }
+
+  app.get('/api/copilot/info', (c) => {
+    return c.json({
+      agents: [
+        {
+          id: 'default',
+          name: 'default',
+          description: 'Tianji controlplane agent',
+        },
+      ],
+    })
+  })
+
+  app.post('/api/sessions', async (c) => {
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400)
+    }
+
+    if (typeof body !== 'object' || body === null) {
+      return c.json({ error: 'Missing nodeId or agentId' }, 400)
+    }
+
+    const { nodeId, agentId } = body as { nodeId?: unknown; agentId?: unknown }
+    if (typeof nodeId !== 'string' || nodeId.length === 0) {
+      return c.json({ error: 'nodeId must be a non-empty string' }, 400)
+    }
+    if (typeof agentId !== 'string' || agentId.length === 0) {
+      return c.json({ error: 'agentId must be a non-empty string' }, 400)
+    }
+
+    const node = db.raw.prepare('SELECT status FROM nodes WHERE node_id = ?').get(nodeId) as
+      | { status: string }
+      | undefined
+
+    if (node === undefined) {
+      return c.json({ error: 'Node not found' }, 404)
+    }
+    if (node.status === 'offline') {
+      return c.json({ error: 'Node is offline' }, 409)
+    }
+
+    const sessionId = createSessionId(`session_${crypto.randomUUID()}`)
+    bindSessionOwner(sessionId, nodeId, agentId)
+    return c.json({ sessionId }, 201)
+  })
 
   app.post('/api/copilot', async (c) => {
     const nodeId = c.req.header('x-node-id')

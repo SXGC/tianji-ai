@@ -31,6 +31,7 @@
 
 html,
 body {
+  height: 100%;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
@@ -40,13 +41,14 @@ body {
 }
 
 #root {
-  min-height: 100vh;
+  height: 100%;
 }
 
 .app-layout {
   display: grid;
   grid-template-columns: 260px 1fr 420px;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .node-list {
@@ -123,6 +125,7 @@ body {
   justify-content: center;
   background: var(--bg);
   border-right: 1px solid var(--border);
+  min-height: 0;
 }
 
 .workspace-placeholder {
@@ -135,6 +138,38 @@ body {
   flex-direction: column;
   background: var(--surface);
   overflow: hidden;
+  min-height: 0;
+}
+
+.chat-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(13, 110, 63, 0.07), rgba(13, 110, 63, 0)), var(--surface);
+}
+
+.chat-toolbar-copy {
+  min-width: 0;
+}
+
+.chat-toolbar-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chat-toolbar-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 .chat-disabled {
@@ -150,7 +185,145 @@ body {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+.tianji-chat > [data-copilotkit],
+.tianji-chat > div {
+  min-height: 0;
+}
+
+.chat-messages-shell {
+  flex: 1;
+  min-height: 0;
+  padding: 12px 12px 0;
+}
+
+.chat-messages-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   height: 100%;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+  scrollbar-gutter: stable;
+}
+
+.chat-input-shell {
+  border-top: 1px solid var(--border);
+  padding: 14px 16px 16px;
+  background: var(--surface);
+}
+
+.chat-input-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.chat-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fcfcfb;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.chat-input-field {
+  width: 100%;
+  min-height: 26px;
+  max-height: 180px;
+  resize: vertical;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.chat-input-field::placeholder {
+  color: var(--text-muted);
+}
+
+.chat-input-field:disabled {
+  cursor: not-allowed;
+}
+
+.chat-input-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.chat-primary-button,
+.chat-secondary-button {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.15s background-color, 0.15s border-color, 0.15s color, 0.15s opacity;
+}
+
+.chat-primary-button {
+  padding: 10px 14px;
+  background: var(--primary);
+  color: #fff;
+}
+
+.chat-icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  background: var(--primary);
+  color: #fff;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: 0.15s background-color, 0.15s opacity;
+}
+
+.chat-icon-button:hover:not(:disabled) {
+  background: #0a5a34;
+}
+
+.chat-icon-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.chat-primary-button:hover:not(:disabled) {
+  background: #0a5a34;
+}
+
+.chat-secondary-button {
+  padding: 10px 12px;
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.chat-secondary-button:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.chat-primary-button:disabled,
+.chat-secondary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 @media (max-width: 1200px) {
@@ -166,6 +339,7 @@ body {
   .app-layout {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
+    height: 100vh;
   }
   .node-list {
     max-height: 35vh;
@@ -174,5 +348,14 @@ body {
   }
   .workspace-panel {
     display: none;
+  }
+  .chat-toolbar {
+    padding: 16px;
+  }
+  .chat-toolbar-title {
+    font-size: 16px;
+  }
+  .chat-input-shell {
+    padding: 12px;
   }
 }

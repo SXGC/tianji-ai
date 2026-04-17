@@ -3,6 +3,7 @@ import { createRoute } from '@tanstack/react-router'
 import { useEffect } from 'react'
 
 import { Layout } from '../components/layout'
+import { createSession } from '../lib/nodes-api'
 import { useAppStore } from '../stores/app-store'
 import { Route as RootRoute } from './__root'
 
@@ -20,6 +21,8 @@ export function IndexRouteComponent() {
     nodes,
     selectNode,
     sessionId,
+    clearSessionId,
+    isSessionOwnedBySelectedTarget,
     setSessionId,
   } = useAppStore()
 
@@ -39,9 +42,22 @@ export function IndexRouteComponent() {
   // 前端只负责初始化体验上的 sessionId，真正的 owner 约束在后端请求边界校验。
   useEffect(() => {
     if (selectedNodeId === null || selectedAgentId === null) return
+    if (sessionId !== null && !isSessionOwnedBySelectedTarget()) {
+      clearSessionId()
+      return
+    }
     if (sessionId !== null) return
-    setSessionId(`session_${Date.now()}`)
-  }, [selectedAgentId, selectedNodeId, sessionId, setSessionId])
+    void createSession({ nodeId: selectedNodeId, agentId: selectedAgentId }).then((result) => {
+      setSessionId(result.sessionId, { nodeId: selectedNodeId, agentId: selectedAgentId })
+    })
+  }, [
+    clearSessionId,
+    isSessionOwnedBySelectedTarget,
+    selectedAgentId,
+    selectedNodeId,
+    sessionId,
+    setSessionId,
+  ])
 
   if (selectedNodeId === null || selectedAgentId === null || sessionId === null) {
     return <Layout />
