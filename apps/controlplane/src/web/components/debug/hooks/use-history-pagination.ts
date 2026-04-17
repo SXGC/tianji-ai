@@ -33,6 +33,6 @@ export function useHistoryPagination(): () => Promise<void> {
       aggregateId: aggregateId === '' ? undefined : aggregateId,
       limit: 200,
     })
-    appendEvents(res.events, res.minCursor || minCursor, res.hasMore)
+    appendEvents(res.events, res.minCursor, res.hasMore)
   }, [mode, reachedEnd, minCursor, aggregateType, aggregateId, startTime, endTime, appendEvents])
 }

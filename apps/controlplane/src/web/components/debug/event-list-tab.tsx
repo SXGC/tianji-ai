@@ -13,6 +13,7 @@ export function EventListTab(): JSX.Element {
   const events = useDebugStore((s) => s.events)
   const lastError = useDebugStore((s) => s.lastError)
   const reachedEnd = useDebugStore((s) => s.historyReachedEnd)
+  const reportFailure = useDebugStore((s) => s.reportFailure)
   const loadMore = useHistoryPagination()
   const [selected, setSelected] = useState<DebugEvent | null>(null)
   const loadingRef = useRef(false)
@@ -22,17 +23,24 @@ export function EventListTab(): JSX.Element {
     if (el.scrollHeight - el.scrollTop - el.clientHeight > SCROLL_THRESHOLD_PX) return
     if (loadingRef.current || reachedEnd) return
     loadingRef.current = true
-    loadMore().finally(() => {
-      loadingRef.current = false
-    })
+    loadMore()
+      .catch((err: unknown) => {
+        reportFailure(err instanceof Error ? err.message : 'unknown')
+      })
+      .finally(() => {
+        loadingRef.current = false
+      })
   }
 
   return (
     <div style={{ position: 'relative', height: '100%' }}>
       {lastError !== null && (
-        <div role="alert" style={{ background: '#5a1f1f', color: '#fff', padding: 6 }}>
+        <output
+          aria-live="polite"
+          style={{ display: 'block', background: '#5a1f1f', color: '#fff', padding: 6 }}
+        >
           轮询失败：{lastError}
-        </div>
+        </output>
       )}
       {events.length >= MAX_EVENTS && (
         <div style={{ background: '#3a3a1f', color: '#fff', padding: 6 }}>

@@ -69,7 +69,7 @@ describe('EventListTab', () => {
       lastError: 'network down',
     })
     render(<EventListTab />)
-    expect(screen.getByRole('alert').textContent).toContain('network down')
+    expect(screen.getByRole('status').textContent).toContain('network down')
   })
 })
 
@@ -122,5 +122,24 @@ describe('use-history-pagination 业务行为', () => {
     fireEvent.scroll(list)
     await Promise.resolve()
     expect(spy).not.toHaveBeenCalled()
+  })
+
+  test('历史分页失败会把错误写入 store.lastError', async () => {
+    vi.spyOn(api, 'fetchDebugEvents').mockRejectedValue(new Error('net down'))
+    useDebugStore.setState({
+      panelOpen: true,
+      tab: 'events',
+      mode: 'history',
+      events: [mockEvent(10), mockEvent(9)],
+      historyMinCursor: 9,
+      historyReachedEnd: false,
+    })
+    render(<EventListTab />)
+    const list = screen.getByTestId('event-list-scroll')
+    Object.defineProperty(list, 'scrollHeight', { value: 1000, configurable: true })
+    Object.defineProperty(list, 'clientHeight', { value: 500, configurable: true })
+    Object.defineProperty(list, 'scrollTop', { value: 400, configurable: true, writable: true })
+    fireEvent.scroll(list)
+    await vi.waitFor(() => expect(useDebugStore.getState().lastError).toBe('net down'))
   })
 })
