@@ -11,6 +11,7 @@ export {
   createObserverLogger,
   createMemorySink,
   createStdoutSink,
+  errorToLogData,
   formatEnvelopeLog,
   getDefaultObserverSensitiveKeys,
   sanitizeObserverLogData,
@@ -18,6 +19,7 @@ export {
 } from './logger/index.js'
 
 export type { CreateJsonlFileSinkOptions } from './logger/index.js'
+export type { ErrorToLogDataOptions } from './logger/index.js'
 export type { ObserverMemorySink } from './logger/index.js'
 export type { CreateStdoutSinkOptions } from './logger/index.js'
 

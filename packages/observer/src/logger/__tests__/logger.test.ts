@@ -40,7 +40,11 @@ describe('createObserverLogger', () => {
     expect(sink.entries).toHaveLength(1)
     expect(sink.entries[0]?.data).toEqual({
       nested: { keep: true },
-      error: { name: 'Error', message: 'boom' },
+      error: expect.objectContaining({
+        name: 'Error',
+        message: 'boom',
+        stack: expect.any(String),
+      }),
     })
   })
 

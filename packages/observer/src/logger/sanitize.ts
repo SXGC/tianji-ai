@@ -1,3 +1,5 @@
+import { errorToLogData } from './error-formatter.js'
+
 const DEFAULT_SENSITIVE_KEYS = ['apiKey', 'prompt', 'soul'] as const
 
 /**
@@ -23,10 +25,7 @@ export function sanitizeObserverLogData(
 
 function sanitizeValue(value: unknown, sensitiveKeySet: ReadonlySet<string>): unknown {
   if (value instanceof Error) {
-    return {
-      name: value.name,
-      message: value.message,
-    }
+    return errorToLogData(value)
   }
 
   if (Array.isArray(value)) {
