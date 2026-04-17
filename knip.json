@@ -19,5 +19,6 @@
     "packages/runtime/src/__tests__/helpers/**": ["exports", "types"],
     "apps/node/src/logger.ts": ["types"],
     "packages/agent/src/orchestration/executors/acp-executor.ts": ["files"]
-  }
+  },
+  "ignoreDependencies": ["tsx"]
 }

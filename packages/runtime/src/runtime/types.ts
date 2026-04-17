@@ -12,6 +12,7 @@ import type {
   AppMessage,
   DomainEvent,
   ExecutionPolicy,
+  OrchestrationGraph,
   RunId,
   RunSnapshot,
   SessionId,
@@ -93,6 +94,56 @@ export interface SessionRuntime {
   readonly resumeRun: (options: ResumeRunOptions) => Promise<RunId>
   readonly streamEvents: (runId: RunId) => AsyncIterable<DomainEvent>
   readonly cancelRun: (runId: RunId) => boolean
+}
+
+export interface GraphRunRequest {
+  readonly graph: OrchestrationGraph
+  readonly initialState?: Record<string, unknown>
+  readonly executors: Record<string, unknown>
+  readonly sessionId?: SessionId
+  readonly runId?: RunId
+}
+
+export interface GraphRunHandle {
+  readonly sessionId: SessionId
+  readonly runId?: RunId
+  readonly events: AsyncIterable<DomainEvent>
+}
+
+export interface ResumeGraphRunRequest {
+  readonly sessionId: SessionId
+  readonly runId: RunId
+  readonly checkpointId?: string
+}
+
+export interface CancelGraphRunRequest {
+  readonly runId: RunId
+}
+
+export interface StreamGraphRunRequest {
+  readonly runId: RunId
+}
+
+export interface GraphRuntime {
+  runGraph(request: GraphRunRequest): Promise<GraphRunHandle>
+  resumeGraph(request: ResumeGraphRunRequest): Promise<GraphRunHandle>
+  cancelRun(request: CancelGraphRunRequest): Promise<void>
+  streamRun(request: StreamGraphRunRequest): AsyncIterable<DomainEvent>
+}
+
+export interface GraphRuntimeDeps {
+  readonly sessionRuntime: Pick<SessionRuntime, 'createSession' | 'streamEvents' | 'cancelRun'>
+  readonly graphRunner?: {
+    readonly start?: (request: {
+      readonly sessionId: SessionId
+      readonly runId: RunId
+      readonly graph: OrchestrationGraph
+      readonly initialState?: Record<string, unknown>
+      readonly executors: Record<string, unknown>
+      readonly emitEvent?: (event: DomainEvent) => void | Promise<void>
+    }) => Promise<RunId>
+    readonly resume?: (request: ResumeGraphRunRequest) => Promise<GraphRunHandle>
+  }
 }
 
 // ── 内部类型（仅 runtime/ 子模块可见）────────────────────────────────────────

@@ -11,11 +11,10 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 import {
-  type AgentExecutorFactory,
   type AgentSession,
   DaemonClient,
   DaemonServer,
-  type OrchestrationGraph,
+  type UnifiedRuntimeEntry,
 } from '@tianji/agent'
 import { createEventBus } from '@tianji/shared'
 import type { DomainEvent, DomainEventEnvelope, EventBus, RunId, SessionId } from '@tianji/shared'
@@ -32,18 +31,16 @@ import {
   wrapRunEnvelope,
 } from './helpers/daemon-subprocess.js'
 
-const testDefaultGraph: OrchestrationGraph = {
+const testDefaultGraph = {
   id: 'test',
   name: 'test',
   version: 1,
-  source: 'static',
+  source: 'static' as const,
   locked: false,
   state: {},
   nodes: [],
   edges: [],
 }
-
-const testExecutorFactory: AgentExecutorFactory = vi.fn()
 
 interface LiveDaemonHandle {
   readonly client: DaemonClient
@@ -62,10 +59,21 @@ async function setupLiveDaemon(
 ): Promise<LiveDaemonHandle> {
   const temp = providedPaths === undefined ? await createTempCliPaths() : undefined
   const paths = providedPaths ?? temp!.paths
+  const entry: UnifiedRuntimeEntry = {
+    run: vi.fn(async (request) => ({
+      sessionId: live.session.sessionId,
+      runId: 'run_test' as never,
+      events: live.session.queryWithGraph(
+        {} as never,
+        { initialState: { input: request.input } } as never
+      ),
+    })),
+    resume: vi.fn(),
+    cancel: vi.fn(),
+    stream: vi.fn(),
+  }
   const server = new DaemonServer({
-    session: live.session,
-    defaultGraph: testDefaultGraph,
-    executorFactory: testExecutorFactory,
+    entry,
     bus: live.bus,
     paths: {
       daemonPortPath: paths.daemonPortPath,

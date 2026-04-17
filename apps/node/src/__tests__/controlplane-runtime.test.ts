@@ -1,4 +1,11 @@
-import { type Command, type DomainEvent, createNodeId, createTaskId } from '@tianji/shared'
+import type { AgentSession, UnifiedRuntimeEntry } from '@tianji/agent'
+import {
+  type Command,
+  type DomainEvent,
+  type TaskRunCommand,
+  createNodeId,
+  createTaskId,
+} from '@tianji/shared'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type {
@@ -10,6 +17,11 @@ import type {
 } from '../node-runtime/controlplane-runtime.js'
 import { createControlPlaneRuntime } from '../node-runtime/controlplane-runtime.js'
 
+const { createAgentSessionMock, buildDefaultGraphMock } = vi.hoisted(() => ({
+  createAgentSessionMock: vi.fn(),
+  buildDefaultGraphMock: vi.fn(),
+}))
+
 const { agentRunnerMock, inProcessRunnerMock } = vi.hoisted(() => ({
   agentRunnerMock: vi.fn(),
   inProcessRunnerMock: vi.fn(),
@@ -19,6 +31,16 @@ vi.mock('../acp/index.js', () => ({
   AgentRunner: agentRunnerMock,
   InProcessAgentRunner: inProcessRunnerMock,
 }))
+
+vi.mock('@tianji/agent', async () => {
+  const actual = await vi.importActual<typeof import('@tianji/agent')>('@tianji/agent')
+
+  return {
+    ...actual,
+    createAgentSession: createAgentSessionMock,
+    buildDefaultGraph: buildDefaultGraphMock,
+  }
+})
 
 function createRunnerDouble() {
   return {
@@ -98,6 +120,33 @@ function createTestCommand(): Command {
   }
 }
 
+function createTaskRunCommand(): TaskRunCommand {
+  return createTestCommand() as TaskRunCommand
+}
+
+function createUnifiedEntryDouble(run?: ReturnType<typeof vi.fn>): UnifiedRuntimeEntry {
+  return {
+    run:
+      run ??
+      vi.fn(async () => ({
+        sessionId: 'session-test' as never,
+        runId: 'run-test' as never,
+        events: (async function* () {
+          yield {
+            type: 'RunCompleted' as const,
+            runId: 'run-test' as never,
+            sessionId: 'session-test' as never,
+            triggerType: 'new' as const,
+            timestamp: Date.now(),
+          }
+        })(),
+      })),
+    resume: vi.fn(),
+    cancel: vi.fn(async () => undefined),
+    stream: vi.fn(),
+  }
+}
+
 describe('createControlPlaneRuntime with custom deps', () => {
   it('updateExecutionState propagates to connection', () => {
     const setExecutionState = vi.fn()
@@ -153,7 +202,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
 
     expect(capturedOnCommand).toBeDefined()
 
-    const cmd = createTestCommand()
+    const cmd = createTaskRunCommand()
     capturedOnCommand!(cmd)
 
     // execute is called via void (fire-and-forget), wait a tick
@@ -198,7 +247,7 @@ describe('createControlPlaneRuntime with custom deps', () => {
       deps
     )
 
-    const cmd = createTestCommand()
+    const cmd = createTaskRunCommand()
     capturedOnCommand?.(cmd)
 
     await new Promise((resolve) => setTimeout(resolve, 10))
@@ -240,37 +289,45 @@ describe('createControlPlaneRuntime with custom deps', () => {
     expect(execute).toHaveBeenCalledWith(cmd)
   })
 
-  it('passes task session attachment dependencies into in-process runner', async () => {
-    setupRunnerMocks()
-
+  it('passes task execution through injected unified entry factory', async () => {
     const emitTaskEvent = vi.fn()
-    const logger = createLoggerDouble()
+    const run = vi.fn(async () => ({
+      sessionId: 'session-test' as never,
+      runId: 'run-test' as never,
+      events: (async function* () {
+        yield {
+          type: 'RunCompleted' as const,
+          runId: 'run-test' as never,
+          sessionId: 'session-test' as never,
+          triggerType: 'new' as const,
+          timestamp: Date.now(),
+        }
+      })(),
+    }))
+    const createUnifiedEntry = vi.fn(async () => createUnifiedEntryDouble(run))
+
     const runtime = createControlPlaneRuntime(
       createTestConfig({
         emitTaskEvent,
-        logger,
-        agentConfigs: {
-          default: {
-            type: 'native',
-          } as never,
-        },
-        nativeAgentContext: {} as never,
-        defaultGraph: {} as never,
-        executorFactory: {} as never,
       }),
       {
         createConnection: () => createConnectionDouble(),
+        createUnifiedEntry,
       }
     )
 
-    await runtime.onCommand(createTestCommand())
+    const command = createTaskRunCommand()
+    await runtime.onCommand(command)
 
-    expect(inProcessRunnerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: 'default',
-        taskId: createTaskId('task-001'),
-        emitEvent: emitTaskEvent,
-      })
+    expect(createUnifiedEntry).toHaveBeenCalledWith(command)
+    expect(run).toHaveBeenCalledWith({
+      source: 'controlplane',
+      agentId: 'default',
+      input: 'test goal',
+      sessionId: undefined,
+    })
+    expect(emitTaskEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'TaskStarted', taskId: 'task-001' })
     )
   })
 
@@ -415,131 +472,175 @@ describe('parseAgentArgs (via default TaskExecutor path)', () => {
   })
 })
 
-describe('createRunner routing', () => {
+describe('unified entry routing', () => {
   beforeEach(() => {
     setupRunnerMocks()
+    vi.mocked(createAgentSessionMock).mockReset()
+    vi.mocked(buildDefaultGraphMock).mockReset()
   })
 
-  it('routes native agents to InProcessAgentRunner when nativeAgentContext exists', async () => {
-    const logger = createLoggerDouble()
+  it('creates unified entry and invokes entry.run when injected', async () => {
+    const run = vi.fn(async () => ({
+      sessionId: 'session-test' as never,
+      runId: 'run-test' as never,
+      events: (async function* () {
+        yield {
+          type: 'RunCompleted' as const,
+          runId: 'run-test' as never,
+          sessionId: 'session-test' as never,
+          triggerType: 'new' as const,
+          timestamp: Date.now(),
+        }
+      })(),
+    }))
+    const createUnifiedEntry = vi.fn(async () => createUnifiedEntryDouble(run))
+
     const runtime = createControlPlaneRuntime(
       createTestConfig({
-        agentConfigs: {
-          default: { model: 'openai/gpt-4o-mini' },
-        },
-        nativeAgentContext: {
-          paths: {} as never,
-          config: {},
-          agent: {} as never,
-          resolvedEnvVars: [],
-          snapshotStore: {} as never,
-        },
-        defaultGraph: {} as never,
-        executorFactory: {} as never,
-        logger,
+        agentConfigs: { default: { model: 'openai/gpt-4o-mini' } },
       }),
       {
         createConnection: () => createConnectionDouble(),
+        createUnifiedEntry,
       }
     )
 
-    await runtime.taskExecutor.execute(createTestCommand())
+    const command = createTaskRunCommand()
+    await runtime.taskExecutor.execute(command)
 
-    expect(inProcessRunnerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: 'default',
-        nativeAgentContext: expect.any(Object),
-      })
-    )
-    expect(logger.logDebug).toHaveBeenCalledWith(
-      ['daemon', 'task'],
-      'Resolved task runner type',
-      expect.objectContaining({
-        agentId: 'default',
-        resolvedAgentType: 'native',
-        hasNativeAgentContext: true,
-        hasDefaultGraph: true,
-        hasExecutorFactory: true,
-        runnerType: 'inprocess',
-      })
-    )
+    expect(createUnifiedEntry).toHaveBeenCalledWith(command)
+    expect(run).toHaveBeenCalledOnce()
     expect(agentRunnerMock).not.toHaveBeenCalled()
-  })
-
-  it('routes external agents to AgentRunner', async () => {
-    const logger = createLoggerDouble()
-    const runtime = createControlPlaneRuntime(
-      createTestConfig({
-        agentConfigs: {
-          default: { command: 'codex', args: ['--acp'] },
-        },
-        nativeAgentContext: {
-          paths: {} as never,
-          config: {},
-          agent: {} as never,
-          resolvedEnvVars: [],
-          snapshotStore: {} as never,
-        },
-        logger,
-      }),
-      {
-        createConnection: () => createConnectionDouble(),
-      }
-    )
-
-    await runtime.taskExecutor.execute(createTestCommand())
-
-    expect(agentRunnerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: 'default',
-        command: 'codex',
-        args: ['--acp'],
-      })
-    )
-    expect(logger.logDebug).toHaveBeenCalledWith(
-      ['daemon', 'task'],
-      'Resolved task runner type',
-      expect.objectContaining({
-        agentId: 'default',
-        resolvedAgentType: 'external',
-        hasNativeAgentContext: true,
-        hasDefaultGraph: false,
-        hasExecutorFactory: false,
-        runnerType: 'acp',
-      })
-    )
-    expect(inProcessRunnerMock).not.toHaveBeenCalled()
-  })
-
-  it('routes native agents to AgentRunner when nativeAgentContext is missing', async () => {
-    const runtime = createControlPlaneRuntime(
-      createTestConfig({
-        agentConfigs: {
-          default: { model: 'openai/gpt-4o-mini' },
-        },
-      }),
-      {
-        createConnection: () => createConnectionDouble(),
-      }
-    )
-
-    await runtime.taskExecutor.execute(createTestCommand())
-
-    expect(agentRunnerMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentId: 'default',
-        command: undefined,
-      })
-    )
     expect(inProcessRunnerMock).not.toHaveBeenCalled()
   })
 
   it('throws when agent config is missing', async () => {
     const runtime = createControlPlaneRuntime(createTestConfig())
 
-    await expect(runtime.taskExecutor.execute(createTestCommand())).rejects.toThrow(
+    await expect(runtime.taskExecutor.execute(createTaskRunCommand())).rejects.toThrow(
       'Agent config not found for agentId "default"'
     )
+  })
+
+  it('throws when native runtime dependencies are missing on default path', async () => {
+    const runtime = createControlPlaneRuntime(
+      createTestConfig({
+        agentConfigs: {
+          default: { model: 'openai/gpt-4o-mini' },
+        },
+      }),
+      {
+        createConnection: () => createConnectionDouble(),
+      }
+    )
+
+    await expect(runtime.taskExecutor.execute(createTaskRunCommand())).rejects.toThrow(
+      'ControlPlaneRuntime requires nativeAgentContext, defaultGraph, and executorFactory for unified task execution'
+    )
+  })
+
+  it('default native unified entry returns runId and cancels via session.abort', async () => {
+    const abortSpy = vi.fn()
+    const emittedTaskEvents: DomainEvent[] = []
+    let resolveBlockedRun: (() => void) | undefined
+    const sessionDouble: AgentSession = {
+      sessionId: 'session-native-test' as never,
+      abort: abortSpy,
+      close: vi.fn(),
+      queryWithGraph: () =>
+        (async function* () {
+          yield {
+            type: 'GraphRunStarted' as const,
+            runId: 'run-native-test' as never,
+            graphId: 'default',
+            graphVersion: 1,
+            timestamp: Date.now(),
+          }
+          await new Promise<void>((resolve) => {
+            resolveBlockedRun = resolve
+          })
+          yield {
+            type: 'GraphRunCancelled' as const,
+            runId: 'run-native-test' as never,
+            graphId: 'default',
+            graphVersion: 1,
+            reason: 'abort' as const,
+            timestamp: Date.now(),
+          }
+        })(),
+    }
+
+    vi.mocked(createAgentSessionMock).mockResolvedValue(sessionDouble)
+    vi.mocked(buildDefaultGraphMock).mockResolvedValue({
+      graph: {
+        id: 'default',
+        name: 'default',
+        version: 1,
+        source: 'static',
+        locked: false,
+        state: {},
+        nodes: [],
+        edges: [],
+      },
+      executorFactory: vi.fn(),
+    })
+
+    const runtime = createControlPlaneRuntime(
+      createTestConfig({
+        emitTaskEvent: (event) => {
+          emittedTaskEvents.push(event)
+        },
+        agentConfigs: { default: { model: 'openai/gpt-4o-mini' } },
+        nativeAgentContext: {
+          paths: {} as never,
+          config: {} as never,
+          agent: {} as never,
+          resolvedEnvVars: [],
+          snapshotStore: {
+            saveSession: vi.fn(),
+            saveRun: vi.fn(),
+            loadSession: vi.fn(),
+            loadRun: vi.fn(),
+            deleteSession: vi.fn(),
+            deleteRun: vi.fn(),
+          } as never,
+        },
+        defaultGraph: {
+          id: 'default',
+          name: 'default',
+          version: 1,
+          source: 'static',
+          locked: false,
+          state: {},
+          nodes: [],
+          edges: [],
+        },
+        executorFactory: vi.fn(),
+      }),
+      {
+        createConnection: () => createConnectionDouble(),
+      }
+    )
+
+    const taskId = createTaskId('task-native-cancel')
+    const executionPromise = runtime.taskExecutor.execute({
+      ...createTaskRunCommand(),
+      payload: {
+        taskId,
+        agentId: 'default',
+        goal: 'cancel me',
+      },
+    })
+
+    while (!emittedTaskEvents.some((event) => event.type === 'GraphRunStarted')) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    runtime.taskExecutor.cancel()
+    resolveBlockedRun?.()
+    await executionPromise
+
+    expect(abortSpy).toHaveBeenCalledOnce()
   })
 })
 

@@ -28,6 +28,7 @@
     "knip": "^6.3.0",
     "sonarqube-scanner": "^4.3.5",
     "turbo": "^2.8.16",
+    "tsx": "^4.21.0",
     "typescript": "^5.8.2",
     "vitest": "^3.0.0"
   }

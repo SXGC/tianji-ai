@@ -8,6 +8,18 @@ import type { UserConfigPaths } from '../config.js'
 type LoadUserConfigContextResult = {
   paths: UserConfigPaths
   config: TianjiConfig
+  agent: {
+    agentName: string
+    modelRef: string
+    provider: string
+    modelName: string
+    providerConfig: undefined
+    soulPath: string
+    soul: string
+    workspace: undefined
+  }
+  resolvedEnvVars: readonly string[]
+  snapshotStore: object
 }
 
 const paths: UserConfigPaths = {
@@ -43,11 +55,45 @@ const loadUserConfigContextMock = vi.fn<() => Promise<LoadUserConfigContextResul
       version: 'v1',
     },
   },
+  agent: {
+    agentName: 'default',
+    modelRef: 'openai/gpt-4.1',
+    provider: 'openai',
+    modelName: 'gpt-4.1',
+    providerConfig: undefined,
+    soulPath: '/tmp/tianji-test/agents/default/SOUL.md',
+    soul: '# Test Agent',
+    workspace: undefined,
+  },
+  resolvedEnvVars: [],
+  snapshotStore: {},
 }))
 const logInfoMock = vi.fn(async () => undefined)
 const logErrorMock = vi.fn(async () => undefined)
 const logDebugMock = vi.fn(async () => undefined)
 const createAgentSessionMock = vi.fn(() => ({ sessionId: 'session-1' }))
+const buildDefaultGraphMock = vi.fn(async () => ({
+  graph: {
+    id: 'test',
+    name: 'test',
+    version: 1,
+    source: 'static',
+    locked: false,
+    state: {},
+    nodes: [],
+    edges: [],
+  },
+  executorFactory: vi.fn(),
+}))
+const createUnifiedRuntimeEntryMock = vi.fn((options: object) => options)
+
+async function collectEvents(events: AsyncIterable<unknown>): Promise<unknown[]> {
+  const items: unknown[] = []
+  for await (const event of events) {
+    items.push(event)
+  }
+  return items
+}
 
 async function waitFor(assertion: () => void): Promise<void> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
@@ -112,6 +158,8 @@ vi.mock('@tianji/agent', () => ({
     lastError: null,
   },
   createAgentSession: createAgentSessionMock,
+  buildDefaultGraph: buildDefaultGraphMock,
+  createUnifiedRuntimeEntry: createUnifiedRuntimeEntryMock,
   loadDefaultOrchestrationGraph: vi.fn(async () => ({
     id: 'test',
     name: 'test',
@@ -142,6 +190,18 @@ describe('runDaemonEntry', () => {
     loadUserConfigContextMock.mockResolvedValueOnce({
       paths,
       config: {} as TianjiConfig,
+      agent: {
+        agentName: 'default',
+        modelRef: 'openai/gpt-4.1',
+        provider: 'openai',
+        modelName: 'gpt-4.1',
+        providerConfig: undefined,
+        soulPath: '/tmp/tianji-test/agents/default/SOUL.md',
+        soul: '# Test Agent',
+        workspace: undefined,
+      },
+      resolvedEnvVars: [],
+      snapshotStore: {},
     })
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
@@ -256,6 +316,111 @@ describe('runDaemonEntry', () => {
     const { runDaemonEntry } = await import('../daemon-entry.js')
 
     await expect(runDaemonEntry()).resolves.toBeUndefined()
+
+    stdoutSpy.mockRestore()
+  })
+
+  it('returns runId and cancels the active daemon session by runId', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const abortSpy = vi.fn()
+
+    vi.mocked(createAgentSessionMock).mockImplementationOnce((() => ({
+      sessionId: 'session-cancel-test',
+      abort: abortSpy,
+      queryWithGraph: () =>
+        (async function* () {
+          yield {
+            type: 'RunCancelled',
+            runId: 'run_graph_test',
+            sessionId: 'session-cancel-test',
+            timestamp: 0,
+          }
+        })(),
+    })) as unknown as () => { sessionId: string })
+
+    const { runDaemonEntry } = await import('../daemon-entry.js')
+    await runDaemonEntry()
+
+    const runtimeOptions = createUnifiedRuntimeEntryMock.mock.calls.at(-1)?.[0] as {
+      runtime: {
+        runGraph: (input: {
+          request: { source: 'controlplane'; input: string }
+          graph: object
+          executors: object
+        }) => Promise<{ runId?: string; events: AsyncIterable<unknown> }>
+        cancelRun: (input: { source: 'controlplane'; runId: string }) => Promise<void>
+      }
+    }
+
+    const handle = await runtimeOptions.runtime.runGraph({
+      request: { source: 'controlplane', input: 'cancel me' },
+      graph: { id: 'test' },
+      executors: {},
+    })
+
+    expect(handle.runId).toBe('run_graph_test')
+
+    await runtimeOptions.runtime.cancelRun({ source: 'controlplane', runId: 'run_graph_test' })
+    expect(abortSpy).toHaveBeenCalledTimes(1)
+
+    const events = await collectEvents(handle.events)
+    expect(events).toHaveLength(1)
+    expect(events[0]).toMatchObject({ type: 'RunCancelled', runId: 'run_graph_test' })
+
+    stdoutSpy.mockRestore()
+  })
+
+  it('keeps streaming graph terminal events after extracting runId from the first event', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    vi.mocked(createAgentSessionMock).mockImplementationOnce((() => ({
+      sessionId: 'session-graph-terminal-test',
+      abort: vi.fn(),
+      queryWithGraph: () =>
+        (async function* () {
+          yield {
+            type: 'GraphRunStarted',
+            runId: 'run_graph_terminal',
+            graphId: 'test',
+            graphVersion: 1,
+            timestamp: 0,
+          }
+          yield {
+            type: 'GraphRunCancelled',
+            runId: 'run_graph_terminal',
+            graphId: 'test',
+            graphVersion: 1,
+            reason: 'abort',
+            timestamp: 1,
+          }
+        })(),
+    })) as unknown as () => { sessionId: string })
+
+    const { runDaemonEntry } = await import('../daemon-entry.js')
+    await runDaemonEntry()
+
+    const runtimeOptions = createUnifiedRuntimeEntryMock.mock.calls.at(-1)?.[0] as {
+      runtime: {
+        runGraph: (input: {
+          request: { source: 'controlplane'; input: string }
+          graph: object
+          executors: object
+        }) => Promise<{ runId?: string; events: AsyncIterable<unknown> }>
+      }
+    }
+
+    const handle = await runtimeOptions.runtime.runGraph({
+      request: { source: 'controlplane', input: 'cancel me' },
+      graph: { id: 'test' },
+      executors: {},
+    })
+
+    expect(handle.runId).toBe('run_graph_terminal')
+
+    const events = await collectEvents(handle.events)
+    expect(events).toHaveLength(2)
+    expect(events[0]).toMatchObject({ type: 'GraphRunStarted', runId: 'run_graph_terminal' })
+    expect(events[1]).toMatchObject({ type: 'GraphRunCancelled', runId: 'run_graph_terminal' })
 
     stdoutSpy.mockRestore()
   })

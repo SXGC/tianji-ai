@@ -1,4 +1,9 @@
-import type { AgentExecutorFactory, LoadedAgentContext, OrchestrationGraph } from '@tianji/agent'
+import type {
+  AgentExecutorFactory,
+  LoadedAgentContext,
+  OrchestrationGraph,
+  UnifiedRuntimeEntry,
+} from '@tianji/agent'
 import type { ObserverLogger } from '@tianji/observer'
 import type {
   AgentInfo,
@@ -11,9 +16,6 @@ import type {
   TianjiAgentConfig,
 } from '@tianji/shared'
 
-import { resolveAgentType } from '@tianji/shared'
-
-import { AgentRunner, InProcessAgentRunner } from '../acp/index.js'
 import { ControlPlaneConnection, type ControlPlaneConnectionConfig } from '../controlplane/index.js'
 import type { RuntimeLogger } from '../logger.js'
 import { ActiveExecutorRegistry } from '../task/active-executor-registry.js'
@@ -58,6 +60,7 @@ export interface ControlPlaneCallbacks {
 export interface ControlPlaneRuntimeDeps {
   createConnection?: (config: ControlPlaneConnectionConfig) => ControlPlaneConnectionLike
   createTaskExecutor?: (callbacks: ControlPlaneCallbacks) => TaskExecutorLike
+  createUnifiedEntry?: (command: TaskRunCommand) => Promise<UnifiedRuntimeEntry>
 }
 
 export interface ControlPlaneConnectionLike {
@@ -79,6 +82,122 @@ export interface TaskExecutorLike {
   readonly currentTaskId: string | null
   execute(command: TaskRunCommand): Promise<void>
   cancel(): void
+}
+
+async function createControlPlaneUnifiedEntry(
+  command: TaskRunCommand,
+  config: ControlPlaneRuntimeConfig
+): Promise<UnifiedRuntimeEntry> {
+  const agentConfig = config.agentConfigs[command.payload.agentId]
+  if (agentConfig === undefined) {
+    throw new Error(`Agent config not found for agentId "${command.payload.agentId}"`)
+  }
+
+  if (
+    config.nativeAgentContext === undefined ||
+    config.defaultGraph === undefined ||
+    config.executorFactory === undefined
+  ) {
+    throw new Error(
+      'ControlPlaneRuntime requires nativeAgentContext, defaultGraph, and executorFactory for unified task execution'
+    )
+  }
+
+  await config.logger?.logDebug(['daemon', 'task'], 'Preparing controlplane unified entry', {
+    taskId: command.payload.taskId,
+    agentId: command.payload.agentId,
+    hasNativeAgentContext: true,
+    hasDefaultGraph: true,
+    hasExecutorFactory: true,
+  })
+
+  const sessionModule = await import('@tianji/agent')
+  const nativeAgentContext = config.nativeAgentContext
+  const built = await sessionModule.buildDefaultGraph(
+    {
+      source: 'controlplane',
+      agentId: command.payload.agentId,
+      input: command.payload.goal,
+      sessionId: command.payload.sessionIds?.[0],
+    },
+    nativeAgentContext
+  )
+  const runtimeOptions = config.observerLogger ? { logger: config.observerLogger } : undefined
+  let activeRun: {
+    readonly runId: string
+    readonly abort: () => void
+  } | null = null
+
+  return {
+    run: async (request) => {
+      const session = await sessionModule.createAgentSession(nativeAgentContext, runtimeOptions)
+      config.emitTaskEvent({
+        type: 'TaskSessionAttached',
+        taskId: String(command.payload.taskId),
+        sessionId: session.sessionId,
+        timestamp: Date.now(),
+      })
+
+      const events = session.queryWithGraph(built.graph, {
+        initialState: { input: request.input },
+        compileOptions: { agentExecutorFactory: built.executorFactory },
+      })
+      const iterator = events[Symbol.asyncIterator]()
+      const first = await iterator.next()
+
+      if (first.done) {
+        throw new Error('ControlPlaneRuntime unified entry run ended before emitting any events')
+      }
+
+      const firstEvent = first.value
+      if (!('runId' in firstEvent) || firstEvent.runId === undefined) {
+        throw new Error('ControlPlaneRuntime unified entry run did not emit a runId')
+      }
+
+      const runId = String(firstEvent.runId)
+      activeRun = {
+        runId,
+        abort: () => session.abort(),
+      }
+
+      async function* replayEvents(): AsyncIterable<typeof firstEvent> {
+        try {
+          yield firstEvent
+          while (true) {
+            const next = await iterator.next()
+            if (next.done) {
+              return
+            }
+            yield next.value
+          }
+        } finally {
+          if (activeRun?.runId === runId) {
+            activeRun = null
+          }
+        }
+      }
+
+      return {
+        sessionId: session.sessionId,
+        runId: firstEvent.runId,
+        events: replayEvents(),
+      }
+    },
+    resume: async () => {
+      throw new Error('ControlPlaneRuntime unified entry resume is not implemented')
+    },
+    cancel: async ({ runId }) => {
+      if (activeRun === null || activeRun.runId !== String(runId)) {
+        throw new Error(
+          `ControlPlaneRuntime unified entry cannot cancel unknown runId: ${String(runId)}`
+        )
+      }
+      activeRun.abort()
+    },
+    stream: () => {
+      throw new Error('ControlPlaneRuntime unified entry stream is not implemented')
+    },
+  }
 }
 
 export interface ControlPlaneRuntimeHandle {
@@ -209,49 +328,8 @@ export function createControlPlaneRuntime(
       onExecutionStateChange: updateExecutionState,
       logger: config.logger,
       enterCorrelation: config.enterCorrelation,
-      createRunner: async (command) => {
-        const agentConfig = config.agentConfigs[command.payload.agentId]
-        if (agentConfig === undefined) {
-          throw new Error(`Agent config not found for agentId "${command.payload.agentId}"`)
-        }
-
-        const resolvedAgentType = resolveAgentType(agentConfig)
-        const useInProcessRunner =
-          resolvedAgentType === 'native' &&
-          config.nativeAgentContext !== undefined &&
-          config.defaultGraph !== undefined &&
-          config.executorFactory !== undefined
-
-        await config.logger?.logDebug(['daemon', 'task'], 'Resolved task runner type', {
-          taskId: command.payload.taskId,
-          agentId: command.payload.agentId,
-          resolvedAgentType,
-          hasNativeAgentContext: config.nativeAgentContext !== undefined,
-          hasDefaultGraph: config.defaultGraph !== undefined,
-          hasExecutorFactory: config.executorFactory !== undefined,
-          runnerType: useInProcessRunner ? 'inprocess' : 'acp',
-        })
-
-        if (useInProcessRunner) {
-          return new InProcessAgentRunner({
-            agentId: command.payload.agentId,
-            taskId: String(command.payload.taskId),
-            emitEvent: config.emitTaskEvent,
-            nativeAgentContext: config.nativeAgentContext,
-            runtimeOptions: config.observerLogger ? { logger: config.observerLogger } : undefined,
-            defaultGraph: config.defaultGraph,
-            executorFactory: config.executorFactory,
-          })
-        }
-
-        return new AgentRunner({
-          agentId: command.payload.agentId,
-          command: agentConfig.command,
-          args: agentConfig.args,
-          env: agentConfig.env,
-          logger: config.logger,
-        })
-      },
+      createUnifiedEntry: async (command) =>
+        deps.createUnifiedEntry?.(command) ?? createControlPlaneUnifiedEntry(command, config),
       emitEvent: config.emitTaskEvent,
     } satisfies TaskExecutorConfig)
 

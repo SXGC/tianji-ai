@@ -13,25 +13,7 @@ import {
 } from '../daemon-protocol.js'
 import type { ChatDoneSseMessage, ChatErrorSseMessage, PingResponse } from '../daemon-protocol.js'
 import { DaemonServer, type DaemonServerOptions } from '../daemon-server.js'
-import type { AgentExecutorFactory, OrchestrationGraph } from '../orchestration/index.js'
-import type { AgentSession } from '../session.js'
-
-/** 最小可用的空编排图存根，测试中不会真正执行。 */
-const STUB_GRAPH: OrchestrationGraph = {
-  id: 'stub',
-  name: 'stub',
-  version: 1,
-  source: 'static',
-  locked: false,
-  state: {},
-  nodes: [],
-  edges: [],
-}
-
-/** 不会被调用的执行器工厂存根。 */
-const STUB_EXECUTOR_FACTORY: AgentExecutorFactory = () => {
-  throw new Error('stub executor factory should not be called')
-}
+import type { UnifiedRuntimeEntry } from '../unified-entry.js'
 
 /** 构造最小合法的 DomainEventEnvelope 用于测试。 */
 function makeEnvelope(overrides: Partial<DomainEventEnvelope> = {}): DomainEventEnvelope {
@@ -56,21 +38,27 @@ function createStubBus(): EventBus {
 }
 
 /**
- * 创建一个简单存根 session，queryWithGraph 会在运行时将 envelopes publish 到 bus，
+ * 创建一个简单存根 entry，run 会在运行时将 envelopes publish 到 bus，
  * 然后正常完成迭代。
  */
-function createStubSession(bus: EventBus, envelopes: DomainEventEnvelope[] = []): AgentSession {
+function createStubEntry(
+  bus: EventBus,
+  envelopes: DomainEventEnvelope[] = []
+): UnifiedRuntimeEntry {
   return {
-    sessionId: 'session_test' as unknown as AgentSession['sessionId'],
-    abort: () => undefined,
-    close: () => undefined,
-    async *queryWithGraph(_graph, _options) {
-      for (const env of envelopes) {
-        bus.publish(env)
-        // 让 microtask 队列有机会 drain，确保 bus handler 在 session 完成前被调度
-        await new Promise<void>((r) => queueMicrotask(r))
-      }
-    },
+    run: vi.fn(async () => ({
+      sessionId: 'session_test' as never,
+      runId: 'run_test' as never,
+      events: (async function* () {
+        for (const env of envelopes) {
+          bus.publish(env)
+          await new Promise<void>((r) => queueMicrotask(r))
+        }
+      })(),
+    })),
+    resume: vi.fn(),
+    cancel: vi.fn(),
+    stream: vi.fn(),
   }
 }
 
@@ -78,25 +66,27 @@ function createStubSession(bus: EventBus, envelopes: DomainEventEnvelope[] = [])
  * 创建一个阻塞 session，会在 resolve() 调用后才结束 queryWithGraph，
  * 用于测试并发 BUSY 场景。
  */
-function createBlockingSession(): AgentSession & { resolve: () => void } {
+function createBlockingEntry(): UnifiedRuntimeEntry & { resolve: () => void } {
   let resolve!: () => void
   const barrier = new Promise<void>((r) => {
     resolve = r
   })
   return {
-    sessionId: 'session_blocking' as unknown as AgentSession['sessionId'],
     resolve,
-    abort: () => undefined,
-    close: () => undefined,
-    queryWithGraph(_graph, _options) {
-      return {
+    run: vi.fn(async () => ({
+      sessionId: 'session_blocking' as never,
+      runId: 'run_blocking' as never,
+      events: {
         [Symbol.asyncIterator]() {
           return {
             next: () => barrier.then(() => ({ value: undefined as never, done: true as const })),
           }
         },
-      }
-    },
+      },
+    })),
+    resume: vi.fn(),
+    cancel: vi.fn(),
+    stream: vi.fn(),
   }
 }
 
@@ -133,11 +123,9 @@ describe('DaemonServer', () => {
 
   it('GET /ping returns session metadata', async () => {
     const bus = createStubBus()
-    const session = createStubSession(bus)
+    const entry = createStubEntry(bus)
     server = new DaemonServer({
-      session,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry,
       bus,
     })
     await server.listen(0)
@@ -146,7 +134,7 @@ describe('DaemonServer', () => {
     expect(res.status).toBe(200)
 
     const body = (await res.json()) as PingResponse
-    expect(body.sessionId).toBe('session_test')
+    expect(body.sessionId).toBe('unified-entry')
     expect(typeof body.pid).toBe('number')
     expect(typeof body.uptime).toBe('number')
     expect(body.uptime).toBeGreaterThanOrEqual(0)
@@ -161,7 +149,7 @@ describe('DaemonServer', () => {
 
   it('GET /ping returns controlplane snapshot from getter', async () => {
     const bus = createStubBus()
-    const session = createStubSession(bus)
+    const entry = createStubEntry(bus)
     const controlPlane: ControlPlaneStatusSnapshot = {
       enabled: true,
       status: 'degraded',
@@ -170,9 +158,7 @@ describe('DaemonServer', () => {
       lastError: 'fetch failed',
     }
     server = new DaemonServer({
-      session,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry,
       bus,
       getControlPlaneStatus: () => controlPlane,
     })
@@ -191,11 +177,9 @@ describe('DaemonServer', () => {
       makeEnvelope({ eventId: 'evt-1', type: 'RunStarted', aggregateType: 'Run' }),
       makeEnvelope({ eventId: 'evt-2', type: 'RunCompleted', aggregateType: 'Run' }),
     ]
-    const session = createStubSession(bus, envelopes)
+    const entry = createStubEntry(bus, envelopes)
     server = new DaemonServer({
-      session,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry,
       bus,
     })
     await server.listen(0)
@@ -236,11 +220,9 @@ describe('DaemonServer', () => {
       makeEnvelope({ eventId: 'run-evt', aggregateType: 'Run' }),
       makeEnvelope({ eventId: 'task-evt', aggregateType: 'Task' }),
     ]
-    const session = createStubSession(bus, envelopes)
+    const entry = createStubEntry(bus, envelopes)
     server = new DaemonServer({
-      session,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry,
       bus,
     })
     await server.listen(0)
@@ -267,11 +249,9 @@ describe('DaemonServer', () => {
 
   it('concurrent chat returns BUSY error', async () => {
     const bus = createStubBus()
-    const blockingSession = createBlockingSession()
+    const blockingEntry = createBlockingEntry()
     server = new DaemonServer({
-      session: blockingSession,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry: blockingEntry,
       bus,
     })
     await server.listen(0)
@@ -299,7 +279,7 @@ describe('DaemonServer', () => {
     expect(parsed.type).toBe('chat.error')
     expect(parsed.code).toBe('BUSY')
 
-    blockingSession.resolve()
+    blockingEntry.resolve()
     await chat1
   })
 
@@ -308,11 +288,9 @@ describe('DaemonServer', () => {
     const pidPath = join(tmpdir(), `tianji-test-daemon-pid-${Date.now()}`)
 
     const bus = createStubBus()
-    const session = createStubSession(bus)
+    const entry = createStubEntry(bus)
     const opts: DaemonServerOptions = {
-      session,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry,
       bus,
       paths: {
         daemonPortPath: portPath,
@@ -339,11 +317,9 @@ describe('DaemonServer', () => {
 
   it('shutdown is idempotent', async () => {
     const bus = createStubBus()
-    const session = createStubSession(bus)
+    const entry = createStubEntry(bus)
     server = new DaemonServer({
-      session,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry,
       bus,
     })
     await server.listen(0)
@@ -354,11 +330,9 @@ describe('DaemonServer', () => {
 
   it('returns 404 for unknown routes', async () => {
     const bus = createStubBus()
-    const session = createStubSession(bus)
+    const entry = createStubEntry(bus)
     server = new DaemonServer({
-      session,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry,
       bus,
     })
     await server.listen(0)
@@ -369,11 +343,9 @@ describe('DaemonServer', () => {
 
   it('POST /chat with invalid body returns 400', async () => {
     const bus = createStubBus()
-    const session = createStubSession(bus)
+    const entry = createStubEntry(bus)
     server = new DaemonServer({
-      session,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry,
       bus,
     })
     await server.listen(0)
@@ -388,17 +360,20 @@ describe('DaemonServer', () => {
 
   it('POST /chat handles internal errors from session', async () => {
     const bus = createStubBus()
-    const errorSession: AgentSession = {
-      sessionId: 'session_error' as unknown as AgentSession['sessionId'],
-      abort: () => undefined,
-      async *queryWithGraph(_graph, _options) {
-        yield await Promise.reject(new Error('boom'))
-      },
+    const errorEntry: UnifiedRuntimeEntry = {
+      run: vi.fn(async () => ({
+        sessionId: 'session_error' as never,
+        runId: 'run_error' as never,
+        events: (async function* () {
+          yield await Promise.reject(new Error('boom'))
+        })(),
+      })),
+      resume: vi.fn(),
+      cancel: vi.fn(),
+      stream: vi.fn(),
     }
     server = new DaemonServer({
-      session: errorSession,
-      defaultGraph: STUB_GRAPH,
-      executorFactory: STUB_EXECUTOR_FACTORY,
+      entry: errorEntry,
       bus,
     })
     await server.listen(0)

@@ -11,16 +11,10 @@ import { Readable, Writable } from 'node:stream'
 import { pathToFileURL } from 'node:url'
 import { AgentSideConnection, ndJsonStream } from '@agentclientprotocol/sdk'
 
-import { resolveAgentModel } from '@tianji/runtime'
-import type { TianjiAgentConfig } from '@tianji/shared'
-
 import { TianjiAcpAgent } from './acp/agent-bridge.js'
 import { loadAgentContext } from './context.js'
-import {
-  createDeepagentsExecutorFactory,
-  loadDefaultOrchestrationGraph,
-} from './orchestration/index.js'
-import { createAgentSession } from './session.js'
+import { buildDefaultGraph } from './default-graph-builder.js'
+import { createUnifiedRuntimeEntry } from './unified-entry.js'
 
 /**
  * 启动 ACP agent 进程。
@@ -33,15 +27,34 @@ export async function runAcpAgent(): Promise<void> {
 
   console.error('[acp-agent] Agent context loaded:', context.agent.agentName)
 
-  const configDir = context.paths.configDir
-  const agentConfigs: Readonly<Record<string, TianjiAgentConfig>> =
-    context.config.agents?.items ?? {}
-  const defaultGraph = await loadDefaultOrchestrationGraph({ configDir, agentConfigs })
-
-  const executorFactory = createDeepagentsExecutorFactory({
-    // 走 runtime 的 resolveAgentModel：当 provider 配置了自定义 baseUrl 时，
-    // 预先实例化 ChatOpenAI，避免 deepagents 内部的 initChatModel 无法识别 provider。
-    resolveModel: (modelRef) => resolveAgentModel(modelRef, context.config.providers),
+  const built = await buildDefaultGraph(
+    { source: 'acp', input: '', agentId: context.agent.agentName },
+    context
+  )
+  const entry = createUnifiedRuntimeEntry({
+    loadDefaultGraph: async () => built.graph,
+    createExecutorRegistry: async () => built.executorFactory,
+    runtime: {
+      runGraph: async ({ request, graph, executors }) => {
+        const sessionFactory = await import('./session.js')
+        const session = await sessionFactory.createAgentSession(context)
+        return {
+          sessionId: session.sessionId,
+          runId: undefined,
+          events: session.queryWithGraph(graph, {
+            initialState: { input: request.input },
+            compileOptions: { agentExecutorFactory: executors },
+          }),
+        }
+      },
+      resumeGraph: async () => {
+        throw new Error('ACP unified entry resume is not implemented yet')
+      },
+      cancelRun: async () => undefined,
+      streamRun: () => {
+        throw new Error('ACP unified entry stream is not implemented yet')
+      },
+    },
   })
 
   const output = Writable.toWeb(process.stdout) as WritableStream<Uint8Array>
@@ -49,8 +62,7 @@ export async function runAcpAgent(): Promise<void> {
   const stream = ndJsonStream(output, input)
 
   const connection = new AgentSideConnection((conn) => {
-    const sessionFactory = () => createAgentSession(context)
-    return new TianjiAcpAgent(conn, sessionFactory, defaultGraph, executorFactory)
+    return new TianjiAcpAgent(conn, entry)
   }, stream)
 
   console.error('[acp-agent] ACP connection established, waiting for requests')

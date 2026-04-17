@@ -7,9 +7,8 @@ import {
   type ControlPlaneStatusSnapshot,
   DEFAULT_CONTROL_PLANE_STATUS,
   DaemonServer,
-  createAgentSession,
-  createDeepagentsExecutorFactory,
-  loadDefaultOrchestrationGraph,
+  buildDefaultGraph,
+  createUnifiedRuntimeEntry,
 } from '@tianji/agent'
 import { subscribeEventBusLogger, subscribeOtelAdapter } from '@tianji/observer'
 import {
@@ -111,30 +110,86 @@ export async function runDaemonEntry(): Promise<void> {
   // Stage 07 的 forwarder 将订阅此 bus 并把 envelope 转发到 controlplane。
   // -------------------------
 
-  const session = await enterCorrelation(`daemon-startup-${Date.now()}`, async () =>
-    createAgentSession(context, {
-      logger: logger.observerLogger,
-      emitEvent: (ev) => pipeline.emitEvent(ev),
-    })
+  const built = await buildDefaultGraph(
+    { source: 'daemon', input: '', agentId: context.agent.agentName },
+    context
   )
-  const defaultGraph = await loadDefaultOrchestrationGraph({
-    configDir: context.paths.configDir,
-    agentConfigs: context.config.agents?.items ?? {},
-  })
-  const executorFactory = createDeepagentsExecutorFactory({
-    // 走 runtime 的 resolveAgentModel：当 provider 配置了自定义 baseUrl 时，
-    // 预先实例化 ChatOpenAI，避免 deepagents 内部的 initChatModel 无法识别 provider。
-    resolveModel: (modelRef) => resolveAgentModel(modelRef, context.config.providers),
-    observer: logger.observerLogger,
+  const activeRuns = new Map<string, { abort: () => void }>()
+  const entry = createUnifiedRuntimeEntry({
+    loadDefaultGraph: async () => built.graph,
+    createExecutorRegistry: async () => built.executorFactory,
+    runtime: {
+      runGraph: async ({ request, graph, executors }) => {
+        const sessionModule = await import('@tianji/agent')
+        const session = await enterCorrelation(`daemon-startup-${Date.now()}`, async () =>
+          sessionModule.createAgentSession(context, {
+            logger: logger.observerLogger,
+            emitEvent: (ev) => pipeline.emitEvent(ev),
+          })
+        )
+        const events = session.queryWithGraph(graph, {
+          initialState: { input: request.input },
+          compileOptions: { agentExecutorFactory: executors },
+        })
+        const iterator = events[Symbol.asyncIterator]()
+        const first = await iterator.next()
+
+        if (first.done) {
+          throw new Error('Daemon unified entry run ended before emitting any events')
+        }
+
+        const firstEvent = first.value
+        if (!('runId' in firstEvent) || firstEvent.runId === undefined) {
+          throw new Error('Daemon unified entry run did not emit a runId')
+        }
+
+        const runId = String(firstEvent.runId)
+        activeRuns.set(runId, { abort: () => session.abort() })
+
+        async function* replayEvents(): AsyncIterable<typeof firstEvent> {
+          try {
+            yield firstEvent
+            while (true) {
+              const next = await iterator.next()
+              if (next.done) {
+                return
+              }
+              yield next.value
+            }
+          } finally {
+            activeRuns.delete(runId)
+          }
+        }
+
+        return {
+          sessionId: session.sessionId,
+          runId: firstEvent.runId,
+          events: replayEvents(),
+        }
+      },
+      resumeGraph: async () => {
+        throw new Error('daemon unified entry resume is not implemented yet')
+      },
+      cancelRun: async ({ runId }) => {
+        const active = activeRuns.get(String(runId))
+        if (active === undefined) {
+          throw new Error(`Daemon unified entry cannot cancel unknown runId: ${String(runId)}`)
+        }
+        active.abort()
+      },
+      streamRun: () => {
+        throw new Error('daemon unified entry stream is not implemented yet')
+      },
+    },
   })
   await logDebug(
     context.paths,
     ['daemon', 'controlplane'],
     'Prepared native runtime dependencies',
     {
-      hasDefaultGraph: defaultGraph !== undefined,
-      defaultGraphId: defaultGraph.id,
-      hasExecutorFactory: executorFactory !== undefined,
+      hasDefaultGraph: built.graph !== undefined,
+      defaultGraphId: built.graph.id,
+      hasExecutorFactory: built.executorFactory !== undefined,
     }
   )
   let controlPlaneStatus: ControlPlaneStatusSnapshot = DEFAULT_CONTROL_PLANE_STATUS
@@ -150,9 +205,7 @@ export async function runDaemonEntry(): Promise<void> {
   }
 
   const server = new DaemonServer({
-    session,
-    defaultGraph,
-    executorFactory,
+    entry,
     bus,
     getControlPlaneStatus: () => controlPlaneStatus,
     paths: {
@@ -190,8 +243,8 @@ export async function runDaemonEntry(): Promise<void> {
       ...controlPlaneConfig,
       agentConfigs: context.config.agents?.items ?? {},
       nativeAgentContext: context,
-      defaultGraph,
-      executorFactory,
+      defaultGraph: built.graph,
+      executorFactory: built.executorFactory,
       agentList: deriveControlPlaneAgentList(context.config, controlPlaneConfig.version),
       logger,
       observerLogger: logger.observerLogger,

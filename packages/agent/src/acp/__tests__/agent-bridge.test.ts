@@ -2,15 +2,8 @@ import { PROTOCOL_VERSION } from '@agentclientprotocol/sdk'
 import type { AgentSideConnection } from '@agentclientprotocol/sdk'
 import { createRunId, createSessionId } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
-import type { AgentExecutorFactory, OrchestrationGraph } from '../../orchestration/index.js'
 
 import { TianjiAcpAgent } from '../agent-bridge.js'
-
-/** 最小化 stub，仅满足 TianjiAcpAgent 构造签名所需 */
-const stubDefaultGraph = {} as OrchestrationGraph
-const stubExecutorFactory = (() => {
-  throw new Error('not used in unit tests')
-}) as unknown as AgentExecutorFactory
 
 function createMockConnection(): AgentSideConnection {
   return {
@@ -26,7 +19,7 @@ function createMockConnection(): AgentSideConnection {
   } as unknown as AgentSideConnection
 }
 
-function createMockSessionFactory() {
+function createMockEntry() {
   const events = [
     {
       type: 'MessageDelta' as const,
@@ -46,23 +39,31 @@ function createMockSessionFactory() {
     },
   ]
 
-  return vi.fn().mockReturnValue({
-    sessionId: createSessionId('session-test'),
-    abort: vi.fn(),
-    close: vi.fn(),
-    async *queryWithGraph(_graph: OrchestrationGraph) {
-      for (const event of events) {
-        yield event
-      }
-    },
-  })
+  return {
+    run: vi.fn(async () => ({
+      sessionId: createSessionId('session-test'),
+      runId: createRunId('run-1'),
+      events: (async function* () {
+        for (const event of events) {
+          yield event
+        }
+      })(),
+    })),
+    resume: vi.fn(),
+    cancel: vi.fn(),
+    stream: vi.fn(),
+  }
+}
+
+function createSessionIdSpy() {
+  return vi.spyOn(Date, 'now').mockReturnValue(123)
 }
 
 describe('TianjiAcpAgent', () => {
   it('should return protocol version on initialize', async () => {
     const conn = createMockConnection()
-    const factory = createMockSessionFactory()
-    const agent = new TianjiAcpAgent(conn, factory, stubDefaultGraph, stubExecutorFactory)
+    const entry = createMockEntry()
+    const agent = new TianjiAcpAgent(conn, entry)
 
     const result = await agent.initialize({
       protocolVersion: PROTOCOL_VERSION,
@@ -74,35 +75,41 @@ describe('TianjiAcpAgent', () => {
 
   it('should create a new session via newSession', async () => {
     const conn = createMockConnection()
-    const factory = createMockSessionFactory()
-    const agent = new TianjiAcpAgent(conn, factory, stubDefaultGraph, stubExecutorFactory)
+    const entry = createMockEntry()
+    const nowSpy = createSessionIdSpy()
+    const agent = new TianjiAcpAgent(conn, entry)
 
     const result = await agent.newSession({ cwd: '/tmp', mcpServers: [] })
-    expect(result.sessionId).toBeDefined()
-    expect(typeof result.sessionId).toBe('string')
-    expect(factory).toHaveBeenCalled()
+    expect(result.sessionId).toBe('session_123')
+    nowSpy.mockRestore()
   })
 
   it('should stream events on prompt and return end_turn', async () => {
     const conn = createMockConnection()
-    const factory = createMockSessionFactory()
-    const agent = new TianjiAcpAgent(conn, factory, stubDefaultGraph, stubExecutorFactory)
+    const entry = createMockEntry()
+    const nowSpy = createSessionIdSpy()
+    const agent = new TianjiAcpAgent(conn, entry)
 
     await agent.newSession({ cwd: '/tmp', mcpServers: [] })
 
     const result = await agent.prompt({
-      sessionId: 'session-test',
+      sessionId: 'session_123',
       prompt: [{ type: 'text', text: 'hello' }],
     })
 
     expect(result.stopReason).toBe('end_turn')
+    expect(entry.run).toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'acp', input: 'hello', sessionId: 'session_123' })
+    )
     expect(conn.sessionUpdate).toHaveBeenCalled()
+    nowSpy.mockRestore()
   })
 
   it('should reject prompt when sessionId does not match current session', async () => {
     const conn = createMockConnection()
-    const factory = createMockSessionFactory()
-    const agent = new TianjiAcpAgent(conn, factory, stubDefaultGraph, stubExecutorFactory)
+    const entry = createMockEntry()
+    const nowSpy = createSessionIdSpy()
+    const agent = new TianjiAcpAgent(conn, entry)
 
     await agent.newSession({ cwd: '/tmp', mcpServers: [] })
 
@@ -112,20 +119,21 @@ describe('TianjiAcpAgent', () => {
         prompt: [{ type: 'text', text: 'hello' }],
       })
     ).rejects.toThrow('Session not found: different-session')
+    nowSpy.mockRestore()
   })
 
   it('should handle cancel without error', async () => {
     const conn = createMockConnection()
-    const factory = createMockSessionFactory()
-    const agent = new TianjiAcpAgent(conn, factory, stubDefaultGraph, stubExecutorFactory)
+    const entry = createMockEntry()
+    const agent = new TianjiAcpAgent(conn, entry)
 
     await expect(agent.cancel({ sessionId: 'session-test' })).resolves.toBeUndefined()
   })
 
   it('should handle authenticate', async () => {
     const conn = createMockConnection()
-    const factory = createMockSessionFactory()
-    const agent = new TianjiAcpAgent(conn, factory, stubDefaultGraph, stubExecutorFactory)
+    const entry = createMockEntry()
+    const agent = new TianjiAcpAgent(conn, entry)
 
     const result = await agent.authenticate({ methodId: 'none' })
     expect(result).toEqual({})

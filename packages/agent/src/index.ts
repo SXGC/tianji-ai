@@ -32,6 +32,16 @@ export {
   type AgentSession,
   type ResumeAgentSessionOptions,
 } from './session.js'
+export {
+  createUnifiedRuntimeEntry,
+  type UnifiedRuntimeEntry,
+  type UnifiedRunRequest,
+  type UnifiedRunHandle,
+  type UnifiedResumeRequest,
+  type UnifiedCancelRequest,
+  type UnifiedStreamRequest,
+} from './unified-entry.js'
+export { buildDefaultGraph, type DefaultGraphBuildResult } from './default-graph-builder.js'
 export { TianjiAcpAgent, mapRuntimeEventToSessionUpdate } from './acp/index.js'
 export { runAcpAgent } from './acp-entry.js'
 export { DaemonClient, type DaemonClientOptions } from './daemon-client.js'

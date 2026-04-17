@@ -1,26 +1,8 @@
-import {
-  type AgentExecutorFactory,
-  type AgentSession,
-  DaemonServer,
-  type OrchestrationGraph,
-} from '@tianji/agent'
+import { type AgentSession, DaemonServer, type UnifiedRuntimeEntry } from '@tianji/agent'
 
 import type { UserConfigPaths } from '../../config.js'
 
 import { createStubSession } from './daemon-subprocess.js'
-
-const testDefaultGraph: OrchestrationGraph = {
-  id: 'test',
-  name: 'test',
-  version: 1,
-  source: 'static',
-  locked: false,
-  state: {},
-  nodes: [],
-  edges: [],
-}
-
-const testExecutorFactory: AgentExecutorFactory = () => async () => ({})
 
 async function main(): Promise<void> {
   const pathsRaw = process.env.TIANJI_TEST_DAEMON_PATHS
@@ -34,11 +16,23 @@ async function main(): Promise<void> {
   const chunks = chunksRaw === undefined ? [] : (JSON.parse(chunksRaw) as readonly string[])
   const live = createStubSession(chunks)
   const session: AgentSession = live.session
+  const entry: UnifiedRuntimeEntry = {
+    run: async () => ({
+      sessionId: session.sessionId,
+      runId: 'run_test' as never,
+      events: session.queryWithGraph({} as never, { initialState: { input: '' } } as never),
+    }),
+    resume: async () => {
+      throw new Error('test daemon subprocess resume is not implemented')
+    },
+    cancel: async () => undefined,
+    stream: () => {
+      throw new Error('test daemon subprocess stream is not implemented')
+    },
+  }
 
   const server = new DaemonServer({
-    session,
-    defaultGraph: testDefaultGraph,
-    executorFactory: testExecutorFactory,
+    entry,
     bus: live.bus,
     paths: {
       daemonPortPath: paths.daemonPortPath,

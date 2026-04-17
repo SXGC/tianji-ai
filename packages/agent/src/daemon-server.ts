@@ -17,13 +17,10 @@ import {
   type ShutdownResponse,
   encodeSseMessage,
 } from './daemon-protocol.js'
-import type { AgentExecutorFactory, OrchestrationGraph } from './orchestration/index.js'
-import type { AgentSession, ChatWithGraphOptions } from './session.js'
+import type { UnifiedRuntimeEntry } from './unified-entry.js'
 
 export interface DaemonServerOptions {
-  readonly session: AgentSession
-  readonly defaultGraph: OrchestrationGraph
-  readonly executorFactory: AgentExecutorFactory
+  readonly entry: UnifiedRuntimeEntry
   readonly bus: EventBus
   readonly paths?: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'>
   readonly getControlPlaneStatus?: () => ControlPlaneStatusSnapshot
@@ -47,9 +44,7 @@ async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
 }
 
 export class DaemonServer {
-  readonly #session: AgentSession
-  readonly #defaultGraph: OrchestrationGraph
-  readonly #executorFactory: AgentExecutorFactory
+  readonly #entry: UnifiedRuntimeEntry
   readonly #bus: EventBus
   readonly #paths: Pick<AgentAppPaths, 'daemonPortPath' | 'daemonPidPath'> | undefined
   readonly #server: Server
@@ -62,9 +57,7 @@ export class DaemonServer {
   #shutdownPromise: Promise<void> | undefined
 
   constructor(options: DaemonServerOptions) {
-    this.#session = options.session
-    this.#defaultGraph = options.defaultGraph
-    this.#executorFactory = options.executorFactory
+    this.#entry = options.entry
     this.#bus = options.bus
     this.#paths = options.paths
     this.#getControlPlaneStatus = options.getControlPlaneStatus
@@ -165,7 +158,7 @@ export class DaemonServer {
 
   #handlePing(res: ServerResponse): void {
     const body: PingResponse = {
-      sessionId: this.#session.sessionId as string,
+      sessionId: 'unified-entry',
       uptime: Math.floor((Date.now() - this.#startedAt) / 1000),
       pid: process.pid,
       controlPlane: this.#getControlPlaneStatus?.() ?? DEFAULT_CONTROL_PLANE_STATUS,
@@ -219,12 +212,11 @@ export class DaemonServer {
         { name: 'daemon-sse', queueSize: 2_000 }
       )
       try {
-        const graphOptions: ChatWithGraphOptions = {
-          initialState: { input: parsed.prompt },
-          compileOptions: { agentExecutorFactory: this.#executorFactory },
-        }
-        // 消耗迭代器以驱动图运行；事件通过 bus 订阅推送给 SSE，不直接使用迭代值。
-        for await (const _ of this.#session.queryWithGraph(this.#defaultGraph, graphOptions)) {
+        const handle = await this.#entry.run({
+          source: 'daemon',
+          input: parsed.prompt,
+        })
+        for await (const _event of handle.events) {
           // intentionally empty — events are delivered via bus subscription
         }
         this.#sendSse(res, DAEMON_SSE_DONE_NAME, { type: 'chat.done' } satisfies ChatSseMessage)

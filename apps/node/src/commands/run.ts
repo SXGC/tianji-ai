@@ -1,8 +1,8 @@
 import { appendFile, mkdir } from 'node:fs/promises'
 
+import { buildDefaultGraph, createAgentSession, createUnifiedRuntimeEntry } from '@tianji/agent'
 import type { DomainEvent, RunId } from '@tianji/shared'
 
-import { AgentRunner } from '../acp/index.js'
 import { type UserConfigPaths, getUserConfigPaths, loadUserConfigContext } from '../config.js'
 import type { CliLogEntry, CliLogScope, CliLogger } from '../logger.js'
 import { createCliLogger } from '../logger.js'
@@ -43,35 +43,35 @@ export const runCommand: CommandDefinition = {
       resolvedEnvVars: context.resolvedEnvVars,
     })
 
-    const createRunner = deps?.createAgentRunner ?? createDefaultAgentRunner
+    const createEntry = deps?.createUnifiedEntry ?? createDefaultUnifiedEntry
 
-    await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Connecting to agent via ACP', {
+    await logger.logInfo(CLI_RUN_RUNTIME_SCOPE, 'Creating unified runtime entry', {
       agentName: context.agent.agentName,
       provider: context.agent.provider,
       modelName: context.agent.modelName,
       promptLength: prompt.length,
     })
 
-    const runner = createRunner(context)
-    await runner.connect()
-
-    try {
-      return await executeRunTurn(runner, prompt, logger)
-    } finally {
-      await runner.disconnect()
-    }
+    const entry = await createEntry(context)
+    return await executeRunTurn(entry, prompt, logger)
   },
 }
 
 async function executeRunTurn(
-  runner: AgentRunner,
+  entry: Awaited<ReturnType<typeof createDefaultUnifiedEntry>>,
   prompt: string,
   logger: CliLogger
 ): Promise<number> {
   let currentRunId: RunId | undefined
   let currentSessionId: string | undefined
 
-  for await (const event of runner.query(prompt)) {
+  const handle = await entry.run({
+    source: 'cli',
+    agentId: 'default',
+    input: prompt,
+  })
+
+  for await (const event of handle.events) {
     if ('runId' in event && event.runId !== undefined) {
       currentRunId = event.runId
     }
@@ -140,10 +140,36 @@ async function appendCliLogEntry(paths: UserConfigPaths, entry: CliLogEntry): Pr
   await appendFile(paths.cliLogFilePath, `${JSON.stringify(entry)}\n`, 'utf8')
 }
 
-function createDefaultAgentRunner(
+async function createDefaultUnifiedEntry(
   context: Awaited<ReturnType<typeof loadUserConfigContext>>
-): AgentRunner {
-  return new AgentRunner({
-    agentId: context.agent.agentName,
+) {
+  const built = await buildDefaultGraph(
+    { source: 'cli', input: '', agentId: context.agent.agentName },
+    context
+  )
+
+  return createUnifiedRuntimeEntry({
+    loadDefaultGraph: async () => built.graph,
+    createExecutorRegistry: async () => built.executorFactory,
+    runtime: {
+      runGraph: async ({ request, graph, executors }) => {
+        const session = await createAgentSession(context)
+        return {
+          sessionId: session.sessionId,
+          runId: undefined,
+          events: session.queryWithGraph(graph, {
+            initialState: { input: request.input },
+            compileOptions: { agentExecutorFactory: executors },
+          }),
+        }
+      },
+      resumeGraph: async () => {
+        throw new Error('CLI unified entry resume is not implemented yet')
+      },
+      cancelRun: async () => undefined,
+      streamRun: () => {
+        throw new Error('CLI unified entry stream is not implemented yet')
+      },
+    },
   })
 }

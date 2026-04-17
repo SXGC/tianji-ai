@@ -18,8 +18,8 @@ import { parseCliArgs, runCli } from '../main.js'
 import {
   captureStdout,
   captureStdoutLive,
-  createFakeAgentRunner,
   createFakeContext,
+  createFakeUnifiedEntry,
   createTempCliPaths,
   waitForOutput,
 } from './helpers/cli-test-utils.js'
@@ -48,7 +48,7 @@ describe('CLI integration', () => {
   describe('run command', () => {
     it('streams assistant text to stdout and returns exit code 0', async () => {
       const fakeContext = createFakeContext()
-      const runner = createFakeAgentRunner([
+      const entry = await createFakeUnifiedEntry([
         {
           type: 'MessageDelta',
           runId: 'run_test' as RunId,
@@ -70,7 +70,7 @@ describe('CLI integration', () => {
       const output = await captureStdout(async () => {
         const exitCode = await runCli(['run', 'say hello'], {
           loadContext: () => Promise.resolve(fakeContext),
-          createAgentRunner: () => runner,
+          createUnifiedEntry: async () => entry,
           getUserConfigPaths: () => fakeContext.paths,
         })
 
@@ -91,7 +91,7 @@ describe('CLI integration', () => {
         },
       })
 
-      const runner = createFakeAgentRunner(
+      const entry = await createFakeUnifiedEntry(
         [
           {
             type: 'RunCompleted',
@@ -109,7 +109,7 @@ describe('CLI integration', () => {
       await captureStdout(async () => {
         const exitCode = await runCli(['run', 'test'], {
           loadContext: () => Promise.resolve(fakeContext),
-          createAgentRunner: () => runner,
+          createUnifiedEntry: async () => entry,
           getUserConfigPaths: () => fakeContext.paths,
         })
         expect(exitCode).toBe(0)
@@ -121,7 +121,7 @@ describe('CLI integration', () => {
     it('returns exit code 1 on runtime failure', async () => {
       const fakeContext = createFakeContext()
       const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-      const runner = createFakeAgentRunner([
+      const entry = await createFakeUnifiedEntry([
         {
           type: 'RunFailed',
           runId: 'run_test' as RunId,
@@ -134,7 +134,7 @@ describe('CLI integration', () => {
 
       const exitCode = await runCli(['run', 'test'], {
         loadContext: () => Promise.resolve(fakeContext),
-        createAgentRunner: () => runner,
+        createUnifiedEntry: async () => entry,
         getUserConfigPaths: () => fakeContext.paths,
       })
 
@@ -144,7 +144,7 @@ describe('CLI integration', () => {
 
     it('writes observer JSONL entries compatible with log follow output', async () => {
       const fakeContext = createFakeContext()
-      const runner = createFakeAgentRunner([
+      const entry = await createFakeUnifiedEntry([
         {
           type: 'MessageDelta',
           runId: 'run_test' as RunId,
@@ -166,7 +166,7 @@ describe('CLI integration', () => {
       await captureStdout(async () => {
         const exitCode = await runCli(['run', 'test observer logger'], {
           loadContext: () => Promise.resolve(fakeContext),
-          createAgentRunner: () => runner,
+          createUnifiedEntry: async () => entry,
           getUserConfigPaths: () => fakeContext.paths,
         })
 
