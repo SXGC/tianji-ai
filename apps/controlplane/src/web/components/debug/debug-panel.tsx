@@ -1,7 +1,11 @@
 import type { JSX } from 'react'
 
 import { useDebugStore } from '../../stores/debug-store.js'
+import { DebugToolbar } from './debug-toolbar.js'
+import { EventListTab } from './event-list-tab.js'
 import { useDebugWindow } from './hooks/use-debug-window.js'
+import { useEventPolling } from './hooks/use-event-polling.js'
+import { NodeStatusTab } from './node-status-tab.js'
 
 const DEBUG_ENABLED = import.meta.env.VITE_ENABLE_DEBUG === 'true'
 
@@ -11,7 +15,9 @@ const DEBUG_ENABLED = import.meta.env.VITE_ENABLE_DEBUG === 'true'
  */
 export function DebugPanelImpl(): JSX.Element | null {
   const open = useDebugStore((s) => s.panelOpen)
+  const tab = useDebugStore((s) => s.tab)
   const { style } = useDebugWindow({ x: 100, y: 100, width: 800, height: 500 })
+  useEventPolling()
   if (!open) return null
   return (
     <div
@@ -22,9 +28,14 @@ export function DebugPanelImpl(): JSX.Element | null {
         color: '#eee',
         border: '1px solid #333',
         borderRadius: 8,
+        display: 'flex',
+        flexDirection: 'column',
       }}
     >
-      {/* Toolbar 与 TabContent 由后续 Task 填入 */}
+      <DebugToolbar />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        {tab === 'events' ? <EventListTab /> : <NodeStatusTab />}
+      </div>
     </div>
   )
 }
@@ -36,7 +47,7 @@ function EmptyComponent(): null {
 /**
  * 浮动调试面板容器。仅当 VITE_ENABLE_DEBUG === 'true' 时导出真正实现。
  * DEBUG_ENABLED=false 时，DebugPanelImpl 未被作为 default export 引用，rollup 会连同它引入的
- * use-debug-window、后续 Task 新增的 DebugToolbar / EventListTab / NodeStatusTab / use-event-polling
+ * use-debug-window、DebugToolbar / EventListTab / NodeStatusTab / use-event-polling
  * 一起剔除。**注意：`DebugPanelImpl` 是 named export，仅用于测试直接渲染；生产代码只引用 `DebugPanel`。**
  */
 export const DebugPanel = DEBUG_ENABLED ? DebugPanelImpl : EmptyComponent
