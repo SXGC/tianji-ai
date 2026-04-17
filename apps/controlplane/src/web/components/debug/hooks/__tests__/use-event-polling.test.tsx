@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { act, renderHook, waitFor } from '@testing-library/react'
+import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 import * as api from '../../../../services/debug-api.js'
@@ -31,6 +31,13 @@ function mockEvent(cursor: number): api.DebugEvent {
   }
 }
 
+/** 将微任务队列抽干，让 Promise.resolve() 链完成 */
+async function flushMicrotasks(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve()
+  })
+}
+
 describe('useEventPolling', () => {
   test('挂载时 bootstrap 不带 sinceCursor', async () => {
     const spy = vi.spyOn(api, 'fetchDebugEvents').mockResolvedValue({
@@ -41,7 +48,8 @@ describe('useEventPolling', () => {
     })
     useDebugStore.setState({ panelOpen: true, tab: 'events', mode: 'realtime' })
     renderHook(() => useEventPolling())
-    await waitFor(() => expect(spy).toHaveBeenCalled())
+    await flushMicrotasks()
+    expect(spy).toHaveBeenCalled()
     expect(spy.mock.calls[0]![0]).toMatchObject({ mode: 'realtime' })
     expect(spy.mock.calls[0]![0].sinceCursor).toBeUndefined()
   })
@@ -55,10 +63,14 @@ describe('useEventPolling', () => {
     })
     useDebugStore.setState({ panelOpen: true, tab: 'events', mode: 'realtime' })
     renderHook(() => useEventPolling())
-    await waitFor(() => expect(useDebugStore.getState().sinceCursor).toBe(5))
+    // flush bootstrap，让 sinceCursor 更新到 5
+    await flushMicrotasks()
+    expect(useDebugStore.getState().sinceCursor).toBe(5)
+    // 推进 2s 触发第一次 interval tick，再 flush 让 Promise 完成
     await act(async () => {
       await vi.advanceTimersByTimeAsync(2000)
     })
+    await flushMicrotasks()
     expect(
       (api.fetchDebugEvents as ReturnType<typeof vi.fn>).mock.calls.length
     ).toBeGreaterThanOrEqual(2)
@@ -70,18 +82,20 @@ describe('useEventPolling', () => {
     vi.spyOn(api, 'fetchDebugEvents').mockRejectedValue(new Error('net'))
     useDebugStore.setState({ panelOpen: true, tab: 'events', mode: 'realtime' })
     renderHook(() => useEventPolling())
-    // bootstrap 失败 → failure 1
-    await waitFor(() =>
-      expect(useDebugStore.getState().consecutiveFailures).toBeGreaterThanOrEqual(1)
-    )
-    // 2s tick → failure 2；2s tick → failure 3（paused=true，effect cleanup）；
-    // 第 3 次推进用于确保即使 cleanup 有延迟，也不会继续累加失败。
-    for (let i = 0; i < 3; i++) {
-      await act(async () => {
-        await vi.advanceTimersByTimeAsync(2000)
-      })
-    }
-    await waitFor(() => expect(useDebugStore.getState().paused).toBe(true))
+    // bootstrap 失败 → consecutiveFailures = 1
+    await flushMicrotasks()
+    expect(useDebugStore.getState().consecutiveFailures).toBeGreaterThanOrEqual(1)
+    // 第 2 次 tick → consecutiveFailures = 2
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    await flushMicrotasks()
+    // 第 3 次 tick → consecutiveFailures = 3 → paused = true
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+    await flushMicrotasks()
+    expect(useDebugStore.getState().paused).toBe(true)
   })
 
   test('切到非 events tab 时停止轮询', async () => {
@@ -93,12 +107,19 @@ describe('useEventPolling', () => {
     })
     useDebugStore.setState({ panelOpen: true, tab: 'events', mode: 'realtime' })
     renderHook(() => useEventPolling())
-    await waitFor(() => expect(spy).toHaveBeenCalled())
+    // flush bootstrap，确认首次调用已发出
+    await flushMicrotasks()
+    expect(spy).toHaveBeenCalled()
     const baseline = spy.mock.calls.length
-    useDebugStore.getState().setTab('nodes')
+    // 切 tab → effect cleanup，interval 应被清除
+    act(() => {
+      useDebugStore.getState().setTab('nodes')
+    })
+    // 推进 4s 验证不再有新调用
     await act(async () => {
       await vi.advanceTimersByTimeAsync(4000)
     })
+    await flushMicrotasks()
     expect(spy.mock.calls.length).toBe(baseline)
   })
 })

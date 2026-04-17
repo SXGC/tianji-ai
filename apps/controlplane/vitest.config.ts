@@ -24,7 +24,6 @@ export default defineConfig({
     exclude: ['node_modules', 'dist'],
     globals: true,
     root: packageRoot,
-    setupFiles: ['src/test-setup.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html', 'lcov'],
