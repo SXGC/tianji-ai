@@ -124,7 +124,7 @@ describe('POST /api/copilot', () => {
     expect(body.error).toContain('offline')
   })
 
-  it('在线节点聊天请求不会因 this.run 丢失而报错', async () => {
+  it('bus 未注入时仍以 SSE 200 完成 HTTP 握手（agent 异步 crash 不污染响应）', async () => {
     const { app } = setup()
     insertNode('node-1', 'online')
 
