@@ -53,7 +53,7 @@ async function flushMicrotasks(): Promise<void> {
 describe('Forwarder', () => {
   it('订阅 bus 并在 maxItems 到达时批量 POST 到 cp', async () => {
     const post = vi.fn().mockResolvedValue(undefined)
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const fwd = createForwarder({
       bus,
       post,
@@ -77,7 +77,7 @@ describe('Forwarder', () => {
 
   it('dispose 时 flush 剩余 buffer', async () => {
     const post = vi.fn().mockResolvedValue(undefined)
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const fwd = createForwarder({
       bus,
       post,
@@ -102,7 +102,7 @@ describe('Forwarder', () => {
 
   it('原始 envelope correlationId/causationId 不被重写，直接透传', async () => {
     const post = vi.fn().mockResolvedValue(undefined)
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const fwd = createForwarder({
       bus,
       post,
@@ -129,7 +129,7 @@ describe('Forwarder', () => {
 
   it('getCurrentTaskId 返回 null 时 flush 跳过，post 不被调用', async () => {
     const post = vi.fn().mockResolvedValue(undefined)
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const fwd = createForwarder({
       bus,
       post,
@@ -152,7 +152,7 @@ describe('Forwarder', () => {
 
   it('丢弃 cp writer-rules 一定会拒绝的 envelope', async () => {
     const post = vi.fn().mockResolvedValue(undefined)
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const fwd = createForwarder({
       bus,
       post,
@@ -177,7 +177,7 @@ describe('Forwarder', () => {
 
   it('非 MessageDelta 事件会记录 node forwarder 诊断日志', async () => {
     const post = vi.fn().mockResolvedValue(undefined)
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
     const fwd = createForwarder({
@@ -211,7 +211,7 @@ describe('Forwarder', () => {
 
   it('MessageDelta 不记录 node forwarder 诊断日志', async () => {
     const post = vi.fn().mockResolvedValue(undefined)
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
     const fwd = createForwarder({

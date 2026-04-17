@@ -83,7 +83,7 @@ describe('subscribeEventBusLogger — 写入 ObserverLogger', () => {
   it('每收到一个 envelope 写入一条 trace 日志，data 包含 correlationId', async () => {
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
 
     const handle = subscribeEventBusLogger(bus, logger)
 
@@ -102,7 +102,7 @@ describe('subscribeEventBusLogger — 写入 ObserverLogger', () => {
   it('filter 为全聚合：任意类型事件均被投递', async () => {
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
 
     const handle = subscribeEventBusLogger(bus, logger)
 
@@ -122,7 +122,7 @@ describe('subscribeEventBusLogger — 写入 ObserverLogger', () => {
   it('unsubscribe 后事件不再写入日志', async () => {
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
 
     const handle = subscribeEventBusLogger(bus, logger)
     handle.unsubscribe()
@@ -136,7 +136,7 @@ describe('subscribeEventBusLogger — 写入 ObserverLogger', () => {
   it('payload 字段写入 data.payload，保持原始结构', async () => {
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
 
     const handle = subscribeEventBusLogger(bus, logger)
 
@@ -152,7 +152,7 @@ describe('subscribeEventBusLogger — 写入 ObserverLogger', () => {
   it('日志 level 为 trace', async () => {
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
 
     const handle = subscribeEventBusLogger(bus, logger)
 

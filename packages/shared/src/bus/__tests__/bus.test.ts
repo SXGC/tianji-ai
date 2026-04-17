@@ -21,7 +21,7 @@ const flush = () => new Promise<void>((resolve) => queueMicrotask(() => resolve(
 
 describe('EventBus', () => {
   it('publish 同步返回，handler 异步执行', async () => {
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const seen: string[] = []
     bus.subscribe(
       {},
@@ -37,7 +37,7 @@ describe('EventBus', () => {
   })
 
   it('按 filter 投递', async () => {
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const taskSeen: string[] = []
     bus.subscribe(
       { aggregateType: ['Task'] },
@@ -54,7 +54,7 @@ describe('EventBus', () => {
   })
 
   it('订阅者顺序执行 handler', async () => {
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const order: string[] = []
     bus.subscribe(
       {},
@@ -73,7 +73,7 @@ describe('EventBus', () => {
 
   it('队列满丢弃并调用 lagSink', async () => {
     const lag = vi.fn()
-    const bus = createEventBus({ lagSink: lag })
+    const bus = createEventBus({ lagSink: lag, errorSink: vi.fn() })
     bus.subscribe(
       {},
       async () => {
@@ -89,7 +89,7 @@ describe('EventBus', () => {
   })
 
   it('unsubscribe 后不再投递', async () => {
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const seen: string[] = []
     const sub = bus.subscribe(
       {},
@@ -166,7 +166,7 @@ describe('EventBus', () => {
 
 describe('EventBus.close()', () => {
   it('close() 等待在途 handler 完成后 resolve', async () => {
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     let callCount = 0
 
     bus.subscribe(
@@ -190,14 +190,14 @@ describe('EventBus.close()', () => {
   })
 
   it('close() 后再 publish 抛 Error', async () => {
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     await bus.close()
 
     expect(() => bus.publish(mk({ eventId: 'e1' }))).toThrow('EventBus is closed')
   })
 
   it('close() 幂等：多次调用返回同一个 Promise，不报错', async () => {
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
 
     const p1 = bus.close()
     const p2 = bus.close()
@@ -207,7 +207,7 @@ describe('EventBus.close()', () => {
   })
 
   it('close() 排空队列里已 enqueue 的事件，不丢消息', async () => {
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const processed: string[] = []
 
     bus.subscribe(
@@ -230,5 +230,22 @@ describe('EventBus.close()', () => {
 
     // 所有 5 条事件必须被处理，不能丢
     expect(processed).toEqual(['e1', 'e2', 'e3', 'e4', 'e5'])
+  })
+})
+
+describe('createEventBus options contract', () => {
+  it('accepts a required errorSink', () => {
+    const bus = createEventBus({
+      lagSink: () => undefined,
+      errorSink: () => undefined,
+    })
+    expect(typeof bus.publish).toBe('function')
+  })
+
+  it('rejects calls that omit errorSink at runtime', () => {
+    expect(() => {
+      // @ts-expect-error errorSink is required
+      createEventBus({ lagSink: () => undefined })
+    }).toThrow()
   })
 })

@@ -280,7 +280,7 @@ describe('subscribeOtelAdapter — bus 集成', () => {
       startSpan: vi.fn().mockReturnValue(mockSpan),
     } as never)
 
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const handle = subscribeOtelAdapter(bus)
 
     const payload: RunStartedEvent = {
@@ -305,7 +305,7 @@ describe('subscribeOtelAdapter — bus 集成', () => {
       startSpan: mockStartSpanFn,
     } as never)
 
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const handle = subscribeOtelAdapter(bus)
 
     const env = {
@@ -354,7 +354,7 @@ describe('subscribeOtelAdapter — bus 集成', () => {
       startSpan: mockStartSpanFn,
     } as never)
 
-    const bus = createEventBus({ lagSink: vi.fn() })
+    const bus = createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
     const handle = subscribeOtelAdapter(bus)
     handle.unsubscribe()
 

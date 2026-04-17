@@ -360,7 +360,7 @@ async function setupTestEnv(
   // 不装配时 /api/events 不注册（见 app.ts），node forwarder 会拿到 404。
   // 注意：不传 emitEvent 以避免在无 ALS 上下文中调用 pipeline.emitEvent 报错。
   // cp 自身的 NodeRegistered 等事件对 e2e 测试不需要落 event_log。
-  const bus = createEventBus({})
+  const bus = createEventBus({ lagSink: () => undefined, errorSink: () => undefined })
   const store = new SqliteEventLogStore(db.raw)
   const eventLogHandle = subscribeEventLog(bus, store, { logger })
 

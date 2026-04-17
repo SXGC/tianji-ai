@@ -43,7 +43,7 @@ export function wrapRunEnvelope(event: DomainEvent): DomainEventEnvelope {
 
 export function createStubSession(chunks: readonly string[]): LiveStubSession {
   const sessionId = `session_stub_${Date.now()}` as SessionId
-  const bus = createEventBus({ lagSink: () => undefined })
+  const bus = createEventBus({ lagSink: () => undefined, errorSink: () => undefined })
 
   return {
     bus,

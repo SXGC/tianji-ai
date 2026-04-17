@@ -34,7 +34,7 @@ function makeEnvelope(overrides: Partial<DomainEventEnvelope> = {}): DomainEvent
 
 /** 创建测试用 EventBus，lagSink 用 vi.fn() 接收。 */
 function createStubBus(): EventBus {
-  return createEventBus({ lagSink: vi.fn() })
+  return createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
 }
 
 /**

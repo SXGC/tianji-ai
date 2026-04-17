@@ -45,6 +45,7 @@ describe('TianjiAgent', () => {
       lagSink: (info) => {
         console.warn('[test-bus] subscriber lag', info)
       },
+      errorSink: () => undefined,
     })
   }
 
@@ -358,6 +359,7 @@ describe('TianjiAgent cancel 终态', () => {
       lagSink: (info) => {
         console.warn('[test-bus] subscriber lag', info)
       },
+      errorSink: () => undefined,
     })
   }
 

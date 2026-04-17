@@ -66,7 +66,7 @@ describe('TianjiAgent × AgUiEventGate 集成', () => {
   function bootstrapRun() {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
-    const bus = createEventBus({ lagSink: () => undefined })
+    const bus = createEventBus({ lagSink: () => undefined, errorSink: () => undefined })
     const sink: ObserverMemorySink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
     const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, logger)

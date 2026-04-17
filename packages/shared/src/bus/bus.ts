@@ -40,14 +40,20 @@ export interface EventBusOptions {
   readonly lagSink: LagSink
   /**
    * 订阅者 handler 抛出异常时调用，用于记录可观测日志。
-   * 不提供时默认使用 console.error 输出结构化信息。
+   * 必填：禁止 bus 在失败路径上默默走 console，所有调用方必须显式指定可观测出口。
    * 不得 rethrow，异常隔离是 bus 的核心不变量。
    */
-  readonly errorSink?: ErrorSink
+  readonly errorSink: ErrorSink
 }
 
 /** 创建一个进程内 EventBus 实例。 */
 export function createEventBus(options: EventBusOptions): EventBus {
+  if (typeof options.errorSink !== 'function') {
+    throw new TypeError('createEventBus: errorSink is required')
+  }
+  if (typeof options.lagSink !== 'function') {
+    throw new TypeError('createEventBus: lagSink is required')
+  }
   const subscribers = new Map<number, Subscriber>()
   let nextId = 1
   let closed = false
@@ -89,17 +95,7 @@ export function createEventBus(options: EventBusOptions): EventBus {
     })
   }
 
-  const defaultErrorSink: ErrorSink = ({ subscriberName, subscriptionId, envelope, error }) => {
-    console.error('[EventBus] handler 抛出异常', {
-      subscriberName,
-      subscriptionId,
-      eventId: envelope.eventId,
-      eventType: envelope.type,
-      error,
-    })
-  }
-
-  const errorSink = options.errorSink ?? defaultErrorSink
+  const errorSink = options.errorSink
 
   async function drain(sub: Subscriber): Promise<void> {
     while (!sub.cancelled && sub.queue.length > 0) {

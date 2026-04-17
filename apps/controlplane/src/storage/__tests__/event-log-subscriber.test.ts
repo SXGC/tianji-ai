@@ -57,7 +57,7 @@ describe('subscribeEventLog', () => {
   it('Bus 发布事件 → subscriber → 落入 SQLite（端到端）', async () => {
     const db = freshDb()
     const store = new SqliteEventLogStore(db)
-    const bus = createEventBus({ lagSink })
+    const bus = createEventBus({ lagSink, errorSink: () => undefined })
 
     const handle = subscribeEventLog(bus, store, { flushIntervalMs: 10 })
 
@@ -76,7 +76,7 @@ describe('subscribeEventLog', () => {
     const db = freshDb()
     const store = new SqliteEventLogStore(db)
     // 使用极长 flushIntervalMs，保证定时器不会自动触发
-    const bus = createEventBus({ lagSink })
+    const bus = createEventBus({ lagSink, errorSink: () => undefined })
     const handle = subscribeEventLog(bus, store, { flushIntervalMs: 60_000 })
 
     bus.publish(makeEnv(1))
@@ -101,7 +101,7 @@ describe('subscribeEventLog', () => {
     } as never
 
     const errorSink: ErrorSink = vi.fn()
-    const bus = createEventBus({ lagSink })
+    const bus = createEventBus({ lagSink, errorSink: () => undefined })
     const handle = subscribeEventLog(bus, store, {
       flushIntervalMs: 10,
       errorSink,
@@ -130,7 +130,7 @@ describe('subscribeEventLog', () => {
       queryByCorrelation: vi.fn(),
     } as never
 
-    const bus = createEventBus({ lagSink })
+    const bus = createEventBus({ lagSink, errorSink: () => undefined })
     const handle = subscribeEventLog(bus, store, {
       flushIntervalMs: 10,
       logger,
@@ -167,7 +167,7 @@ describe('subscribeEventLog', () => {
       queryByCorrelation: vi.fn(),
     } as never
 
-    const bus = createEventBus({ lagSink })
+    const bus = createEventBus({ lagSink, errorSink: () => undefined })
     const handle = subscribeEventLog(bus, store, {
       flushIntervalMs: 10,
       logger,
@@ -190,7 +190,7 @@ describe('subscribeEventLog', () => {
   it('close() 调用后不再处理新事件', async () => {
     const db = freshDb()
     const store = new SqliteEventLogStore(db)
-    const bus = createEventBus({ lagSink })
+    const bus = createEventBus({ lagSink, errorSink: () => undefined })
     const handle = subscribeEventLog(bus, store, { flushIntervalMs: 10 })
 
     bus.publish(makeEnv(1))

@@ -96,7 +96,7 @@ async function setupLiveDaemon(
 }
 
 function createTestBus(): EventBus {
-  return createEventBus({ lagSink: vi.fn() })
+  return createEventBus({ lagSink: vi.fn(), errorSink: vi.fn() })
 }
 
 function createRecordingSession(prompts: string[]): LiveDaemonSessionFactory {
