@@ -6,6 +6,7 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [react()],
   root: resolve(import.meta.dirname, 'src/web'),
+  envDir: resolve(import.meta.dirname, '../..'),
   resolve: {
     mainFields: ['module', 'browser', 'main'],
   },

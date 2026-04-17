@@ -36,9 +36,6 @@
 - 删除看起来是有意设计的功能或代码前，必须先询问用户。
 - 禁止硬编码快捷键判断，例如 `matchesKey(keyData, "ctrl+x")`。
 - 所有 build 产物必须放到对应包的 dist 目录中，并且在 .gitignore 中忽视。
-- 所有快捷键都必须可配置，并在默认配置中声明，例如：
-  - `DEFAULT_EDITOR_KEYBINDINGS`
-  - `DEFAULT_APP_KEYBINDINGS`
 - 任何环境变量的添加都需要明确让用户同意.
 - 禁止递归
 - 业务代码不要过多考虑边界判断
@@ -85,7 +82,7 @@
 
 ### 提交规则
 
-- 如果需要执行 `git commit`，必须先加载 `git commit` skill。
+- 如果需要执行 `git commit`，必须先加载 `git comm eit` skill。
 - 绝对不允许添加例如 `Co-Authored-By:` 这样的内容
 
 ## 文件读取与编辑规则
@@ -116,10 +113,18 @@ git commit --no-verify
 * 如果冲突出现在你未修改的文件中，立即停止并询问用户。
 * 严禁 `force push`。
 
+
+## 相关文档索引
+
+在计划或者实现相关功能前，你可以阅读以下文档
+
+- 日志可观测性相关
+docs/development/04 - OBSERVER_DESIGN.md
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **tianji-ai** (3608 symbols, 6121 relationships, 237 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **tianji-ai** (3741 symbols, 6441 relationships, 280 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

@@ -34,6 +34,33 @@ describe('control plane shutdown hardening', () => {
     expect(typeof mod.startControlPlaneServer).toBe('function')
   })
 
+  it('loads .env.local after .env from repo root', async () => {
+    vi.resetModules()
+    const mod = await import('../server-entry.js')
+
+    const loader = {
+      existsSync: (filePath: string) => {
+        const path = String(filePath)
+        return path.endsWith('/.env') || path.endsWith('/.env.local')
+      },
+      readFileSync: (filePath: string) => {
+        const path = String(filePath)
+        if (path.endsWith('/.env')) {
+          return 'TIANJI_DEBUG=false\nVITE_ENABLE_DEBUG=false\n'
+        }
+        if (path.endsWith('/.env.local')) {
+          return 'TIANJI_DEBUG=true\nVITE_ENABLE_DEBUG=true\n'
+        }
+        throw new Error(`unexpected env file: ${path}`)
+      },
+    }
+
+    mod.loadControlPlaneRootEnv(loader)
+
+    expect(process.env.TIANJI_DEBUG).toBe('true')
+    expect(process.env.VITE_ENABLE_DEBUG).toBe('true')
+  })
+
   it('invokes shutdown once for uncaughtException with stack in log data', async () => {
     const mod = await import('../server-entry.js')
     const logs: Array<{ level: string; data: Record<string, unknown> | undefined }> = []

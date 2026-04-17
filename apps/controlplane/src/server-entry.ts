@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 import { serve } from '@hono/node-server'
@@ -31,6 +31,62 @@ import { subscribeEventLog } from './storage/event-log-subscriber.js'
 
 const SCOPE_SERVER = ['controlplane', 'server'] as const
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000
+const REPO_ROOT_DIR = resolve(import.meta.dirname, '../../..')
+
+export interface RootEnvLoader {
+  readonly existsSync: (filePath: string) => boolean
+  readonly readFileSync: (filePath: string, encoding: BufferEncoding) => string
+}
+
+const defaultRootEnvLoader: RootEnvLoader = {
+  existsSync,
+  readFileSync,
+}
+
+/**
+ * 在 controlplane 入口最早阶段读取仓库根目录 env，统一前后端的变量来源。
+ */
+export function loadControlPlaneRootEnv(loader: RootEnvLoader = defaultRootEnvLoader): void {
+  const envFilePaths = [resolve(REPO_ROOT_DIR, '.env'), resolve(REPO_ROOT_DIR, '.env.local')]
+
+  for (const filePath of envFilePaths) {
+    if (!loader.existsSync(filePath)) {
+      continue
+    }
+
+    const fileContent = loader.readFileSync(filePath, 'utf8')
+    const lines = fileContent.split(/\r?\n/u)
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim()
+      if (line.length === 0 || line.startsWith('#')) {
+        continue
+      }
+
+      const equalsIndex = line.indexOf('=')
+      if (equalsIndex <= 0) {
+        continue
+      }
+
+      const key = line.slice(0, equalsIndex).trim()
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key)) {
+        continue
+      }
+
+      let value = line.slice(equalsIndex + 1).trim()
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1)
+      }
+
+      process.env[key] = value
+    }
+  }
+}
+
+loadControlPlaneRootEnv()
 
 export interface ControlPlaneServerHandle {
   readonly shutdown: () => Promise<void>
@@ -234,8 +290,7 @@ export function createCrashHandlers(options: CrashHandlerOptions): CrashHandlers
   return { onUncaughtException, onUnhandledRejection, onSignal, flush }
 }
 
-const isMain =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href
+const isMain = process.argv[1] !== undefined && import.meta.url.endsWith('/server-entry.js')
 
 if (isMain) {
   try {
