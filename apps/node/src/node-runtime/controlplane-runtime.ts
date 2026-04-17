@@ -4,6 +4,7 @@ import type {
   OrchestrationGraph,
   UnifiedRuntimeEntry,
 } from '@tianji/agent'
+import { errorToLogData } from '@tianji/observer'
 import type { ObserverLogger } from '@tianji/observer'
 import type {
   AgentInfo,
@@ -248,12 +249,13 @@ export function createControlPlaneRuntime(
         taskExecutorRef
           .execute(taskCommand)
           .catch((error) => {
+            // fire-and-forget：日志 Promise 的 reject 也要吞掉，否则会变成 unhandledRejection。
             config.logger
               ?.logError(['daemon', 'controlplane'], 'Failed to execute task command', {
                 commandId: taskCommand.commandId,
                 taskId: taskCommand.payload.taskId,
                 agentId: taskCommand.payload.agentId,
-                error: error instanceof Error ? error.message : String(error),
+                ...errorToLogData(error),
               })
               ?.catch(() => {})
           })
@@ -267,11 +269,12 @@ export function createControlPlaneRuntime(
         try {
           registry.cancel(String(command.payload.taskId))
         } catch (error) {
+          // fire-and-forget：日志 Promise 的 reject 也要吞掉，否则会变成 unhandledRejection。
           config.logger
             ?.logError(['daemon', 'controlplane'], 'Failed to cancel task', {
               commandId: command.commandId,
               taskId: command.payload.taskId,
-              error: error instanceof Error ? error.message : String(error),
+              ...errorToLogData(error),
             })
             ?.catch(() => {})
         }

@@ -6,26 +6,9 @@
 
 import type { AgentInfo, NodeExecutionState, NodeId, PollCommandResponse } from '@tianji/shared'
 
+import { errorToLogData } from '@tianji/observer'
 import type { RuntimeLogger } from '../logger.js'
 import { ControlPlaneAuthError, ControlPlaneClient } from './client.js'
-
-function toErrorLogData(error: unknown): Record<string, unknown> {
-  const message = error instanceof Error ? error.message : String(error)
-
-  if (!(error instanceof Error)) {
-    return { error: message }
-  }
-
-  const cause = error.cause
-  const errorCause =
-    cause instanceof Error ? cause.message : cause === undefined ? undefined : String(cause)
-
-  return {
-    error: message,
-    errorName: error.name,
-    errorCause,
-  }
-}
 
 export interface ControlPlaneConnectionConfig {
   readonly baseUrl: string
@@ -121,7 +104,7 @@ export class ControlPlaneConnection {
     void task().catch(async (error) => {
       try {
         await this.#config.logger?.logError(this.#scope, 'Control plane background task failed', {
-          ...toErrorLogData(error),
+          ...errorToLogData(error),
         })
       } catch {
         // 后台兜底日志也失败时，直接吞掉，避免再次触发 unhandledRejection。
@@ -143,11 +126,11 @@ export class ControlPlaneConnection {
         executionState: this.#executionState,
       })
     } catch (error) {
-      const errorData = toErrorLogData(error)
+      const errorData = errorToLogData(error)
 
       this.#config.onConnectionStateChange?.({
         status: 'heartbeat_failed',
-        error: String(errorData.error),
+        error: typeof errorData.message === 'string' ? errorData.message : String(error),
       })
       await this.#config.logger?.logError(this.#scope, 'Control plane heartbeat failed', {
         nodeId: this.#config.nodeId,

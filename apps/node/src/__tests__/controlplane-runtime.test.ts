@@ -259,7 +259,9 @@ describe('createControlPlaneRuntime with custom deps', () => {
         commandId: cmd.commandId,
         taskId: cmd.payload.taskId,
         agentId: cmd.payload.agentId,
-        error: 'executor failed',
+        name: 'Error',
+        message: 'executor failed',
+        stack: expect.any(String),
       })
     )
   })

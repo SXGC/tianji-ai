@@ -269,9 +269,13 @@ describe('ControlPlaneConnectionConfig', () => {
       nodeId: 'node-001',
       executionState: 'idle',
       baseUrl: 'http://localhost:3000',
-      error: 'fetch failed',
-      errorName: 'TypeError',
-      errorCause: 'connect ECONNREFUSED 127.0.0.1:3000',
+      name: 'TypeError',
+      message: 'fetch failed',
+      stack: expect.any(String),
+      cause: expect.objectContaining({
+        name: 'Error',
+        message: 'connect ECONNREFUSED 127.0.0.1:3000',
+      }),
     })
   })
 
