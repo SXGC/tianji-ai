@@ -1,4 +1,3 @@
-import { appendFile, mkdir } from 'node:fs/promises'
 import type {
   ObserverLogEntry,
   ObserverLogLevel,
@@ -6,7 +5,7 @@ import type {
   ObserverLogSink,
   ObserverLogger,
 } from '@tianji/observer'
-import { createObserverLogger } from '@tianji/observer'
+import { createJsonlFileSink, createObserverLogger, createStderrSink } from '@tianji/observer'
 import type { UserConfigPaths } from './config.js'
 
 export type CliLogLevel = Extract<ObserverLogLevel, 'debug' | 'info' | 'warn' | 'error'>
@@ -160,12 +159,43 @@ export function getCliLogger(paths: UserConfigPaths): CliLogger {
 }
 
 function createCliLoggerFromPaths(paths: UserConfigPaths): CliLogger {
-  return createCliLogger({
-    sink: {
-      async write(entry: CliLogEntry) {
-        await mkdir(paths.logsDir, { recursive: true })
-        await appendFile(paths.cliLogFilePath, `${JSON.stringify(entry)}\n`, 'utf8')
-      },
-    },
+  const fileSink = createJsonlFileSink({ filePath: paths.cliLogFilePath })
+  const stderrSink = createStderrSink({ minLevel: 'warn' })
+  return createCliLoggerWithSinks(paths, [fileSink, stderrSink])
+}
+
+/**
+ * Creates a CLI logger backed by an ordered list of observer sinks.
+ * The first sink is treated as the primary sink for `appendCliLog` direct writes.
+ *
+ * @param _paths - Reserved for future path-aware sink configuration
+ * @param sinks - Ordered sink list; index 0 is the primary (file) sink
+ */
+function createCliLoggerWithSinks(
+  _paths: UserConfigPaths,
+  sinks: readonly ObserverLogSink[]
+): CliLogger {
+  const observerLogger = createObserverLogger({
+    sinks,
+    sensitiveKeys: ['prompt', 'soul'],
   })
+  const primarySink = sinks[0]
+  return {
+    observerLogger,
+    appendCliLog(entry) {
+      return primarySink !== undefined ? primarySink.write(entry) : Promise.resolve()
+    },
+    logDebug(scope, message, data) {
+      return observerLogger.debug(scope, message, data)
+    },
+    logInfo(scope, message, data) {
+      return observerLogger.info(scope, message, data)
+    },
+    logWarn(scope, message, data) {
+      return observerLogger.warn(scope, message, data)
+    },
+    logError(scope, message, data) {
+      return observerLogger.error(scope, message, data)
+    },
+  }
 }

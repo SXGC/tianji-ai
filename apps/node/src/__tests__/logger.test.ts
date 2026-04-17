@@ -1,9 +1,21 @@
-import { readFile } from 'node:fs/promises'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { ObserverLogEntry } from '@tianji/observer'
 
-import { appendCliLog, createCliLogger, logDebug, logError, logInfo, logWarn } from '../logger.js'
+import type { UserConfigPaths } from '../config.js'
+import {
+  appendCliLog,
+  createCliLogger,
+  getCliLogger,
+  logDebug,
+  logError,
+  logInfo,
+  logWarn,
+} from '../logger.js'
 
 import { createTempCliPaths } from './helpers/cli-test-utils.js'
 
@@ -169,5 +181,45 @@ describe('path-based log helpers', () => {
     expect(content).toContain('auto-mkdir test')
 
     await cleanup()
+  })
+})
+
+describe('getCliLogger sinks', () => {
+  let tmpRoot: string
+  let paths: UserConfigPaths
+  let stderrSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), 'tianji-cli-log-'))
+    paths = {
+      logsDir: join(tmpRoot, 'logs'),
+      cliLogFilePath: join(tmpRoot, 'logs', 'cli.jsonl'),
+    } as UserConfigPaths
+    stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+  })
+
+  afterEach(async () => {
+    stderrSpy.mockRestore()
+    await rm(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('writes jsonl file for all levels and stderr only for warn/error', async () => {
+    const cli = getCliLogger(paths)
+    await cli.logDebug(['cli', 'test'], 'debug-msg')
+    await cli.logWarn(['cli', 'test'], 'warn-msg')
+    await cli.logError(['cli', 'test'], 'error-msg', { detail: 'boom' })
+
+    const fileContent = await readFile(paths.cliLogFilePath, 'utf8')
+    const lines = fileContent
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+    expect(lines).toHaveLength(3)
+    expect(lines.map((l) => l.level)).toEqual(['debug', 'warn', 'error'])
+
+    const stderrOutput = stderrSpy.mock.calls.map((c) => String(c[0])).join('')
+    expect(stderrOutput).not.toContain('debug-msg')
+    expect(stderrOutput).toContain('warn-msg')
+    expect(stderrOutput).toContain('error-msg')
   })
 })
