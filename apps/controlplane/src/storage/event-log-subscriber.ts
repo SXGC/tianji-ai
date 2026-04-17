@@ -7,6 +7,7 @@
  * @module storage/event-log-subscriber
  */
 
+import { errorToLogData } from '@tianji/observer'
 import type { ObserverLogger } from '@tianji/observer'
 import type { DomainEventEnvelope, ErrorSink, EventBus, EventLogStore } from '@tianji/shared'
 import {
@@ -63,7 +64,7 @@ export function subscribeEventLog(
       // 使用 error 级别日志保证错误可见性
       void logger?.error(['event-log-subscriber', 'flush'], 'batch flush failed', {
         itemCount: items.length,
-        error: err instanceof Error ? err.message : String(err),
+        ...errorToLogData(err),
         ...diagnostics,
       })
       // 若配置了 errorSink，通知第一条 envelope（代表该批次）
@@ -90,7 +91,7 @@ export function subscribeEventLog(
           'failed to push envelope to committer',
           {
             eventId: env.eventId,
-            error: err instanceof Error ? err.message : String(err),
+            ...errorToLogData(err),
           }
         )
         if (errorSink) {

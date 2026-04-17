@@ -257,13 +257,11 @@ if (isMain) {
       void handlers.onUnhandledRejection(err)
     })
   } catch (error: unknown) {
-    process.stderr.write(
-      `[controlplane] Fatal startup error: ${
-        error instanceof Error ? error.message : String(error)
-      }\n`
-    )
-    if (error instanceof Error && error.stack !== undefined) {
-      process.stderr.write(`${error.stack}\n`)
+    const data = errorToLogData(error)
+    const message = typeof data.message === 'string' ? data.message : String(error)
+    process.stderr.write(`[controlplane] Fatal startup error: ${message}\n`)
+    if (typeof data.stack === 'string') {
+      process.stderr.write(`${data.stack}\n`)
     }
     process.exit(1)
   }

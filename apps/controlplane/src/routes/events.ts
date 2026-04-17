@@ -8,6 +8,7 @@
  * @module routes/events
  */
 
+import { errorToLogData } from '@tianji/observer'
 import type { ObserverLogger } from '@tianji/observer'
 import type { DomainEventEnvelope, EventBus } from '@tianji/shared'
 import { Hono } from 'hono'
@@ -69,7 +70,7 @@ export function createEventsRoute(deps: EventsRouteDeps): Hono<AuthVariables> {
           eventId: env.eventId,
           eventType: env.type,
           processKind: env.source.processKind,
-          error: err instanceof Error ? err.message : String(err),
+          ...errorToLogData(err),
         })
         throw err
       }

@@ -1,3 +1,4 @@
+import { errorToLogData } from '@tianji/observer'
 import type { ObserverLogger } from '@tianji/observer'
 import type { DomainEvent } from '@tianji/shared'
 
@@ -17,7 +18,7 @@ function emitSafe(
     result.catch((err: unknown) => {
       void logger.error(SCOPE_MONITOR, 'emitEvent failed', {
         eventType: event.type,
-        error: err instanceof Error ? err.message : String(err),
+        ...errorToLogData(err),
       })
     })
   }

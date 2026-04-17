@@ -140,20 +140,22 @@ describe('subscribeEventLog', () => {
     await drain(50)
     await handle.close().catch(() => {})
 
-    expect(sink.entries).toContainEqual(
-      expect.objectContaining({
-        message: 'batch flush failed',
-        data: expect.objectContaining({
-          eventId: 'flush-diag',
-          eventType: 'RunStarted',
-          aggregateType: 'Run',
-          aggregateId: 'r1',
-          sequence: 5,
-          itemCount: 1,
-          error: 'db write failed',
-        }),
-      })
-    )
+    const flushEntry = sink.entries.find((item) => item.message === 'batch flush failed')
+    expect(flushEntry).toBeDefined()
+    expect(flushEntry?.data).toMatchObject({
+      eventId: 'flush-diag',
+      eventType: 'RunStarted',
+      aggregateType: 'Run',
+      aggregateId: 'r1',
+      sequence: 5,
+      itemCount: 1,
+    })
+    // errorToLogData 展开后应包含 name / message / stack
+    expect(flushEntry?.data).toMatchObject({
+      name: expect.any(String),
+      message: 'db write failed',
+    })
+    expect(typeof (flushEntry?.data as Record<string, unknown>)?.stack).toBe('string')
   })
 
   it('MessageDelta 的 flush 失败不记录诊断字段', async () => {
