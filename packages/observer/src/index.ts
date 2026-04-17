@@ -10,18 +10,22 @@ export {
   createJsonlFileSink,
   createObserverLogger,
   createMemorySink,
+  createStderrSink,
   createStdoutSink,
   errorToLogData,
   formatEnvelopeLog,
   getDefaultObserverSensitiveKeys,
+  isLevelAtLeast,
+  LOG_LEVEL_ORDER,
   sanitizeObserverLogData,
   subscribeEventBusLogger,
 } from './logger/index.js'
 
 export type { CreateJsonlFileSinkOptions } from './logger/index.js'
+export type { CreateStderrSinkOptions } from './logger/index.js'
+export type { CreateStdoutSinkOptions } from './logger/index.js'
 export type { ErrorToLogDataOptions } from './logger/index.js'
 export type { ObserverMemorySink } from './logger/index.js'
-export type { CreateStdoutSinkOptions } from './logger/index.js'
 
 export type {
   ObserverLlmCallSpanInput,
