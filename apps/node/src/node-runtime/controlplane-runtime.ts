@@ -284,6 +284,7 @@ export function createControlPlaneRuntime(
         // 穷尽断言：若 PollCommandResponse 新增 variant 而此处未处理，TS 编译期会在此行报错。
         const exhaustive: never = command
         const fallback = exhaustive as { commandId?: string; type?: string }
+        // fire-and-forget：日志 Promise 的 reject 也要吞掉，否则会变成 unhandledRejection。
         config.logger
           ?.logError(['daemon', 'controlplane'], 'Unsupported command type (dispatch pending)', {
             commandId: fallback.commandId,
