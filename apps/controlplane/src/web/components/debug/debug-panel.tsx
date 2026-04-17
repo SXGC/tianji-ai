@@ -9,6 +9,8 @@ import { NodeStatusTab } from './node-status-tab.js'
 
 const DEBUG_ENABLED = import.meta.env.VITE_ENABLE_DEBUG === 'true'
 
+const HEADER_HEIGHT = 32
+
 /**
  * 真正的实现。导出以便测试文件直接渲染，绕开模块级 DEBUG_ENABLED 常量在测试
  * 环境中无法运行时切换的限制。
@@ -16,7 +18,12 @@ const DEBUG_ENABLED = import.meta.env.VITE_ENABLE_DEBUG === 'true'
 export function DebugPanelImpl(): JSX.Element | null {
   const open = useDebugStore((s) => s.panelOpen)
   const tab = useDebugStore((s) => s.tab)
-  const { style } = useDebugWindow({ x: 100, y: 100, width: 800, height: 500 })
+  const { style, minimized, startDrag, startResize, toggleMinimize } = useDebugWindow({
+    x: 100,
+    y: 100,
+    width: 800,
+    height: 500,
+  })
   useEventPolling()
   if (!open) return null
   return (
@@ -32,10 +39,61 @@ export function DebugPanelImpl(): JSX.Element | null {
         flexDirection: 'column',
       }}
     >
-      <DebugToolbar />
-      <div style={{ flex: 1, minHeight: 0 }}>
-        {tab === 'events' ? <EventListTab /> : <NodeStatusTab />}
+      {/* 拖拽手柄：整个 header 区域均可拖动 */}
+      <div
+        data-testid="debug-panel-header"
+        onPointerDown={(e) => startDrag(e.nativeEvent)}
+        style={{
+          height: HEADER_HEIGHT,
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '0 8px',
+          background: '#222',
+          borderRadius: '8px 8px 0 0',
+          cursor: 'move',
+          userSelect: 'none',
+        }}
+      >
+        <span>Debug</span>
+        <button
+          type="button"
+          aria-label="Minimize"
+          onClick={toggleMinimize}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: '#eee',
+            cursor: 'pointer',
+            fontSize: 14,
+            padding: '0 4px',
+          }}
+        >
+          {minimized ? '▢' : '—'}
+        </button>
       </div>
+      {minimized ? null : (
+        <>
+          <DebugToolbar />
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {tab === 'events' ? <EventListTab /> : <NodeStatusTab />}
+          </div>
+          {/* resize handle：绝对定位贴右下角 */}
+          <div
+            data-testid="debug-panel-resize-handle"
+            onPointerDown={(e) => startResize(e.nativeEvent)}
+            style={{
+              position: 'absolute',
+              right: 0,
+              bottom: 0,
+              width: 12,
+              height: 12,
+              cursor: 'nwse-resize',
+            }}
+          />
+        </>
+      )}
     </div>
   )
 }

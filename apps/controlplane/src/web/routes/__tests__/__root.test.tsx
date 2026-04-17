@@ -1,15 +1,16 @@
 /** @vitest-environment jsdom */
 import { render } from '@testing-library/react'
+import type { JSX } from 'react'
 import { describe, expect, test, vi } from 'vitest'
 
 // Outlet 依赖 RouterProvider 上下文；在单元测试中 mock 掉避免 router 报错
-vi.mock('@tanstack/react-router', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@tanstack/react-router')>()
-  return {
-    ...actual,
-    Outlet: () => null,
-  }
-})
+// 禁止使用 importOriginal<typeof import(...)> 的类型级动态导入，改为显式列举 mock 符号
+vi.mock('@tanstack/react-router', () => ({
+  Outlet: () => null,
+  createRootRoute: (options: { component: () => JSX.Element }) => ({
+    component: options.component,
+  }),
+}))
 
 import { RootRouteComponent } from '../__root.js'
 
