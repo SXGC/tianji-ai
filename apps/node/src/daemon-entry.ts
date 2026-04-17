@@ -75,7 +75,7 @@ export async function runDaemonEntry(): Promise<void> {
         subscriptionId: err.subscriptionId,
         eventId: err.envelope.eventId,
         eventType: err.envelope.type,
-        ...errorToLogData(err.error),
+        error: errorToLogData(err.error),
       })
     },
   })
@@ -374,6 +374,13 @@ export async function runDaemonEntry(): Promise<void> {
     }
   }
 
+  /**
+   * TODO: daemon shutdown 待对齐 controlplane 的 `ensureShutdown` / `ensureExit` /
+   * `runShutdownWithTimeout` 模式（见 `apps/controlplane/src/server-entry.ts` 内
+   * `createCrashHandlers`）。当前仅用 `shutdownPromise !== null` 单层幂等保护，
+   * 若 `bus.close()` 或 `controlPlaneHandle?.connection.stop()` 阻塞，进程会挂住。
+   * 本次 Task 仅完成日志层迁移，超时/退出保护留到后续计划。
+   */
   let shutdownPromise: Promise<void> | null = null
 
   const shutdown = (reason: DaemonShutdownReason): Promise<void> => {
@@ -422,6 +429,9 @@ export async function runDaemonEntry(): Promise<void> {
   process.on('SIGINT', () => {
     void shutdown({ type: 'signal', signal: 'SIGINT' })
   })
+  // uncaughtException：进程状态已污染即将退出，使用 fatal 级以便下游告警立刻抓到；
+  // unhandledRejection：Node 默认不退出进程，仅记录 error 级便于诊断，fatal 会误导告警。
+  // 语义参考 controlplane `createCrashHandlers`：同样 fatal/error 分流。
   process.on('uncaughtException', (error) => {
     void shutdown({ type: 'uncaughtException', error })
   })
