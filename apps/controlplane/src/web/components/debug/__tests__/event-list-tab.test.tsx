@@ -57,7 +57,8 @@ describe('EventListTab', () => {
     const events = Array.from({ length: MAX_EVENTS }, (_, i) => mockEvent(MAX_EVENTS - i))
     useDebugStore.setState({ panelOpen: true, tab: 'events', mode: 'history', events })
     render(<EventListTab />)
-    expect(screen.getByText(/3000/).textContent).toMatch(/上限|缩小/)
+    const banner = screen.getByText(/已加载 3000 条达到上限/)
+    expect(banner).toBeTruthy()
   })
 
   test('lastError 存在时显示红色 banner', () => {

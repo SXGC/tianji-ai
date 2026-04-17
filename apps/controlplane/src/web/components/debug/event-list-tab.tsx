@@ -49,7 +49,6 @@ export function EventListTab(): JSX.Element {
             key={ev.eventId}
             type="button"
             data-testid="event-row"
-            data-cursor={ev.cursor}
             onClick={() => setSelected(ev)}
             style={{
               display: 'block',
@@ -65,15 +64,8 @@ export function EventListTab(): JSX.Element {
               color: 'inherit',
             }}
           >
-            {/*
-             * eventId 只显示前 5 字符（足以区分行），cursor 存 data-cursor 属性。
-             * 避免大 cursor 值（如 3000）出现在 getNodeText 的直接文本节点中，
-             * 防止 getByText(/3000/) 同时命中事件行与溢出 banner。
-             */}
-            <span>
-              {ev.occurredAt} · {ev.type} · {ev.aggregateType} · {ev.aggregateId.slice(0, 12)} ·{' '}
-              {ev.eventId.slice(0, 5)}
-            </span>
+            {ev.occurredAt} · {ev.type} · {ev.aggregateType} · {ev.aggregateId.slice(0, 12)} · #
+            {ev.cursor} · {ev.eventId}
           </button>
         ))}
         {reachedEnd && <div style={{ padding: 8, color: '#888' }}>已到底部</div>}
