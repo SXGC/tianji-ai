@@ -87,6 +87,46 @@ export async function executeDeepagentsRun(
   const llmRecorder = options.llmRawDir === undefined ? undefined : new LlmCallRecorder()
   const recordingMiddleware =
     llmRecorder === undefined ? undefined : createRecordingMiddleware(llmRecorder)
+  const resolvedMiddleware = buildMiddlewareList(options.deepagents.middleware, recordingMiddleware)
+  const resolvedSubagents = resolveDeepagentsSubagents(options.deepagents.subagents)
+  const resolvedCheckpointer = resolveDeepagentsCheckpointer(options.deepagents.checkpointer)
+  const resolvedStore = resolveDeepagentsStore(options.deepagents.store)
+  const resolvedBackend = resolveDeepagentsBackend(options.deepagents.backend)
+  const resolvedInterruptOn = resolveDeepagentsInterruptOn(options.deepagents.interruptOn)
+  const resolvedTools = createDeepagentsTools(options, observedToolCalls, turnMessages)
+
+  void options.logger?.info(['runtime', 'deepagents'], 'deepagents.run.config', {
+    sessionId: options.sessionId,
+    runId: options.runId,
+    threadId,
+    checkpointId: options.checkpointId,
+    hasResumeValue: options.resumeValue !== undefined,
+    modelType: typeof options.deepagents.model,
+    modelConstructor:
+      typeof options.deepagents.model === 'string'
+        ? undefined
+        : options.deepagents.model.constructor?.name,
+    backendType: resolvedBackend === undefined ? 'undefined' : typeof resolvedBackend,
+    backendConstructor: resolvedBackend?.constructor?.name,
+    backendKeys: readInspectableKeys(resolvedBackend),
+    backendRootDir: readInspectableString(resolvedBackend, 'rootDir'),
+    backendVirtualMode: readInspectableBoolean(resolvedBackend, 'virtualMode'),
+    backendInheritEnv: readInspectableBoolean(resolvedBackend, 'inheritEnv'),
+    hasBackendLs: hasInspectableFunction(resolvedBackend, 'ls'),
+    hasBackendReadFile: hasInspectableFunction(resolvedBackend, 'readFile'),
+    hasBackendWriteFile: hasInspectableFunction(resolvedBackend, 'writeFile'),
+    hasBackendGlob: hasInspectableFunction(resolvedBackend, 'glob'),
+    hasBackendExecute: hasInspectableFunction(resolvedBackend, 'execute'),
+    checkpointerConstructor: resolvedCheckpointer?.constructor?.name,
+    storeConstructor: resolvedStore?.constructor?.name,
+    middlewareCount: resolvedMiddleware?.length ?? 0,
+    subagentCount: resolvedSubagents?.length ?? 0,
+    skillCount: options.deepagents.skills?.length ?? 0,
+    interruptToolNames: resolvedInterruptOn === undefined ? [] : Object.keys(resolvedInterruptOn),
+    runtimeToolNames: options.toolCatalog.getToolSpecs().map((spec) => spec.name),
+    deepagentsToolNames: resolvedTools.map((tool) => tool.name),
+    systemPromptLength: options.systemPrompt?.length ?? 0,
+  })
 
   options.emitEvent({
     type: 'MessageStarted',
@@ -99,14 +139,14 @@ export async function executeDeepagentsRun(
   const agent = createUntypedDeepAgent({
     model: options.deepagents.model,
     systemPrompt: options.systemPrompt,
-    middleware: buildMiddlewareList(options.deepagents.middleware, recordingMiddleware),
-    subagents: resolveDeepagentsSubagents(options.deepagents.subagents),
-    checkpointer: resolveDeepagentsCheckpointer(options.deepagents.checkpointer),
-    store: resolveDeepagentsStore(options.deepagents.store),
-    backend: resolveDeepagentsBackend(options.deepagents.backend),
-    interruptOn: resolveDeepagentsInterruptOn(options.deepagents.interruptOn),
+    middleware: resolvedMiddleware,
+    subagents: resolvedSubagents,
+    checkpointer: resolvedCheckpointer,
+    store: resolvedStore,
+    backend: resolvedBackend,
+    interruptOn: resolvedInterruptOn,
     skills: options.deepagents.skills ? [...options.deepagents.skills] : undefined,
-    tools: createDeepagentsTools(options, observedToolCalls, turnMessages),
+    tools: resolvedTools,
   })
 
   const events = await agent.streamEvents(readDeepagentsInput(options), {
@@ -178,4 +218,39 @@ export async function executeDeepagentsRun(
     checkpointId: stateMetadata?.checkpointId,
     usage: loopState.usage,
   }
+}
+
+function readInspectableKeys(value: unknown): string[] {
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return []
+  }
+
+  return Object.keys(value).sort()
+}
+
+function readInspectableString(value: unknown, key: string): string | undefined {
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  return typeof record[key] === 'string' ? record[key] : undefined
+}
+
+function readInspectableBoolean(value: unknown, key: string): boolean | undefined {
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return undefined
+  }
+
+  const record = value as Record<string, unknown>
+  return typeof record[key] === 'boolean' ? record[key] : undefined
+}
+
+function hasInspectableFunction(value: unknown, key: string): boolean {
+  if (value === undefined || value === null || typeof value !== 'object') {
+    return false
+  }
+
+  const record = value as Record<string, unknown>
+  return typeof record[key] === 'function'
 }
