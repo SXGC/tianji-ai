@@ -25,7 +25,7 @@ export function sanitizeObserverLogData(
 
 function sanitizeValue(value: unknown, sensitiveKeySet: ReadonlySet<string>): unknown {
   if (value instanceof Error) {
-    return errorToLogData(value)
+    return errorToLogData(value, { sensitiveKeys: sensitiveKeySet })
   }
 
   if (Array.isArray(value)) {

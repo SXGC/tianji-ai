@@ -63,3 +63,56 @@ describe('errorToLogData', () => {
     expect(data.message).toContain('3000')
   })
 })
+
+describe('errorToLogData hardening', () => {
+  it('falls back gracefully when stack getter throws', () => {
+    const err = new Error('boom')
+    Object.defineProperty(err, 'stack', {
+      get() {
+        throw new Error('stack getter failed')
+      },
+    })
+
+    const data = errorToLogData(err)
+    expect(data.message).toBe('boom')
+    expect(typeof data.stack).toBe('string')
+    expect(data.stack).toContain('stack unavailable')
+  })
+
+  it('falls back gracefully when cause getter throws', () => {
+    const err = new Error('boom')
+    Object.defineProperty(err, 'cause', {
+      get() {
+        throw new Error('cause getter failed')
+      },
+    })
+
+    const data = errorToLogData(err)
+    expect(data.cause).toBe('[cause unavailable]')
+  })
+
+  it('coerces non-string name and message to string', () => {
+    const err = new Error('orig')
+    ;(err as unknown as { name: unknown }).name = 123
+    ;(err as unknown as { message: unknown }).message = { foo: 'bar' }
+
+    const data = errorToLogData(err)
+    expect(data.name).toBe('123')
+    expect(typeof data.message).toBe('string')
+  })
+
+  it('redacts sensitive keys from plain-object cause when provided', () => {
+    const err = new Error('boom', { cause: { apiKey: 'secret', other: 'ok' } })
+    const data = errorToLogData(err, { sensitiveKeys: new Set(['apiKey']) })
+    const cause = data.cause as Record<string, unknown>
+    expect(cause.message).not.toContain('secret')
+    expect(cause.message).toContain('ok')
+  })
+
+  it('serializes plain-object cause without redaction when no sensitiveKeys given', () => {
+    const err = new Error('boom', { cause: { apiKey: 'leaked' } })
+    const data = errorToLogData(err)
+    const cause = data.cause as Record<string, unknown>
+    expect(cause.message).toContain('leaked')
+  })
+})

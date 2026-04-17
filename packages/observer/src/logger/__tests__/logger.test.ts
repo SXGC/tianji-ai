@@ -48,6 +48,19 @@ describe('createObserverLogger', () => {
     })
   })
 
+  it('redacts sensitive keys from plain-object cause via sanitize pipeline', async () => {
+    const sink = createMemorySink()
+    const logger = createObserverLogger({ sinks: [sink] })
+
+    const err = new Error('boom', { cause: { apiKey: 'secret', other: 'ok' } })
+    await logger.error(['cli'], 'failed', { error: err })
+
+    const errorData = sink.entries[0]?.data?.error as Record<string, unknown>
+    const cause = errorData?.cause as Record<string, unknown>
+    expect(cause?.message).not.toContain('secret')
+    expect(cause?.message).toContain('ok')
+  })
+
   it('merges child scope and bindings', async () => {
     const sink = createMemorySink()
     const logger = createObserverLogger({
