@@ -119,7 +119,7 @@ git commit --no-verify
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **tianji-ai** (3608 symbols, 6121 relationships, 237 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **daemon-session-thread-alignment** (3633 symbols, 6197 relationships, 245 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
@@ -135,7 +135,7 @@ This project is indexed by GitNexus as **tianji-ai** (3608 symbols, 6121 relatio
 
 1. `gitnexus_query({query: "<error or symptom>"})` — find execution flows related to the issue
 2. `gitnexus_context({name: "<suspect function>"})` — see all callers, callees, and process participation
-3. `READ gitnexus://repo/tianji-ai/process/{processName}` — trace the full execution flow step by step
+3. `READ gitnexus://repo/daemon-session-thread-alignment/process/{processName}` — trace the full execution flow step by step
 4. For regressions: `gitnexus_detect_changes({scope: "compare", base_ref: "main"})` — see what your branch changed
 
 ## When Refactoring
@@ -174,10 +174,10 @@ This project is indexed by GitNexus as **tianji-ai** (3608 symbols, 6121 relatio
 
 | Resource | Use for |
 |----------|---------|
-| `gitnexus://repo/tianji-ai/context` | Codebase overview, check index freshness |
-| `gitnexus://repo/tianji-ai/clusters` | All functional areas |
-| `gitnexus://repo/tianji-ai/processes` | All execution flows |
-| `gitnexus://repo/tianji-ai/process/{name}` | Step-by-step execution trace |
+| `gitnexus://repo/daemon-session-thread-alignment/context` | Codebase overview, check index freshness |
+| `gitnexus://repo/daemon-session-thread-alignment/clusters` | All functional areas |
+| `gitnexus://repo/daemon-session-thread-alignment/processes` | All execution flows |
+| `gitnexus://repo/daemon-session-thread-alignment/process/{name}` | Step-by-step execution trace |
 
 ## Self-Check Before Finishing
 

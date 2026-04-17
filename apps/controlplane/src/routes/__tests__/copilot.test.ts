@@ -64,6 +64,20 @@ describe('POST /api/copilot', () => {
     expect(body.error).toContain('x-agent-id')
   })
 
+  it('x-session-id 缺失时返回 400', async () => {
+    const { app } = setup()
+    insertNode('node-1', 'online')
+
+    const response = await app.request('/api/copilot', {
+      method: 'POST',
+      headers: { 'x-node-id': 'node-1', 'x-agent-id': 'agent-1' },
+    })
+
+    expect(response.status).toBe(400)
+    const body = (await response.json()) as { error: string }
+    expect(body.error).toContain('x-session-id')
+  })
+
   it('x-node-id 为空字符串时返回 400', async () => {
     const { app } = setup()
     const response = await app.request('/api/copilot', {
@@ -80,7 +94,11 @@ describe('POST /api/copilot', () => {
     const { app } = setup()
     const response = await app.request('/api/copilot', {
       method: 'POST',
-      headers: { 'x-node-id': 'nonexistent-node', 'x-agent-id': 'agent-1' },
+      headers: {
+        'x-node-id': 'nonexistent-node',
+        'x-agent-id': 'agent-1',
+        'x-session-id': 'session_missing_node',
+      },
     })
 
     expect(response.status).toBe(404)
@@ -94,7 +112,11 @@ describe('POST /api/copilot', () => {
 
     const response = await app.request('/api/copilot', {
       method: 'POST',
-      headers: { 'x-node-id': 'offline-node', 'x-agent-id': 'agent-1' },
+      headers: {
+        'x-node-id': 'offline-node',
+        'x-agent-id': 'agent-1',
+        'x-session-id': 'session_offline_node',
+      },
     })
 
     expect(response.status).toBe(409)
@@ -112,6 +134,7 @@ describe('POST /api/copilot', () => {
         'content-type': 'application/json',
         'x-node-id': 'node-1',
         'x-agent-id': 'agent-1',
+        'x-session-id': 'session_123',
       },
       body: JSON.stringify({
         method: 'agent/run',
@@ -124,7 +147,7 @@ describe('POST /api/copilot', () => {
           messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
           tools: [],
           context: [],
-          forwardedProps: {},
+          forwardedProps: { sessionId: 'session_123' },
           state: {},
         },
       }),
@@ -132,6 +155,32 @@ describe('POST /api/copilot', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain('text/event-stream')
+  })
+
+  it('rejects when x-session-id belongs to a different node-agent owner', async () => {
+    const { app } = setup()
+    insertNode('node-a', 'online')
+    insertNode('node-b', 'online')
+    db.raw
+      .prepare(
+        `INSERT INTO sessions (session_id, node_id, agent_id, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'user', ?, ?)`
+      )
+      .run('session-owned', 'node-a', 'agent-a', Date.now(), Date.now())
+
+    const response = await app.request('/api/copilot', {
+      method: 'POST',
+      headers: {
+        'x-node-id': 'node-b',
+        'x-agent-id': 'agent-a',
+        'x-session-id': 'session-owned',
+      },
+    })
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'session owner mismatch',
+    })
   })
 })
 

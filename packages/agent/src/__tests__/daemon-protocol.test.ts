@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import type { DomainEventEnvelope } from '@tianji/shared'
+import type { DomainEventEnvelope, SessionId } from '@tianji/shared'
 
 import {
   type ChatDoneSseMessage,
   type ChatErrorSseMessage,
   type ChatEventSseMessage,
   type ChatRequestBody,
+  type CreateSessionResponse,
   DAEMON_SSE_DONE_NAME,
   DAEMON_SSE_ERROR_NAME,
   DAEMON_SSE_EVENT_NAME,
@@ -87,19 +88,23 @@ describe('encodeSseMessage', () => {
 })
 
 describe('protocol type shapes', () => {
-  it('ChatRequestBody accepts prompt', () => {
-    const body: ChatRequestBody = { prompt: 'hello' }
+  it('ChatRequestBody requires prompt and sessionId', () => {
+    const body: ChatRequestBody = { prompt: 'hello', sessionId: 'sess-1' as SessionId }
     expect(body.prompt).toBe('hello')
+    expect(body.sessionId).toBe('sess-1')
   })
 
-  it('PingResponse has sessionId, uptime, and pid', () => {
+  it('CreateSessionResponse returns sessionId', () => {
+    const response: CreateSessionResponse = { sessionId: 'sess-1' as SessionId }
+    expect(response.sessionId).toBe('sess-1')
+  })
+
+  it('PingResponse has uptime and pid', () => {
     const response: PingResponse = {
-      sessionId: 'sess-1',
       uptime: 42,
       pid: 1234,
       controlPlane: DEFAULT_CONTROL_PLANE_STATUS,
     }
-    expect(response.sessionId).toBe('sess-1')
     expect(response.uptime).toBe(42)
     expect(response.pid).toBe(1234)
     expect(response.controlPlane.status).toBe('disabled')

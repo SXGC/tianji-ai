@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { createInterface } from 'node:readline'
 
 import { DaemonClient } from '@tianji/agent'
-import { isRunEvent } from '@tianji/shared'
+import { type SessionId, isRunEvent } from '@tianji/shared'
 
 import { getUserConfigPaths } from '../config.js'
 
@@ -33,6 +33,8 @@ export const chatCommand: CommandDefinition = {
 
     const client = new DaemonClient({ host: '127.0.0.1', port })
     const ping = await client.ping()
+    const createdSession = await client.createSession()
+    const currentSessionId: SessionId = createdSession.sessionId
     process.stdout.write(`${i18n.t('daemon.connected', { pid: ping.pid })}\n`)
 
     const rl = createInterface({
@@ -53,7 +55,7 @@ export const chatCommand: CommandDefinition = {
         break
       }
 
-      for await (const envelope of client.sendChat(trimmed)) {
+      for await (const envelope of client.sendChat(trimmed, currentSessionId)) {
         if (
           isRunEvent(envelope) &&
           envelope.payload.type === 'MessageDelta' &&

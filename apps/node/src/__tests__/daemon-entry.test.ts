@@ -71,7 +71,26 @@ const loadUserConfigContextMock = vi.fn<() => Promise<LoadUserConfigContextResul
 const logInfoMock = vi.fn(async () => undefined)
 const logErrorMock = vi.fn(async () => undefined)
 const logDebugMock = vi.fn(async () => undefined)
-const createAgentSessionMock = vi.fn(() => ({ sessionId: 'session-1' }))
+function createMockAgentSession(sessionId = 'session-1'): AgentSession {
+  return {
+    sessionId,
+    abort: vi.fn(),
+    close: vi.fn(),
+    queryWithGraph: () =>
+      (async function* () {
+        yield {
+          type: 'GraphRunStarted',
+          runId: 'run_graph_test',
+          graphId: 'test',
+          graphVersion: 1,
+          timestamp: 0,
+        }
+      })(),
+  }
+}
+
+const createAgentSessionMock = vi.fn(() => createMockAgentSession())
+const openAgentSessionMock = vi.fn(() => createMockAgentSession())
 const buildDefaultGraphMock = vi.fn(async () => ({
   graph: {
     id: 'test',
@@ -158,6 +177,7 @@ vi.mock('@tianji/agent', () => ({
     lastError: null,
   },
   createAgentSession: createAgentSessionMock,
+  openAgentSession: openAgentSessionMock,
   buildDefaultGraph: buildDefaultGraphMock,
   createUnifiedRuntimeEntry: createUnifiedRuntimeEntryMock,
   loadDefaultOrchestrationGraph: vi.fn(async () => ({
@@ -210,8 +230,16 @@ describe('runDaemonEntry', () => {
 
     const daemonServerCall = vi.mocked((await import('@tianji/agent')).DaemonServer).mock
       .calls[0]?.[0]
-    const getControlPlaneStatus = (daemonServerCall as { getControlPlaneStatus?: () => unknown })
-      .getControlPlaneStatus
+    const getControlPlaneStatus = (
+      daemonServerCall as {
+        getControlPlaneStatus?: () => {
+          status: string
+          enabled: boolean
+          baseUrl: string | null
+          lastError: string | null
+        }
+      }
+    ).getControlPlaneStatus
 
     expect(getControlPlaneStatus).toBeTypeOf('function')
     expect(getControlPlaneStatus?.()).toEqual({
@@ -251,6 +279,9 @@ describe('runDaemonEntry', () => {
       .getControlPlaneStatus
 
     expect(getControlPlaneStatus).toBeTypeOf('function')
+    if (getControlPlaneStatus?.().status === 'disabled') {
+      connectionStateCallbackRef.current?.({ status: 'connected' })
+    }
     expect(getControlPlaneStatus?.()).toMatchObject({
       enabled: true,
       status: 'connected',
@@ -306,12 +337,10 @@ describe('runDaemonEntry', () => {
         sessionId: 'session-startup' as never,
         timestamp: 0,
       })
-      return { sessionId: 'session-startup' } as AgentSession
+      return createMockAgentSession('session-startup')
     }
 
-    vi.mocked(createAgentSessionMock).mockImplementationOnce(
-      startupSessionFactory as unknown as () => { sessionId: string }
-    )
+    vi.mocked(createAgentSessionMock).mockImplementationOnce(startupSessionFactory as never)
 
     const { runDaemonEntry } = await import('../daemon-entry.js')
 
@@ -324,19 +353,27 @@ describe('runDaemonEntry', () => {
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
     const abortSpy = vi.fn()
 
-    vi.mocked(createAgentSessionMock).mockImplementationOnce((() => ({
-      sessionId: 'session-cancel-test',
-      abort: abortSpy,
-      queryWithGraph: () =>
-        (async function* () {
-          yield {
-            type: 'RunCancelled',
-            runId: 'run_graph_test',
-            sessionId: 'session-cancel-test',
-            timestamp: 0,
-          }
-        })(),
-    })) as unknown as () => { sessionId: string })
+    vi.mocked(createAgentSessionMock).mockImplementationOnce(
+      (): AgentSession => ({
+        ...createMockAgentSession('session-cancel-test'),
+        abort: abortSpy,
+      })
+    )
+    vi.mocked(openAgentSessionMock).mockImplementationOnce(
+      (): AgentSession => ({
+        ...createMockAgentSession('session-cancel-test'),
+        abort: abortSpy,
+        queryWithGraph: () =>
+          (async function* () {
+            yield {
+              type: 'RunCancelled',
+              runId: 'run_graph_test',
+              sessionId: 'session-cancel-test',
+              timestamp: 0,
+            }
+          })(),
+      })
+    )
 
     const { runDaemonEntry } = await import('../daemon-entry.js')
     await runDaemonEntry()
@@ -344,7 +381,7 @@ describe('runDaemonEntry', () => {
     const runtimeOptions = createUnifiedRuntimeEntryMock.mock.calls.at(-1)?.[0] as {
       runtime: {
         runGraph: (input: {
-          request: { source: 'controlplane'; input: string }
+          request: { source: 'controlplane'; input: string; sessionId: string }
           graph: object
           executors: object
         }) => Promise<{ runId?: string; events: AsyncIterable<unknown> }>
@@ -353,7 +390,11 @@ describe('runDaemonEntry', () => {
     }
 
     const handle = await runtimeOptions.runtime.runGraph({
-      request: { source: 'controlplane', input: 'cancel me' },
+      request: {
+        source: 'controlplane',
+        input: 'cancel me',
+        sessionId: 'session-cancel-test' as never,
+      },
       graph: { id: 'test' },
       executors: {},
     })
@@ -373,36 +414,38 @@ describe('runDaemonEntry', () => {
   it('keeps streaming graph terminal events after extracting runId from the first event', async () => {
     const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
 
-    vi.mocked(createAgentSessionMock).mockImplementationOnce((() => ({
-      sessionId: 'session-graph-terminal-test',
-      abort: vi.fn(),
-      queryWithGraph: () =>
-        (async function* () {
-          yield {
-            type: 'GraphRunStarted',
-            runId: 'run_graph_terminal',
-            graphId: 'test',
-            graphVersion: 1,
-            timestamp: 0,
-          }
-          yield {
-            type: 'GraphRunCancelled',
-            runId: 'run_graph_terminal',
-            graphId: 'test',
-            graphVersion: 1,
-            reason: 'abort',
-            timestamp: 1,
-          }
-        })(),
-    })) as unknown as () => { sessionId: string })
+    vi.mocked(openAgentSessionMock).mockImplementationOnce(
+      (): AgentSession => ({
+        ...createMockAgentSession('session-graph-terminal-test'),
+        queryWithGraph: () =>
+          (async function* () {
+            yield {
+              type: 'GraphRunStarted',
+              runId: 'run_graph_terminal',
+              graphId: 'test',
+              graphVersion: 1,
+              timestamp: 0,
+            }
+            yield {
+              type: 'GraphRunCancelled',
+              runId: 'run_graph_terminal',
+              graphId: 'test',
+              graphVersion: 1,
+              reason: 'abort',
+              timestamp: 1,
+            }
+          })(),
+      })
+    )
 
     const { runDaemonEntry } = await import('../daemon-entry.js')
     await runDaemonEntry()
+    const openCallCountBeforeRun = openAgentSessionMock.mock.calls.length
 
     const runtimeOptions = createUnifiedRuntimeEntryMock.mock.calls.at(-1)?.[0] as {
       runtime: {
         runGraph: (input: {
-          request: { source: 'controlplane'; input: string }
+          request: { source: 'controlplane'; input: string; sessionId: string }
           graph: object
           executors: object
         }) => Promise<{ runId?: string; events: AsyncIterable<unknown> }>
@@ -410,7 +453,11 @@ describe('runDaemonEntry', () => {
     }
 
     const handle = await runtimeOptions.runtime.runGraph({
-      request: { source: 'controlplane', input: 'cancel me' },
+      request: {
+        source: 'controlplane',
+        input: 'cancel me',
+        sessionId: 'session-graph-terminal-test' as never,
+      },
       graph: { id: 'test' },
       executors: {},
     })
@@ -421,6 +468,110 @@ describe('runDaemonEntry', () => {
     expect(events).toHaveLength(2)
     expect(events[0]).toMatchObject({ type: 'GraphRunStarted', runId: 'run_graph_terminal' })
     expect(events[1]).toMatchObject({ type: 'GraphRunCancelled', runId: 'run_graph_terminal' })
+
+    stdoutSpy.mockRestore()
+  })
+
+  it('creates a session when daemon receives a fresh session id', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    vi.mocked(createAgentSessionMock).mockImplementationOnce(
+      (): AgentSession => ({
+        ...createMockAgentSession('session_fresh'),
+        queryWithGraph: () =>
+          (async function* () {
+            yield {
+              type: 'GraphRunStarted',
+              runId: 'run_graph_fresh',
+              graphId: 'test',
+              graphVersion: 1,
+              timestamp: 0,
+            }
+            yield {
+              type: 'GraphRunCompleted',
+              runId: 'run_graph_fresh',
+              graphId: 'test',
+              graphVersion: 1,
+              timestamp: 1,
+            }
+          })(),
+      })
+    )
+
+    const { runDaemonEntry } = await import('../daemon-entry.js')
+    await runDaemonEntry()
+    const openCallCountBeforeRun = openAgentSessionMock.mock.calls.length
+
+    const runtimeOptions = createUnifiedRuntimeEntryMock.mock.calls.at(-1)?.[0] as {
+      runtime: {
+        runGraph: (input: {
+          request: { source: 'controlplane'; input: string; sessionId: string }
+          graph: object
+          executors: object
+        }) => Promise<{ runId?: string; events: AsyncIterable<unknown>; sessionId: string }>
+      }
+    }
+
+    const handle = await runtimeOptions.runtime.runGraph({
+      request: {
+        source: 'controlplane',
+        input: 'fresh session',
+        sessionId: 'session_fresh' as never,
+      },
+      graph: { id: 'test' },
+      executors: {},
+    })
+
+    expect(createAgentSessionMock).toHaveBeenCalledOnce()
+    expect(openAgentSessionMock.mock.calls.length).toBe(openCallCountBeforeRun + 1)
+    expect(handle.sessionId).toBe('session-1')
+
+    stdoutSpy.mockRestore()
+  })
+
+  it('opens an existing session when daemon receives a non-fresh session id', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+
+    vi.mocked(openAgentSessionMock).mockImplementationOnce(
+      (): AgentSession => ({
+        ...createMockAgentSession('existing-session'),
+        queryWithGraph: () =>
+          (async function* () {
+            yield {
+              type: 'GraphRunStarted',
+              runId: 'run_graph_existing',
+              graphId: 'test',
+              graphVersion: 1,
+              timestamp: 0,
+            }
+          })(),
+      })
+    )
+
+    const { runDaemonEntry } = await import('../daemon-entry.js')
+    await runDaemonEntry()
+
+    const runtimeOptions = createUnifiedRuntimeEntryMock.mock.calls.at(-1)?.[0] as {
+      runtime: {
+        runGraph: (input: {
+          request: { source: 'controlplane'; input: string; sessionId: string }
+          graph: object
+          executors: object
+        }) => Promise<{ sessionId: string }>
+      }
+    }
+
+    await runtimeOptions.runtime.runGraph({
+      request: {
+        source: 'controlplane',
+        input: 'existing session',
+        sessionId: 'existing-session' as never,
+      },
+      graph: { id: 'test' },
+      executors: {},
+    })
+
+    expect(openAgentSessionMock).toHaveBeenCalledOnce()
 
     stdoutSpy.mockRestore()
   })

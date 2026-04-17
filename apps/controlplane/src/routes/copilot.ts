@@ -20,6 +20,7 @@ import type { ControlPlaneDb } from '../db/index.js'
  * 每个 POST /api/copilot 请求都需要携带：
  * - `x-node-id`：目标节点 ID（非空）
  * - `x-agent-id`：代理 ID（非空）
+ * - `x-session-id`：当前会话 ID（非空，作为 AG-UI threadId）
  *
  * 节点必须存在且处于 online 状态，否则返回对应错误码。
  *
@@ -40,12 +41,30 @@ export function createCopilotRoute(
 ): Hono {
   const app = new Hono()
 
+  function getSessionOwner(sessionId: string): { nodeId: string; agentId: string } | undefined {
+    return db.raw
+      .prepare('SELECT node_id, agent_id FROM sessions WHERE session_id = ?')
+      .get(sessionId) as { nodeId: string; agentId: string } | undefined
+  }
+
+  function bindSessionOwner(sessionId: string, nodeId: string, agentId: string): void {
+    const now = Date.now()
+    db.raw
+      .prepare(
+        `INSERT INTO sessions (session_id, node_id, agent_id, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, 'user', ?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET updated_at = excluded.updated_at`
+      )
+      .run(sessionId, nodeId, agentId, now, now)
+  }
+
   app.post('/api/copilot', async (c) => {
     const nodeId = c.req.header('x-node-id')
     const agentId = c.req.header('x-agent-id')
+    const sessionId = c.req.header('x-session-id')
 
-    if (!nodeId || !agentId) {
-      return c.json({ error: 'Missing x-node-id or x-agent-id header' }, 400)
+    if (!nodeId || !agentId || !sessionId) {
+      return c.json({ error: 'Missing x-node-id, x-agent-id, or x-session-id header' }, 400)
     }
 
     const node = db.raw.prepare('SELECT status FROM nodes WHERE node_id = ?').get(nodeId) as
@@ -59,6 +78,13 @@ export function createCopilotRoute(
       return c.json({ error: 'Node is offline' }, 409)
     }
 
+    const existingOwner = getSessionOwner(sessionId)
+    if (existingOwner === undefined) {
+      bindSessionOwner(sessionId, nodeId, agentId)
+    } else if (existingOwner.nodeId !== nodeId || existingOwner.agentId !== agentId) {
+      return c.json({ error: 'session owner mismatch' }, 409)
+    }
+
     const agent = new TianjiAgent(db, nodeId, agentId, bus, logger)
     const runtime = new CopilotRuntime({
       agents: { default: agent },
@@ -67,6 +93,10 @@ export function createCopilotRoute(
     const handler = copilotRuntimeNodeHttpEndpoint({
       runtime,
       endpoint: '/api/copilot',
+      properties: {
+        sessionId,
+        owner: { nodeId, agentId },
+      },
     })
 
     return handler(c.req.raw) as Promise<Response>

@@ -204,7 +204,7 @@ describe('daemon e2e', () => {
     try {
       const ping = await live.client.ping()
       expect(ping.pid).toBeGreaterThan(0)
-      expect(ping.sessionId).toBeTruthy()
+      expect('sessionId' in ping).toBe(false)
     } finally {
       await live.cleanup()
     }
@@ -218,9 +218,10 @@ describe('daemon start/status/stop', () => {
 
     try {
       const ping = await live.client.ping()
-      expect(ping.sessionId).toBeTruthy()
+      expect('sessionId' in ping).toBe(false)
 
-      const events = await collectEnvelopes(live.client.sendChat('hello'))
+      const createdSession = await live.client.createSession()
+      const events = await collectEnvelopes(live.client.sendChat('hello', createdSession.sessionId))
       expect(events.some((event) => event.type === 'MessageDelta')).toBe(true)
     } finally {
       await live.cleanup()
@@ -237,7 +238,6 @@ describe('daemon start/status/stop', () => {
 
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toContain('Daemon running')
-      expect(result.stdout).toContain('sessionId=')
       expect(result.stdout).toContain('controlplane=disabled')
     } finally {
       await live.cleanup()
@@ -475,7 +475,8 @@ describe('chat and end-to-end flow', () => {
     const liveSession = createStubSession(['hello', ' world'])
     const live = await setupLiveDaemon(liveSession)
     try {
-      const events = await collectEnvelopes(live.client.sendChat('hello'))
+      const createdSession = await live.client.createSession()
+      const events = await collectEnvelopes(live.client.sendChat('hello', createdSession.sessionId))
       const deltas = events.filter((event) => event.type === 'MessageDelta')
       expect(deltas).toHaveLength(2)
     } finally {
@@ -487,8 +488,9 @@ describe('chat and end-to-end flow', () => {
     const prompts: string[] = []
     const live = await setupLiveDaemon(createRecordingSession(prompts))
     try {
-      await collectEnvelopes(live.client.sendChat('first'))
-      await collectEnvelopes(live.client.sendChat('second'))
+      const createdSession = await live.client.createSession()
+      await collectEnvelopes(live.client.sendChat('first', createdSession.sessionId))
+      await collectEnvelopes(live.client.sendChat('second', createdSession.sessionId))
       expect(prompts).toEqual(['first', 'second'])
     } finally {
       await live.cleanup()
@@ -505,7 +507,10 @@ describe('chat and end-to-end flow', () => {
         })
         expect(status1.exitCode).toBe(0)
 
-        const events = await collectEnvelopes(live.client.sendChat('hello'))
+        const createdSession = await live.client.createSession()
+        const events = await collectEnvelopes(
+          live.client.sendChat('hello', createdSession.sessionId)
+        )
         expect(events.some((event) => event.type === 'RunCompleted')).toBe(true)
 
         const stop = await runCommand(['daemon', 'stop'], {

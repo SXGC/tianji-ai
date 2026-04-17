@@ -1,4 +1,4 @@
-import type { DomainEventEnvelope } from '@tianji/shared'
+import type { DomainEventEnvelope, SessionId } from '@tianji/shared'
 
 export const DAEMON_SSE_EVENT_NAME = 'chat.event' as const
 export const DAEMON_SSE_DONE_NAME = 'chat.done' as const
@@ -6,6 +6,11 @@ export const DAEMON_SSE_ERROR_NAME = 'chat.error' as const
 
 export interface ChatRequestBody {
   readonly prompt: string
+  readonly sessionId: SessionId
+}
+
+export interface CreateSessionResponse {
+  readonly sessionId: SessionId
 }
 
 export type ControlPlaneConnectionStatus = 'disabled' | 'connecting' | 'connected' | 'degraded'
@@ -27,7 +32,6 @@ export const DEFAULT_CONTROL_PLANE_STATUS: ControlPlaneStatusSnapshot = {
 }
 
 export interface PingResponse {
-  readonly sessionId: string
   readonly uptime: number
   readonly pid: number
   readonly controlPlane: ControlPlaneStatusSnapshot
@@ -48,7 +52,7 @@ export interface ChatDoneSseMessage {
 
 export interface ChatErrorSseMessage {
   readonly type: 'chat.error'
-  readonly code: 'BUSY' | 'INTERNAL'
+  readonly code: 'ACTIVE_SESSION_CONCURRENCY_UNSUPPORTED' | 'INTERNAL' | 'SESSION_NOT_FOUND'
   readonly message: string
 }
 

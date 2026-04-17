@@ -98,6 +98,12 @@ console.log(resolved.config.agents?.defaultAgent)
 
 ## `SessionRuntimeOptions` v2 说明
 
+### Session 生命周期语义
+
+- `createSession` 只用于新建 session，并写入新的初始快照。
+- `openSession` 只用于打开已有 session；目标 session 不存在时会直接抛出 `SESSION_NOT_FOUND`。
+- 如果调用方需要“有则打开、无则创建”，必须在应用层显式判断，不能再把这两种语义混进一个 runtime API。
+
 - `engine?: 'deepagents'`：未显式指定时默认使用 `deepagents`；历史 legacy 标记仅通过 metadata helper 暴露，不再作为可执行 runtime 选项。
 - `deepagents`：v2 主配置块，当前公开字段为 `model`、`middleware`、`backend`、`checkpointer`、`store`、`subagents`、`skills`、`interruptOn`。
 - `logger?: ObserverLogger`：可选注入 observer logger，作为 runtime 向外部日志系统写入记录的公共边界；runtime 本身不定义 sink、文件路径或渲染策略。

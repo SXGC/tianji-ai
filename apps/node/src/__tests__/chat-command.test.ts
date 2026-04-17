@@ -122,11 +122,13 @@ describe('chatCommand', () => {
     await writeFile(paths.daemonPortPath, '12345', 'utf8')
 
     const mockPing = vi.fn(async () => ({ pid: 1234 }))
+    const mockCreateSession = vi.fn(async () => ({ sessionId: 'session_cli' }))
 
     MockedDaemonClient.mockImplementation(
       () =>
         ({
           ping: mockPing,
+          createSession: mockCreateSession,
           sendChat: vi.fn(),
           shutdown: vi.fn(),
         }) as unknown as InstanceType<typeof DaemonClient>
@@ -168,6 +170,7 @@ describe('chatCommand', () => {
     Object.defineProperty(process, 'stdin', { value: originalStdin, writable: true })
 
     expect(mockPing).toHaveBeenCalled()
+    expect(mockCreateSession).toHaveBeenCalled()
     expect(result).toBe(0)
     expect(stdoutChunks.join('')).toContain('1234')
 
@@ -181,8 +184,9 @@ describe('chatCommand', () => {
     await writeFile(paths.daemonPortPath, '12345', 'utf8')
 
     const mockPing = vi.fn(async () => ({ pid: 1234 }))
+    const mockCreateSession = vi.fn(async () => ({ sessionId: 'session_cli' }))
 
-    async function* fakeSendChat(_prompt: string) {
+    async function* fakeSendChat(_prompt: string, _sessionId: string) {
       yield wrapEvent({
         type: 'MessageDelta',
         runId: 'run-test' as never,
@@ -207,6 +211,7 @@ describe('chatCommand', () => {
       () =>
         ({
           ping: mockPing,
+          createSession: mockCreateSession,
           sendChat: fakeSendChat,
           shutdown: vi.fn(),
         }) as unknown as InstanceType<typeof DaemonClient>
@@ -248,6 +253,7 @@ describe('chatCommand', () => {
     Object.defineProperty(process, 'stdin', { value: originalStdin, writable: true })
 
     const output = stdoutChunks.join('')
+    expect(mockCreateSession).toHaveBeenCalled()
     expect(output).toContain('Hello')
     expect(output).toContain(' World')
     expect(result).toBe(0)
@@ -262,6 +268,7 @@ describe('chatCommand', () => {
     await writeFile(paths.daemonPortPath, '12345', 'utf8')
 
     const mockPing = vi.fn(async () => ({ pid: 1234 }))
+    const mockCreateSession = vi.fn(async () => ({ sessionId: 'session_cli' }))
     const mockSendChat = vi.fn(async function* () {
       yield wrapEvent({
         type: 'MessageDelta',
@@ -278,6 +285,7 @@ describe('chatCommand', () => {
       () =>
         ({
           ping: mockPing,
+          createSession: mockCreateSession,
           sendChat: mockSendChat,
           shutdown: vi.fn(),
         }) as unknown as InstanceType<typeof DaemonClient>
@@ -323,7 +331,8 @@ describe('chatCommand', () => {
 
     // sendChat should only be called once (for "real message"), not for empty lines
     expect(mockSendChat).toHaveBeenCalledTimes(1)
-    expect(mockSendChat).toHaveBeenCalledWith('real message')
+    expect(mockCreateSession).toHaveBeenCalled()
+    expect(mockSendChat).toHaveBeenCalledWith('real message', 'session_cli')
 
     await cleanup()
   })

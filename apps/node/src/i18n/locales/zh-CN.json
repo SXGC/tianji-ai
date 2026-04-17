@@ -23,7 +23,7 @@
   "daemon.already_running": "守护进程已在运行 (pid={pid})",
   "daemon.started": "守护进程已启动 (pid={pid}, port={port})",
   "daemon.stopped": "守护进程已停止",
-  "daemon.status": "守护进程运行中 (pid={pid}, port={port}, sessionId={sessionId}, uptime={uptime}s)",
+  "daemon.status": "守护进程运行中 (pid={pid}, port={port}, uptime={uptime}s)",
   "daemon.listening": "守护进程正在监听端口 {port}",
   "daemon.connected": "已连接到守护进程 (pid={pid})",
   "log.waiting": "等待 CLI 日志文件: {path}",
