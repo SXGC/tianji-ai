@@ -41,6 +41,17 @@ type DaemonShutdownReason =
   | { readonly type: 'uncaughtException'; readonly error: unknown }
 
 /**
+ * runDaemonEntry 返回的句柄，允许调用方在 shutdown 路径之外显式摘除 process 监听器。
+ *
+ * 生产环境：进程在 shutdown 完成后立即 process.exit，dispose 调用冗余但无副作用。
+ * 测试环境：每个用例通过 afterEach 调用 dispose，避免监听器在测试间叠加。
+ */
+export interface DaemonHandle {
+  /** 摘除 runDaemonEntry 注册的 4 个 process 监听器。生产环境 process.exit 后冗余；用于测试或上层显式拆解场景 */
+  dispose(): void
+}
+
+/**
  * 把 daemon 顶层抛出物规范化为结构化日志 data。
  *
  * 委托给 observer 的 `errorToLogData`，保留 `name`、`message`、`stack` 及递归 `cause`。
@@ -52,7 +63,7 @@ export function buildDaemonCrashLogData(error: unknown): Record<string, unknown>
   return errorToLogData(error)
 }
 
-export async function runDaemonEntry(): Promise<void> {
+export async function runDaemonEntry(): Promise<DaemonHandle> {
   // 开发环境中 daemon 作为 detached 进程，PATH 不含 pnpm 注入的本地 .bin 目录。
   // 若本地 node_modules/.bin/tianji-agent 存在（workspace 链接），则追加到 PATH。
   // 生产环境全局安装时该路径不存在，条件不成立，不做修改。
@@ -403,6 +414,37 @@ export async function runDaemonEntry(): Promise<void> {
    */
   let shutdownPromise: Promise<void> | null = null
 
+  // 具名 handler 引用，用于 unregisterProcessHandlers 精确摘除。
+  // handler 闭包捕获 shutdown 引用，但函数体只在下方 process.on 注册并实际触发后才执行；
+  // 此时 shutdown 已通过 TDZ。
+  const onSIGTERM = (): void => {
+    void shutdown({ type: 'signal', signal: 'SIGTERM' })
+  }
+  const onSIGINT = (): void => {
+    void shutdown({ type: 'signal', signal: 'SIGINT' })
+  }
+  // uncaughtException：进程状态已污染即将退出，使用 fatal 级以便下游告警立刻抓到；
+  // unhandledRejection：Node 默认不退出进程，仅记录 error 级便于诊断，fatal 会误导告警。
+  // 语义参考 controlplane `createCrashHandlers`：同样 fatal/error 分流。
+  const onUncaughtException = (error: Error): void => {
+    void shutdown({ type: 'uncaughtException', error })
+  }
+  const onUnhandledRejection = (reason: unknown): void => {
+    void logger.observerLogger.error(
+      ['daemon'],
+      'Daemon caught unhandled rejection',
+      buildDaemonCrashLogData(reason)
+    )
+  }
+
+  /** 对称摘除全部 4 个 process 监听器，防止多次 runDaemonEntry 叠加 */
+  const unregisterProcessHandlers = (): void => {
+    process.off('SIGTERM', onSIGTERM)
+    process.off('SIGINT', onSIGINT)
+    process.off('uncaughtException', onUncaughtException)
+    process.off('unhandledRejection', onUnhandledRejection)
+  }
+
   const shutdown = (reason: DaemonShutdownReason): Promise<void> => {
     if (shutdownPromise !== null) {
       return shutdownPromise
@@ -438,30 +480,20 @@ export async function runDaemonEntry(): Promise<void> {
 
       await server.deleteStateFiles()
       process.exit(reason.type === 'signal' ? 0 : 1)
-    })()
+    })().finally(unregisterProcessHandlers)
 
     return shutdownPromise
   }
 
-  process.on('SIGTERM', () => {
-    void shutdown({ type: 'signal', signal: 'SIGTERM' })
-  })
-  process.on('SIGINT', () => {
-    void shutdown({ type: 'signal', signal: 'SIGINT' })
-  })
-  // uncaughtException：进程状态已污染即将退出，使用 fatal 级以便下游告警立刻抓到；
-  // unhandledRejection：Node 默认不退出进程，仅记录 error 级便于诊断，fatal 会误导告警。
-  // 语义参考 controlplane `createCrashHandlers`：同样 fatal/error 分流。
-  process.on('uncaughtException', (error) => {
-    void shutdown({ type: 'uncaughtException', error })
-  })
-  process.on('unhandledRejection', (error) => {
-    void logger.observerLogger.error(
-      ['daemon'],
-      'Daemon caught unhandled rejection',
-      buildDaemonCrashLogData(error)
-    )
-  })
+  process.on('SIGTERM', onSIGTERM)
+  process.on('SIGINT', onSIGINT)
+  process.on('uncaughtException', onUncaughtException)
+  process.on('unhandledRejection', onUnhandledRejection)
+
+  // process.off 对同一函数引用多次调用是幂等的（Node.js 文档保证）：
+  // 若 dispose 在 shutdown 路径的 .finally(unregisterProcessHandlers) 已运行后再被调用，
+  // 第二次 off 调用为 no-op，不会抛出也不会产生副作用。
+  return { dispose: unregisterProcessHandlers }
 }
 
 // 作为独立子进程被 fork 时，直接执行守护进程逻辑

@@ -270,7 +270,7 @@ describe('daemon start/status/stop', () => {
     try {
       const result = await runCommand(['daemon', 'start', '--fg'], {
         getUserConfigPaths: () => live.paths,
-        runDaemonEntry: vi.fn(async () => undefined),
+        runDaemonEntry: vi.fn(async () => ({ dispose: () => {} })),
         loadConfig: async () => ({
           controlPlane: { baseUrl: 'http://localhost:3000', enrollmentToken: 'tok', nodeId: 'n1' },
         }),
@@ -385,7 +385,7 @@ describe('daemon restart', () => {
   it('starts a fresh daemon when restart is called with no daemon running', async () => {
     const { paths, cleanup } = await createTempCliPaths()
     try {
-      const runDaemonEntry = vi.fn(async () => undefined)
+      const runDaemonEntry = vi.fn(async () => ({ dispose: () => {} }))
       const result = await runCommand(['daemon', 'restart', '--fg'], {
         getUserConfigPaths: () => paths,
         runDaemonEntry,
@@ -403,7 +403,7 @@ describe('daemon restart', () => {
 
   it('restarts a running daemon in foreground mode', async () => {
     const { paths, cleanup: cleanupTemp } = await createTempCliPaths()
-    const replacement = vi.fn(async () => undefined)
+    const replacement = vi.fn(async () => ({ dispose: () => {} }))
 
     try {
       const first = await setupSubprocessDaemon(['first'], paths)
@@ -440,6 +440,7 @@ describe('daemon restart', () => {
       const runDaemonEntry = vi.fn(async () => {
         expect(await pathExists(paths.daemonPortPath)).toBe(false)
         expect(await pathExists(paths.daemonPidPath)).toBe(false)
+        return { dispose: () => {} }
       })
 
       const result = await runCommand(['daemon', 'start', '--fg'], {
