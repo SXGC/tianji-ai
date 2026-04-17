@@ -41,7 +41,7 @@ export function useEventPolling(): void {
         })
         if (cancelled) return
         if (res.events.length > 0 || isBootstrap) {
-          prependEvents(res.events, res.maxCursor || cursorRef.current || 0)
+          prependEvents(res.events, res.maxCursor)
         }
         reportSuccess()
       } catch (e) {
