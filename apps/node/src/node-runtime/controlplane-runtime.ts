@@ -255,7 +255,7 @@ export function createControlPlaneRuntime(
                 commandId: taskCommand.commandId,
                 taskId: taskCommand.payload.taskId,
                 agentId: taskCommand.payload.agentId,
-                ...errorToLogData(error),
+                error: errorToLogData(error),
               })
               ?.catch(() => {})
           })
@@ -274,7 +274,7 @@ export function createControlPlaneRuntime(
             ?.logError(['daemon', 'controlplane'], 'Failed to cancel task', {
               commandId: command.commandId,
               taskId: command.payload.taskId,
-              ...errorToLogData(error),
+              error: errorToLogData(error),
             })
             ?.catch(() => {})
         }

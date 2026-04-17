@@ -104,7 +104,7 @@ export class ControlPlaneConnection {
     void task().catch(async (error) => {
       try {
         await this.#config.logger?.logError(this.#scope, 'Control plane background task failed', {
-          ...errorToLogData(error),
+          error: errorToLogData(error),
         })
       } catch {
         // 后台兜底日志也失败时，直接吞掉，避免再次触发 unhandledRejection。
@@ -136,7 +136,7 @@ export class ControlPlaneConnection {
         nodeId: this.#config.nodeId,
         executionState: this.#executionState,
         baseUrl: this.#config.baseUrl,
-        ...errorData,
+        error: errorData,
       })
       if (error instanceof ControlPlaneAuthError) {
         await this.#reRegister()
