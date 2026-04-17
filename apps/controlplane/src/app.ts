@@ -5,6 +5,8 @@ import { Hono } from 'hono'
 import type { ControlPlaneDb } from './db/index.js'
 import { createCommandPollRoute } from './routes/command-poll.js'
 import { createCopilotRoute } from './routes/copilot.js'
+import { createDebugEventsRoute } from './routes/debug-events.js'
+import { createDebugNodesRoute } from './routes/debug-nodes.js'
 import { createEventLogMaxSequenceRoute } from './routes/event-log-max-sequence.js'
 import { createEventsRoute } from './routes/events.js'
 import { createNodeHeartbeatRoute } from './routes/node-heartbeat.js'
@@ -74,6 +76,10 @@ export function createApp(
 
   app.route('/', createUiNodesRoute(db))
   app.route('/', createCopilotRoute(db, logger, bus))
+  if (process.env.TIANJI_DEBUG === 'true') {
+    app.route('/', createDebugEventsRoute(db))
+    app.route('/', createDebugNodesRoute(db))
+  }
   app.route('/', createWebUiRoute())
 
   return {
