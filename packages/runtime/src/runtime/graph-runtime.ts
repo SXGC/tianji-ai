@@ -21,7 +21,14 @@ async function emptyEvents(): Promise<AsyncIterable<DomainEvent>> {
 export function createGraphRuntime(deps: GraphRuntimeDeps): GraphRuntime {
   return {
     async runGraph(request: GraphRunRequest): Promise<GraphRunHandle> {
-      const session = await deps.sessionRuntime.createSession({ sessionId: request.sessionId })
+      const session =
+        request.sessionId === undefined
+          ? await deps.sessionRuntime.createSession()
+          : await deps.sessionRuntime
+              .openSession(request.sessionId)
+              .catch(async () =>
+                deps.sessionRuntime.createSession({ sessionId: request.sessionId })
+              )
       const runId = request.runId ?? createRunId(`run_graph_${Date.now()}`)
 
       if (deps.graphRunner?.start === undefined) {

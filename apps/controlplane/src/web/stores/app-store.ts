@@ -13,6 +13,7 @@ export interface AppState {
 
   sessionId: string | null
   setSessionId: (id: string) => void
+  clearSessionId: () => void
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -31,11 +32,15 @@ export const useAppStore = create<AppState>((set) => ({
   selectedNodeId: null,
   selectedAgentId: null,
   selectNode: (nodeId, agentId) => {
+    // 切换 owner 边界时必须重建 session，避免跨 node/agent 复用。
     set({ selectedNodeId: nodeId, selectedAgentId: agentId, sessionId: null })
   },
 
   sessionId: null,
   setSessionId: (id) => {
     set({ sessionId: id })
+  },
+  clearSessionId: () => {
+    set({ sessionId: null })
   },
 }))

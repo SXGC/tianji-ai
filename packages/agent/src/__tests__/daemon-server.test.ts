@@ -4,7 +4,12 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { type DomainEventEnvelope, type EventBus, createEventBus } from '@tianji/shared'
+import {
+  type DomainEventEnvelope,
+  type EventBus,
+  type SessionId,
+  createEventBus,
+} from '@tianji/shared'
 
 import {
   type ControlPlaneStatusSnapshot,
@@ -121,7 +126,7 @@ describe('DaemonServer', () => {
     }
   })
 
-  it('GET /ping returns session metadata', async () => {
+  it('GET /ping returns daemon metadata without sessionId', async () => {
     const bus = createStubBus()
     const entry = createStubEntry(bus)
     server = new DaemonServer({
@@ -134,7 +139,7 @@ describe('DaemonServer', () => {
     expect(res.status).toBe(200)
 
     const body = (await res.json()) as PingResponse
-    expect(body.sessionId).toBe('unified-entry')
+    expect('sessionId' in body).toBe(false)
     expect(typeof body.pid).toBe('number')
     expect(typeof body.uptime).toBe('number')
     expect(body.uptime).toBeGreaterThanOrEqual(0)
@@ -187,7 +192,7 @@ describe('DaemonServer', () => {
     const res = await fetch(`${baseUrl(server)}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'hi' }),
+      body: JSON.stringify({ prompt: 'hi', sessionId: 'session_chat' }),
     })
     expect(res.status).toBe(200)
     expect(res.headers.get('content-type')).toBe('text/event-stream')
@@ -230,7 +235,7 @@ describe('DaemonServer', () => {
     const res = await fetch(`${baseUrl(server)}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'hi' }),
+      body: JSON.stringify({ prompt: 'hi', sessionId: 'session_chat' }),
     })
     const text = await res.text()
     const blocks = parseSseBlocks(text)
@@ -247,7 +252,7 @@ describe('DaemonServer', () => {
     expect(ids).not.toContain('task-evt')
   })
 
-  it('concurrent chat returns BUSY error', async () => {
+  it('concurrent chat returns active session concurrency error', async () => {
     const bus = createStubBus()
     const blockingEntry = createBlockingEntry()
     server = new DaemonServer({
@@ -259,7 +264,7 @@ describe('DaemonServer', () => {
     const chat1 = fetch(`${baseUrl(server)}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'first' }),
+      body: JSON.stringify({ prompt: 'first', sessionId: 'session_first' }),
     })
 
     await new Promise((r) => setTimeout(r, 50))
@@ -267,7 +272,7 @@ describe('DaemonServer', () => {
     const res2 = await fetch(`${baseUrl(server)}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'second' }),
+      body: JSON.stringify({ prompt: 'second', sessionId: 'session_second' }),
     })
 
     expect(res2.status).toBe(200)
@@ -277,7 +282,8 @@ describe('DaemonServer', () => {
     expect(blocks[0].event).toBe('chat.error')
     const parsed = JSON.parse(blocks[0].data) as ChatErrorSseMessage
     expect(parsed.type).toBe('chat.error')
-    expect(parsed.code).toBe('BUSY')
+    expect(parsed.code).toBe('ACTIVE_SESSION_CONCURRENCY_UNSUPPORTED')
+    expect(parsed.message).toBe('The daemon currently supports only one active session at a time')
 
     blockingEntry.resolve()
     await chat1
@@ -341,7 +347,23 @@ describe('DaemonServer', () => {
     expect(res.status).toBe(404)
   })
 
-  it('POST /chat with invalid body returns 400', async () => {
+  it('POST /sessions returns a new sessionId', async () => {
+    const bus = createStubBus()
+    const entry = createStubEntry(bus)
+    server = new DaemonServer({
+      entry,
+      bus,
+    })
+    await server.listen(0)
+
+    const res = await fetch(`${baseUrl(server)}/sessions`, { method: 'POST' })
+    expect(res.status).toBe(200)
+
+    const body = (await res.json()) as { sessionId: string }
+    expect(body.sessionId).toMatch(/^session_/)
+  })
+
+  it('POST /chat without sessionId returns 400', async () => {
     const bus = createStubBus()
     const entry = createStubEntry(bus)
     server = new DaemonServer({
@@ -353,9 +375,33 @@ describe('DaemonServer', () => {
     const res = await fetch(`${baseUrl(server)}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ notPrompt: 'hello' }),
+      body: JSON.stringify({ prompt: 'hello' }),
     })
     expect(res.status).toBe(400)
+  })
+
+  it('POST /chat forwards sessionId to entry.run', async () => {
+    const bus = createStubBus()
+    const entry = createStubEntry(bus)
+    server = new DaemonServer({
+      entry,
+      bus,
+    })
+    await server.listen(0)
+
+    await fetch(`${baseUrl(server)}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'hi', sessionId: 'session_existing' }),
+    })
+
+    expect(entry.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        source: 'daemon',
+        input: 'hi',
+        sessionId: 'session_existing' as SessionId,
+      })
+    )
   })
 
   it('POST /chat handles internal errors from session', async () => {
@@ -381,7 +427,7 @@ describe('DaemonServer', () => {
     const res = await fetch(`${baseUrl(server)}/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'hi' }),
+      body: JSON.stringify({ prompt: 'hi', sessionId: 'session_error' }),
     })
     expect(res.status).toBe(200)
 

@@ -1,7 +1,7 @@
 import { unlink, writeFile } from 'node:fs/promises'
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http'
 
-import type { EventBus } from '@tianji/shared'
+import type { EventBus, SessionId } from '@tianji/shared'
 
 import type { AgentAppPaths } from './context.js'
 import {
@@ -43,6 +43,10 @@ async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8')) as T
 }
 
+function createDaemonSessionId(): SessionId {
+  return `session_${Date.now()}_${crypto.randomUUID()}` as SessionId
+}
+
 export class DaemonServer {
   readonly #entry: UnifiedRuntimeEntry
   readonly #bus: EventBus
@@ -53,7 +57,7 @@ export class DaemonServer {
     | ((correlationId: string, fn: () => Promise<void>) => Promise<void>)
     | undefined
   #startedAt: number
-  #chatInProgress: boolean
+  #activeSessionInProgress: boolean
   #shutdownPromise: Promise<void> | undefined
 
   constructor(options: DaemonServerOptions) {
@@ -66,7 +70,7 @@ export class DaemonServer {
       void this.#handleRequest(req, res)
     })
     this.#startedAt = 0
-    this.#chatInProgress = false
+    this.#activeSessionInProgress = false
     this.#shutdownPromise = undefined
   }
 
@@ -123,13 +127,13 @@ export class DaemonServer {
   }
 
   #waitForChat(timeoutMs = 10_000): Promise<void> {
-    if (!this.#chatInProgress) {
+    if (!this.#activeSessionInProgress) {
       return Promise.resolve()
     }
     return new Promise<void>((resolve) => {
       const deadline = Date.now() + timeoutMs
       const interval = setInterval(() => {
-        if (!this.#chatInProgress || Date.now() >= deadline) {
+        if (!this.#activeSessionInProgress || Date.now() >= deadline) {
           clearInterval(interval)
           resolve()
         }
@@ -148,6 +152,10 @@ export class DaemonServer {
       return this.#handleChat(req, res)
     }
 
+    if (req.method === 'POST' && url.pathname === '/sessions') {
+      return this.#handleCreateSession(res)
+    }
+
     if (req.method === 'POST' && url.pathname === '/shutdown') {
       return this.#handleShutdown(res)
     }
@@ -158,13 +166,17 @@ export class DaemonServer {
 
   #handlePing(res: ServerResponse): void {
     const body: PingResponse = {
-      sessionId: 'unified-entry',
       uptime: Math.floor((Date.now() - this.#startedAt) / 1000),
       pid: process.pid,
       controlPlane: this.#getControlPlaneStatus?.() ?? DEFAULT_CONTROL_PLANE_STATUS,
     }
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify(body))
+  }
+
+  #handleCreateSession(res: ServerResponse): void {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    res.end(JSON.stringify({ sessionId: createDaemonSessionId() }))
   }
 
   async #handleChat(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -177,23 +189,23 @@ export class DaemonServer {
       return
     }
 
-    if (typeof parsed.prompt !== 'string') {
+    if (typeof parsed.prompt !== 'string' || typeof parsed.sessionId !== 'string') {
       res.writeHead(400, { 'content-type': 'application/json' })
-      res.end(JSON.stringify({ error: 'missing prompt field' }))
+      res.end(JSON.stringify({ error: 'missing prompt or sessionId field' }))
       return
     }
 
-    if (this.#chatInProgress) {
+    if (this.#activeSessionInProgress) {
       this.#sendSse(res, DAEMON_SSE_ERROR_NAME, {
         type: 'chat.error',
-        code: 'BUSY',
-        message: 'A chat is already in progress',
+        code: 'ACTIVE_SESSION_CONCURRENCY_UNSUPPORTED',
+        message: 'The daemon currently supports only one active session at a time',
       } satisfies ChatErrorSseMessage)
       res.end()
       return
     }
 
-    this.#chatInProgress = true
+    this.#activeSessionInProgress = true
     res.writeHead(200, {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
@@ -215,6 +227,7 @@ export class DaemonServer {
         const handle = await this.#entry.run({
           source: 'daemon',
           input: parsed.prompt,
+          sessionId: parsed.sessionId as SessionId,
         })
         for await (const _event of handle.events) {
           // intentionally empty — events are delivered via bus subscription
@@ -222,14 +235,21 @@ export class DaemonServer {
         this.#sendSse(res, DAEMON_SSE_DONE_NAME, { type: 'chat.done' } satisfies ChatSseMessage)
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : 'Unknown error'
+        const code =
+          typeof err === 'object' &&
+          err !== null &&
+          'code' in err &&
+          err.code === 'SESSION_NOT_FOUND'
+            ? 'SESSION_NOT_FOUND'
+            : 'INTERNAL'
         this.#sendSse(res, DAEMON_SSE_ERROR_NAME, {
           type: 'chat.error',
-          code: 'INTERNAL',
+          code,
           message,
         } satisfies ChatErrorSseMessage)
       } finally {
         subscription.unsubscribe()
-        this.#chatInProgress = false
+        this.#activeSessionInProgress = false
         res.end()
       }
     }

@@ -12,7 +12,7 @@ import type {
   NodeExecutorContext,
   OrchestrationGraph,
 } from '../orchestration/index.js'
-import { createAgentRuntime, createAgentSession } from '../session.js'
+import { createAgentRuntime, createAgentSession, openAgentSession } from '../session.js'
 
 vi.mock('@tianji/runtime', async () => {
   const actual = await vi.importActual<typeof import('@tianji/runtime')>('@tianji/runtime')
@@ -32,6 +32,12 @@ function createStubRuntime(): SessionRuntime {
   return {
     createSession: vi.fn(async (options) => ({
       sessionId: options?.sessionId ?? ('session_test' as never),
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    })),
+    openSession: vi.fn(async (sessionId) => ({
+      sessionId,
       messages: [],
       createdAt: 1,
       updatedAt: 1,
@@ -126,6 +132,49 @@ describe('agent session', () => {
         'x-test-header': 'enabled',
       },
     })
+  })
+
+  it('openAgentSession throws when the session snapshot does not exist', async () => {
+    const runtime = createStubRuntime()
+    vi.mocked(runtime.openSession).mockRejectedValueOnce(
+      Object.assign(new Error('missing session'), { code: 'SESSION_NOT_FOUND' })
+    )
+    const createSessionRuntimeSpy = vi
+      .spyOn(runtimeModule, 'createSessionRuntime')
+      .mockReturnValue(runtime)
+
+    await expect(
+      openAgentSession(createFakeContext(), { sessionId: 'session_missing' as never })
+    ).rejects.toMatchObject({ code: 'SESSION_NOT_FOUND' })
+
+    expect(runtime.createSession).not.toHaveBeenCalled()
+
+    createSessionRuntimeSpy.mockRestore()
+  })
+
+  it('openAgentSession reuses provided sessionId without emitting SessionCreated', async () => {
+    const runtime = createStubRuntime()
+    const createSessionRuntimeSpy = vi
+      .spyOn(runtimeModule, 'createSessionRuntime')
+      .mockReturnValue(runtime)
+    const emitEvent = vi.fn()
+
+    const session = await openAgentSession(
+      createFakeContext(),
+      { sessionId: 'session_existing' as never },
+      { emitEvent }
+    )
+
+    expect(runtime.openSession).toHaveBeenCalledWith('session_existing')
+    expect(runtime.createSession).not.toHaveBeenCalled()
+    expect(session.sessionId).toBe('session_existing')
+    expect(emitEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'SessionCreated',
+      })
+    )
+
+    createSessionRuntimeSpy.mockRestore()
   })
 })
 

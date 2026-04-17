@@ -35,6 +35,15 @@ export interface ResumeAgentSessionOptions {
 }
 
 /**
+ * 继续已有会话的参数。
+ *
+ * @param sessionId - 已存在的会话 ID，用于继续后续多轮运行
+ */
+export interface OpenAgentSessionOptions {
+  readonly sessionId: SessionId
+}
+
+/**
  * 通过 OrchestrationGraph 启动一轮多智能体编排所需的参数。
  *
  * compileOptions 中的 `runId`、`observer`、`emitGraphEvent`、`abortSignal`
@@ -60,6 +69,76 @@ export interface AgentSession {
   readonly abort: () => void
   /** 关闭 session，发射 SessionClosed 事件，中止所有进行中的图运行。 */
   readonly close: () => void
+}
+
+async function createSessionFacade(
+  sessionId: SessionId,
+  runtime: SessionRuntime,
+  options?: AgentRuntimeOptions
+): Promise<AgentSession> {
+  const activeGraphControllers = new Set<AbortController>()
+
+  return {
+    sessionId,
+    abort(): void {
+      for (const controller of activeGraphControllers) {
+        controller.abort()
+      }
+    },
+    close(): void {
+      for (const controller of activeGraphControllers) {
+        controller.abort()
+      }
+      const result = options?.emitEvent?.({
+        type: 'SessionClosed',
+        sessionId,
+        timestamp: Date.now(),
+      })
+      if (result instanceof Promise) {
+        result.catch((err: unknown) => {
+          void options?.logger?.error(['agent', 'session'], 'SessionClosed emitEvent failed', {
+            sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        })
+      }
+    },
+    async *queryWithGraph(
+      graph: OrchestrationGraph,
+      graphOptions: ChatWithGraphOptions
+    ): AsyncIterable<DomainEvent> {
+      const runId = `run_graph_${Date.now()}` as RunId
+      const controller = new AbortController()
+      activeGraphControllers.add(controller)
+
+      try {
+        const result = runOrchestrationGraph({
+          graph,
+          runId,
+          initialState: graphOptions.initialState,
+          compileOptions: graphOptions.compileOptions,
+          observer: options?.logger,
+          abortSignal: controller.signal,
+          onMermaid: (diagram) => {
+            void options?.logger?.info(['agent', 'orchestration'], 'graph.mermaid', {
+              sessionId,
+              runId,
+              graphId: graph.id,
+              graphVersion: graph.version,
+              diagram,
+            })
+          },
+        })
+
+        for await (const event of result.events) {
+          yield event
+        }
+        await result.finished
+      } finally {
+        activeGraphControllers.delete(controller)
+      }
+    },
+  }
 }
 
 /**
@@ -115,10 +194,6 @@ export async function createAgentSession(
 ): Promise<AgentSession> {
   const runtime = await createAgentRuntime(context, options)
   const sessionId = `session_${Date.now()}` as SessionId
-  // 当前 session 内所有仍在运行的 queryWithGraph 对应的 AbortController。
-  // session.abort() 会同时通知这些图级控制器，让节点执行器（deepagents-executor / acp-executor）
-  // 走 AbortSignal 路径中断正在进行的 runtime 调用。
-  const activeGraphControllers = new Set<AbortController>()
 
   // runtime.createSession 是初始化语义,会无脑覆盖 sessions/{sessionId}.json 的 messages 为空。
   // 必须只在 AgentSession 工厂里调用一次,否则后续每轮 query 都会清掉前一轮 runTurn 累加的多轮历史。
@@ -130,74 +205,26 @@ export async function createAgentSession(
     timestamp: Date.now(),
   })
 
-  return {
-    sessionId,
-    abort(): void {
-      // 通知所有进行中的图运行终止；controller 会在各自 queryWithGraph 的 finally
-      // 里从集合里移除，这里只负责发信号。
-      for (const controller of activeGraphControllers) {
-        controller.abort()
-      }
-    },
-    close(): void {
-      for (const controller of activeGraphControllers) {
-        controller.abort()
-      }
-      // close() 是同步方法，无法 await。用 .catch 显式捕获，防止 fire-and-forget 丢失错误。
-      const result = options?.emitEvent?.({
-        type: 'SessionClosed',
-        sessionId,
-        timestamp: Date.now(),
-      })
-      if (result instanceof Promise) {
-        result.catch((err: unknown) => {
-          void options?.logger?.error(['agent', 'session'], 'SessionClosed emitEvent failed', {
-            sessionId,
-            ...errorToLogData(err),
-          })
-        })
-      }
-    },
-    async *queryWithGraph(
-      graph: OrchestrationGraph,
-      graphOptions: ChatWithGraphOptions
-    ): AsyncIterable<DomainEvent> {
-      // runId 是 @tianji/shared 的分支类型，这里用 session 级时间戳生成唯一值即可。
-      const runId = `run_graph_${Date.now()}` as RunId
-      const controller = new AbortController()
-      activeGraphControllers.add(controller)
+  return createSessionFacade(sessionId, runtime, options)
+}
 
-      try {
-        const result = runOrchestrationGraph({
-          graph,
-          runId,
-          initialState: graphOptions.initialState,
-          compileOptions: graphOptions.compileOptions,
-          observer: options?.logger,
-          abortSignal: controller.signal,
-          onMermaid: (diagram) => {
-            void options?.logger?.info(['agent', 'orchestration'], 'graph.mermaid', {
-              sessionId,
-              runId,
-              graphId: graph.id,
-              graphVersion: graph.version,
-              diagram,
-            })
-          },
-        })
-
-        // DomainEvent 是图级与运行时事件的统一类型，直接产出给上层消费者。
-        for await (const event of result.events) {
-          yield event
-        }
-        await result.finished
-      } finally {
-        // 无论正常结束、消费者 break、还是底层抛错，都要从集合中移除 controller，
-        // 避免悬挂的 controller 影响后续 abort() 语义。
-        activeGraphControllers.delete(controller)
-      }
-    },
-  }
+/**
+ * 会话打开入口：复用已有 sessionId 继续后续多轮运行，不涉及 checkpoint 恢复。
+ *
+ * @param context - 已加载的 agent bootstrap 上下文
+ * @param openOptions - 打开参数（仅 sessionId）
+ * @param runtimeOptions - 运行时选项（logger、emitEvent）
+ * @returns 复用同一 sessionId 的 AgentSession 实例
+ */
+export async function openAgentSession(
+  context: LoadedAgentContext,
+  openOptions: OpenAgentSessionOptions,
+  runtimeOptions?: AgentRuntimeOptions
+): Promise<AgentSession> {
+  const { sessionId } = openOptions
+  const runtime = await createAgentRuntime(context, runtimeOptions)
+  await runtime.openSession(sessionId)
+  return createSessionFacade(sessionId, runtime, runtimeOptions)
 }
 
 /**
@@ -218,7 +245,6 @@ export async function resumeAgentSession(
 ): Promise<AgentSession> {
   const { checkpointId, sessionId } = resumeOptions
   const runtime = await createAgentRuntime(context, runtimeOptions)
-  const activeGraphControllers = new Set<AbortController>()
 
   // 恢复语义：runtime.createSession 使用已有 sessionId，runtime 内部会加载已有快照。
   // 与 createAgentSession 的"初始化语义"不同，这里只是让 runtime 找到该 session。
@@ -231,69 +257,7 @@ export async function resumeAgentSession(
     timestamp: Date.now(),
   })
 
-  return {
-    sessionId,
-    abort(): void {
-      for (const controller of activeGraphControllers) {
-        controller.abort()
-      }
-    },
-    close(): void {
-      for (const controller of activeGraphControllers) {
-        controller.abort()
-      }
-      // close() 是同步方法，无法 await。用 .catch 显式捕获，防止 fire-and-forget 丢失错误。
-      const result = runtimeOptions?.emitEvent?.({
-        type: 'SessionClosed',
-        sessionId,
-        timestamp: Date.now(),
-      })
-      if (result instanceof Promise) {
-        result.catch((err: unknown) => {
-          void runtimeOptions?.logger?.error(
-            ['agent', 'session'],
-            'SessionClosed emitEvent failed',
-            { sessionId, ...errorToLogData(err) }
-          )
-        })
-      }
-    },
-    async *queryWithGraph(
-      graph: OrchestrationGraph,
-      graphOptions: ChatWithGraphOptions
-    ): AsyncIterable<DomainEvent> {
-      const runId = `run_graph_${Date.now()}` as RunId
-      const controller = new AbortController()
-      activeGraphControllers.add(controller)
-
-      try {
-        const result = runOrchestrationGraph({
-          graph,
-          runId,
-          initialState: graphOptions.initialState,
-          compileOptions: graphOptions.compileOptions,
-          observer: runtimeOptions?.logger,
-          abortSignal: controller.signal,
-          onMermaid: (diagram) => {
-            void runtimeOptions?.logger?.info(['agent', 'orchestration'], 'graph.mermaid', {
-              sessionId,
-              runId,
-              graphId: graph.id,
-              graphVersion: graph.version,
-              diagram,
-            })
-          },
-        })
-
-        for await (const event of result.events) {
-          yield event
-        }
-        await result.finished
-      } finally {
-        activeGraphControllers.delete(controller)
-      }
-    },
-  }
+  return createSessionFacade(sessionId, runtime, runtimeOptions)
 }
 
 function readProviderBaseUrl(context: LoadedAgentContext): string | undefined {

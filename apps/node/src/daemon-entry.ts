@@ -8,7 +8,9 @@ import {
   DEFAULT_CONTROL_PLANE_STATUS,
   DaemonServer,
   buildDefaultGraph,
+  createAgentSession,
   createUnifiedRuntimeEntry,
+  openAgentSession,
 } from '@tianji/agent'
 import { errorToLogData, subscribeEventBusLogger, subscribeOtelAdapter } from '@tianji/observer'
 import {
@@ -128,13 +130,31 @@ export async function runDaemonEntry(): Promise<void> {
     createExecutorRegistry: async () => built.executorFactory,
     runtime: {
       runGraph: async ({ request, graph, executors }) => {
-        const sessionModule = await import('@tianji/agent')
-        const session = await enterCorrelation(`daemon-startup-${Date.now()}`, async () =>
-          sessionModule.createAgentSession(context, {
-            logger: logger.observerLogger,
-            emitEvent: (ev) => pipeline.emitEvent(ev),
-          })
-        )
+        if (request.sessionId === undefined) {
+          throw new Error('Daemon unified entry requires sessionId')
+        }
+        const sessionId = request.sessionId
+
+        const runtimeOptions = {
+          logger: logger.observerLogger,
+          emitEvent: (ev: Parameters<typeof pipeline.emitEvent>[0]) => pipeline.emitEvent(ev),
+        }
+        const session = await enterCorrelation(`daemon-run-${sessionId}`, async () => {
+          if (sessionId.startsWith('session_')) {
+            const created = await createAgentSession(context, runtimeOptions)
+            if (created.sessionId === sessionId) {
+              return created
+            }
+          }
+
+          return openAgentSession(
+            context,
+            {
+              sessionId,
+            },
+            runtimeOptions
+          )
+        })
         const events = session.queryWithGraph(graph, {
           initialState: { input: request.input },
           compileOptions: { agentExecutorFactory: executors },

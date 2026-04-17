@@ -88,5 +88,11 @@ describe('useAppStore', () => {
       useAppStore.getState().setSessionId('sess-xyz')
       expect(useAppStore.getState().sessionId).toBe('sess-xyz')
     })
+
+    it('clearSessionId 清空 sessionId', () => {
+      useAppStore.getState().setSessionId('sess-xyz')
+      useAppStore.getState().clearSessionId()
+      expect(useAppStore.getState().sessionId).toBeNull()
+    })
   })
 })

@@ -21,15 +21,18 @@ export {
   type ChatErrorSseMessage,
   type ChatEventSseMessage,
   type ChatSseMessage,
+  type CreateSessionResponse,
   type PingResponse,
   type ShutdownResponse,
 } from './daemon-protocol.js'
 export {
   createAgentRuntime,
   createAgentSession,
+  openAgentSession,
   resumeAgentSession,
   type AgentRuntimeOptions,
   type AgentSession,
+  type OpenAgentSessionOptions,
   type ResumeAgentSessionOptions,
 } from './session.js'
 export {
