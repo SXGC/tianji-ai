@@ -2,6 +2,7 @@ import { resolveAgentModel } from '@tianji/runtime'
 import type { LoadedAgentContext } from './context.js'
 import {
   type AgentExecutorFactory,
+  type CreateDeepagentsExecutorFactoryOptions,
   type OrchestrationGraph,
   createDeepagentsExecutorFactory,
   loadDefaultOrchestrationGraph,
@@ -13,19 +14,32 @@ export interface DefaultGraphBuildResult {
   readonly executorFactory: AgentExecutorFactory
 }
 
+export interface BuildDefaultGraphOptions {
+  /**
+   * 预留 deepagents executor 的扩展装配入口。
+   *
+   * `resolveModel` 由默认装配统一注入，调用方不能覆盖。
+   */
+  readonly executorFactoryOptions?: Omit<CreateDeepagentsExecutorFactoryOptions, 'resolveModel'>
+}
+
 /**
  * 统一入口默认装配：先解析图，再构造默认执行器。
  */
 export async function buildDefaultGraph(
   request: UnifiedRunRequest,
-  context: LoadedAgentContext
+  context: LoadedAgentContext,
+  options: BuildDefaultGraphOptions = {}
 ): Promise<DefaultGraphBuildResult> {
+  const executorFactoryOptions = {
+    ...options.executorFactoryOptions,
+    resolveModel: (modelRef: string) => resolveAgentModel(modelRef, context.config.providers),
+  } satisfies CreateDeepagentsExecutorFactoryOptions
+
   if (request.graph !== undefined) {
     return {
       graph: request.graph,
-      executorFactory: createDeepagentsExecutorFactory({
-        resolveModel: (modelRef) => resolveAgentModel(modelRef, context.config.providers),
-      }),
+      executorFactory: createDeepagentsExecutorFactory(executorFactoryOptions),
     }
   }
 
@@ -36,8 +50,6 @@ export async function buildDefaultGraph(
 
   return {
     graph,
-    executorFactory: createDeepagentsExecutorFactory({
-      resolveModel: (modelRef) => resolveAgentModel(modelRef, context.config.providers),
-    }),
+    executorFactory: createDeepagentsExecutorFactory(executorFactoryOptions),
   }
 }

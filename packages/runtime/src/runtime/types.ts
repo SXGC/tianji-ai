@@ -87,6 +87,7 @@ export interface SessionRuntimeOptions {
 
 export interface SessionRuntime {
   readonly createSession: (options?: CreateSessionOptions) => Promise<SessionSnapshot>
+  readonly openSession: (sessionId: SessionId) => Promise<SessionSnapshot>
   readonly closeSession: (sessionId: SessionId) => Promise<SessionSnapshot>
   readonly getSessionSnapshot: (sessionId: SessionId) => Promise<SessionSnapshot | undefined>
   readonly getRunSnapshot: (runId: RunId) => Promise<RunSnapshot | undefined>
@@ -132,7 +133,10 @@ export interface GraphRuntime {
 }
 
 export interface GraphRuntimeDeps {
-  readonly sessionRuntime: Pick<SessionRuntime, 'createSession' | 'streamEvents' | 'cancelRun'>
+  readonly sessionRuntime: Pick<
+    SessionRuntime,
+    'createSession' | 'openSession' | 'streamEvents' | 'cancelRun'
+  >
   readonly graphRunner?: {
     readonly start?: (request: {
       readonly sessionId: SessionId

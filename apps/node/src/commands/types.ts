@@ -2,6 +2,7 @@ import type { AgentSession, LoadedAgentContext, UnifiedRuntimeEntry } from '@tia
 import type { TianjiConfig } from '@tianji/shared'
 
 import type { UserConfigPaths } from '../config.js'
+import type { DaemonHandle } from '../daemon-entry.js'
 import type { I18n, MessageKey } from '../i18n/index.js'
 import type { FollowCliLogOptions } from '../log-follow.js'
 import type {
@@ -26,7 +27,7 @@ export interface CliDependencies {
     config: ControlPlaneRuntimeConfig
   ) => ControlPlaneRuntimeHandle
   readonly writeStdout?: (message: string) => void
-  readonly runDaemonEntry?: () => Promise<void>
+  readonly runDaemonEntry?: () => Promise<DaemonHandle>
   readonly loadConfig?: () => Promise<Partial<TianjiConfig>>
   readonly confirmOverwrite?: (message: string) => Promise<boolean>
   readonly saveConfig?: (config: Partial<TianjiConfig>) => Promise<void>

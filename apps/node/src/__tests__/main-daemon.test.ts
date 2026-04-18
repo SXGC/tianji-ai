@@ -143,7 +143,6 @@ describe('runCli daemon commands', () => {
 
       const ping = {
         pid: 4321,
-        sessionId: 'session-1',
         uptime: 684,
         controlPlane: {
           enabled: true,

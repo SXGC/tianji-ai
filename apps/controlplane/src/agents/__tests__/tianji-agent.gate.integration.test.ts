@@ -72,10 +72,12 @@ describe('TianjiAgent × AgUiEventGate 集成', () => {
     const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, logger)
 
     const stream$ = agent.run({
+      threadId: 'session_gate',
+      runId: 'run_gate',
       messages: [{ id: 'u1', role: 'user', content: 'hi' }],
       tools: [],
       context: [],
-      forwardedProps: {},
+      forwardedProps: { sessionId: 'session_gate' },
       state: {},
     })
     // lastValueFrom 立即订阅 Observable，Observable 工厂内的 DB INSERT 同步执行

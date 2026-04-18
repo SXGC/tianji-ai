@@ -43,7 +43,7 @@ describe('TianjiAgent', () => {
    */
   function createTestBus() {
     return createEventBus({
-      lagSink: (info) => {
+      lagSink: (info: unknown) => {
         console.warn('[test-bus] subscriber lag', info)
       },
       errorSink: () => undefined,
@@ -54,16 +54,19 @@ describe('TianjiAgent', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
 
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
+    const bus = createTestBus()
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
     const clonedAgent = agent.clone()
 
     await expect(
       firstValueFrom(
         clonedAgent.run({
+          threadId: 'session_clone',
+          runId: 'run_clone',
           messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
           tools: [],
           context: [],
-          forwardedProps: {},
+          forwardedProps: { sessionId: 'session_clone' },
           state: {},
         })
       )
@@ -76,19 +79,109 @@ describe('TianjiAgent', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
 
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
+    const bus = createTestBus()
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
 
     const firstEvent = await firstValueFrom(
       agent.run({
+        threadId: 'session_run_started',
+        runId: 'run_run_started',
         messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
         tools: [],
         context: [],
-        forwardedProps: {},
+        forwardedProps: { sessionId: 'session_run_started' },
         state: {},
       })
     )
 
-    expect(firstEvent).toMatchObject({ type: 'RUN_STARTED' })
+    expect(firstEvent).toMatchObject({
+      type: 'RUN_STARTED',
+      threadId: 'session_run_started',
+    })
+  })
+
+  it('uses sessionId from forwarded props as AG-UI threadId', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+
+    const bus = createTestBus()
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+
+    const firstEvent = await firstValueFrom(
+      agent.run({
+        threadId: 'session_123',
+        runId: 'run_session_123',
+        messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
+        tools: [],
+        context: [],
+        forwardedProps: { sessionId: 'session_123' },
+        state: {},
+      })
+    )
+
+    expect(firstEvent).toMatchObject({ type: 'RUN_STARTED', threadId: 'session_123' })
+  })
+
+  it('writes sessionIds into command payload', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+
+    const bus = createTestBus()
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+
+    await firstValueFrom(
+      agent.run({
+        threadId: 'session_payload',
+        runId: 'run_session_payload',
+        messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
+        tools: [],
+        context: [],
+        forwardedProps: { sessionId: 'session_payload' },
+        state: {},
+      })
+    )
+
+    const commandRow = db.raw
+      .prepare('SELECT payload FROM commands ORDER BY created_at DESC LIMIT 1')
+      .get() as { payload: string } | undefined
+
+    expect(commandRow).toBeDefined()
+    expect(JSON.parse(commandRow!.payload)).toMatchObject({
+      sessionIds: ['session_payload'],
+    })
+  })
+
+  it('writes nodeId and agentId into command payload owner fields', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+
+    const bus = createTestBus()
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+
+    await firstValueFrom(
+      agent.run({
+        threadId: 'session_owner',
+        runId: 'run_session_owner',
+        messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
+        tools: [],
+        context: [],
+        forwardedProps: {
+          sessionId: 'session_owner',
+          owner: { nodeId: 'node-1', agentId: 'agent-1' },
+        },
+        state: {},
+      })
+    )
+
+    const commandRow = db.raw
+      .prepare('SELECT payload FROM commands ORDER BY created_at DESC LIMIT 1')
+      .get() as { payload: string } | undefined
+
+    expect(commandRow).toBeDefined()
+    expect(JSON.parse(commandRow!.payload)).toMatchObject({
+      sessionIds: ['session_owner'],
+      owner: { nodeId: 'node-1', agentId: 'agent-1' },
+    })
   })
 
   it('run 在 notify waiter registry 时，对应 task 行已落库', async () => {
@@ -144,10 +237,12 @@ describe('TianjiAgent', () => {
     const completion = firstValueFrom(
       agent
         .run({
+          threadId: 'session_terminal',
+          runId: 'run_terminal',
           messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
           tools: [],
           context: [],
-          forwardedProps: {},
+          forwardedProps: { sessionId: 'session_terminal' },
           state: {},
         })
         .pipe(toArray())
@@ -191,10 +286,12 @@ describe('TianjiAgent', () => {
     const events = await firstValueFrom(
       agent
         .run({
+          threadId: 'session_missing_node',
+          runId: 'run_missing_node',
           messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
           tools: [],
           context: [],
-          forwardedProps: {},
+          forwardedProps: { sessionId: 'session_missing_node' },
           state: {},
         })
         .pipe(toArray())
@@ -216,10 +313,12 @@ describe('TianjiAgent', () => {
     const events = await firstValueFrom(
       agent
         .run({
+          threadId: 'session_offline_node',
+          runId: 'run_offline_node',
           messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
           tools: [],
           context: [],
-          forwardedProps: {},
+          forwardedProps: { sessionId: 'session_offline_node' },
           state: {},
         })
         .pipe(toArray())
@@ -256,6 +355,8 @@ describe('TianjiAgent', () => {
 
     await firstValueFrom(
       agent.run({
+        threadId: 'session_payload',
+        runId: 'run_payload',
         messages: [
           {
             id: 'msg-1',
@@ -268,7 +369,7 @@ describe('TianjiAgent', () => {
         ],
         tools: [],
         context: [],
-        forwardedProps: {},
+        forwardedProps: { sessionId: 'session_payload' },
         state: {},
       })
     )
@@ -422,7 +523,7 @@ describe('TianjiAgent cancel 终态', () => {
 
   function createTestBus() {
     return createEventBus({
-      lagSink: (info) => {
+      lagSink: (info: unknown) => {
         console.warn('[test-bus] subscriber lag', info)
       },
       errorSink: () => undefined,
@@ -438,12 +539,12 @@ describe('TianjiAgent cancel 终态', () => {
     const events: BaseEvent[] = []
     const subscription = agent
       .run({
-        threadId: 'thread-cancel-1',
+        threadId: 'session_cancel_1',
         runId: 'run-cancel-1',
         messages: [{ id: 'm-cancel', role: 'user', content: 'hi' }],
         tools: [],
         context: [],
-        forwardedProps: {},
+        forwardedProps: { sessionId: 'session_cancel_1' },
         state: {},
       })
       .subscribe((e) => events.push(e))
@@ -489,12 +590,12 @@ describe('TianjiAgent cancel 终态', () => {
     const events: BaseEvent[] = []
     const subscription = agent
       .run({
-        threadId: 'thread-cancel-2',
+        threadId: 'session_cancel_2',
         runId: 'run-cancel-2',
         messages: [{ id: 'm-cancel-2', role: 'user', content: 'bye' }],
         tools: [],
         context: [],
-        forwardedProps: {},
+        forwardedProps: { sessionId: 'session_cancel_2' },
         state: {},
       })
       .subscribe((e) => events.push(e))
@@ -529,7 +630,7 @@ describe('TianjiAgent cancel 终态', () => {
       | undefined
 
     expect(runFinished).toBeDefined()
-    expect(runFinished!.threadId).toBe('thread-cancel-2')
+    expect(runFinished!.threadId).toBe('session_cancel_2')
     expect(runFinished!.runId).toBe('run-cancel-2')
     expect(runFinished!.reason).toBe('cancelled')
   })

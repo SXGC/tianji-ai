@@ -18,6 +18,14 @@ import type { CommandWaiterRegistry } from '../services/command-waiter-registry.
 import { AgUiEventGate, isTerminalAgUiEvent } from './ag-ui-event-gate.js'
 import { type EventMapperContext, createInitialStateSnapshot, mapToAgUi } from './event-mapper.js'
 
+type ForwardedPropsWithSession = {
+  readonly sessionId?: string
+  readonly owner?: {
+    readonly nodeId?: string
+    readonly agentId?: string
+  }
+}
+
 /** Task 终态事件类型集合 */
 const TERMINAL_TASK_TYPES = new Set([
   'TaskCompleted',
@@ -79,7 +87,19 @@ export class TianjiAgent extends AbstractAgent {
   run(input: RunAgentInput): Observable<BaseEvent> {
     return new Observable<BaseEvent>((subscriber) => {
       const runId = input.runId ?? randomUUID()
-      const threadId = input.threadId ?? this.#nodeId
+      const forwardedProps = input.forwardedProps as ForwardedPropsWithSession | undefined
+      const sessionId = forwardedProps?.sessionId
+
+      if (typeof sessionId !== 'string' || sessionId.length === 0) {
+        subscriber.next({
+          type: EventType.RUN_ERROR,
+          message: 'Missing sessionId in forwardedProps',
+        } as BaseEvent)
+        subscriber.complete()
+        return
+      }
+
+      const threadId = sessionId
 
       subscriber.next({ type: EventType.RUN_STARTED, threadId, runId } as BaseEvent)
       // AG-UI 运行流要求首个事件必须是 RUN_STARTED，快照放在其后。
@@ -113,7 +133,11 @@ export class TianjiAgent extends AbstractAgent {
         taskId,
         agentId: this.#cpAgentId,
         goal: goalText,
-        sessionIds: [],
+        sessionIds: [sessionId],
+        owner: {
+          nodeId: forwardedProps?.owner?.nodeId ?? this.#nodeId,
+          agentId: forwardedProps?.owner?.agentId ?? this.#cpAgentId,
+        },
       })
 
       this.#db.raw

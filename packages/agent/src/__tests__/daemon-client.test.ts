@@ -2,7 +2,7 @@ import { type IncomingMessage, type ServerResponse, createServer } from 'node:ht
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import type { DomainEventEnvelope } from '@tianji/shared'
+import type { DomainEventEnvelope, SessionId } from '@tianji/shared'
 
 import { DaemonClient, type DaemonClientOptions } from '../daemon-client.js'
 import {
@@ -11,7 +11,11 @@ import {
   DAEMON_SSE_EVENT_NAME,
   encodeSseMessage,
 } from '../daemon-protocol.js'
-import type { ChatErrorSseMessage, ChatSseMessage } from '../daemon-protocol.js'
+import type {
+  ChatErrorSseMessage,
+  ChatSseMessage,
+  CreateSessionResponse,
+} from '../daemon-protocol.js'
 
 /** 构造最小合法的 DomainEventEnvelope 用于客户端测试。 */
 function makeEnvelope(overrides: Partial<DomainEventEnvelope> = {}): DomainEventEnvelope {
@@ -52,7 +56,10 @@ function sseDone(): string {
   return encodeSseMessage({ event: DAEMON_SSE_DONE_NAME, data: { type: 'chat.done' } })
 }
 
-function sseError(code: 'BUSY' | 'INTERNAL', message: string): string {
+function sseError(
+  code: 'ACTIVE_SESSION_CONCURRENCY_UNSUPPORTED' | 'INTERNAL' | 'SESSION_NOT_FOUND',
+  message: string
+): string {
   const msg: ChatErrorSseMessage = { type: 'chat.error', code, message }
   return encodeSseMessage({ event: DAEMON_SSE_ERROR_NAME, data: msg })
 }
@@ -116,12 +123,32 @@ describe('DaemonClient', () => {
     expect(result).toEqual({ ok: true })
   })
 
+  it('createSession returns sessionId', async () => {
+    const { client, close } = await setupServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/sessions') {
+        writeJson(res, { sessionId: 'session_123' })
+      } else {
+        res.writeHead(404)
+        res.end()
+      }
+    })
+    closeServer = close
+
+    await expect(client.createSession()).resolves.toEqual({
+      sessionId: 'session_123',
+    } satisfies CreateSessionResponse)
+  })
+
   it('sendChat yields DomainEventEnvelope objects from SSE stream', async () => {
     const env1 = makeEnvelope({ eventId: 'evt-1', type: 'RunStarted' })
     const env2 = makeEnvelope({ eventId: 'evt-2', type: 'RunCompleted' })
 
-    const { client, close } = await setupServer((req, res) => {
+    let requestBody = ''
+    const { client, close } = await setupServer(async (req, res) => {
       if (req.method === 'POST' && req.url === '/chat') {
+        for await (const chunk of req) {
+          requestBody += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+        }
         writeSseHeaders(res)
         res.write(sseEvent(env1))
         res.write(sseEvent(env2))
@@ -135,18 +162,24 @@ describe('DaemonClient', () => {
     closeServer = close
 
     const collected: DomainEventEnvelope[] = []
-    for await (const env of client.sendChat('hi')) {
+    for await (const env of client.sendChat('hi', 'session_abc' as SessionId)) {
       collected.push(env)
     }
 
     expect(collected).toEqual([env1, env2])
+    expect(JSON.parse(requestBody)).toEqual({ prompt: 'hi', sessionId: 'session_abc' })
   })
 
-  it('sendChat throws on BUSY error from SSE', async () => {
+  it('sendChat throws on active session concurrency error from SSE', async () => {
     const { client, close } = await setupServer((req, res) => {
       if (req.method === 'POST' && req.url === '/chat') {
         writeSseHeaders(res)
-        res.write(sseError('BUSY', 'A chat is already in progress'))
+        res.write(
+          sseError(
+            'ACTIVE_SESSION_CONCURRENCY_UNSUPPORTED',
+            'The daemon currently supports only one active session at a time'
+          )
+        )
         res.end()
       } else {
         res.writeHead(404)
@@ -156,10 +189,30 @@ describe('DaemonClient', () => {
     closeServer = close
 
     await expect(async () => {
-      for await (const _ of client.sendChat('hi')) {
+      for await (const _ of client.sendChat('hi', 'session_busy' as SessionId)) {
         // consume
       }
-    }).rejects.toThrow('A chat is already in progress')
+    }).rejects.toThrow('The daemon currently supports only one active session at a time')
+  })
+
+  it('sendChat throws on SESSION_NOT_FOUND error from SSE', async () => {
+    const { client, close } = await setupServer((req, res) => {
+      if (req.method === 'POST' && req.url === '/chat') {
+        writeSseHeaders(res)
+        res.write(sseError('SESSION_NOT_FOUND', 'Session "session_missing" does not exist'))
+        res.end()
+      } else {
+        res.writeHead(404)
+        res.end()
+      }
+    })
+    closeServer = close
+
+    await expect(async () => {
+      for await (const _ of client.sendChat('hi', 'session_missing' as SessionId)) {
+        // consume
+      }
+    }).rejects.toThrow('Session "session_missing" does not exist')
   })
 
   it('sendChat throws on INTERNAL error from SSE', async () => {
@@ -176,7 +229,7 @@ describe('DaemonClient', () => {
     closeServer = close
 
     await expect(async () => {
-      for await (const _ of client.sendChat('hi')) {
+      for await (const _ of client.sendChat('hi', 'session_internal' as SessionId)) {
         // consume
       }
     }).rejects.toThrow('Something went wrong')
@@ -210,7 +263,7 @@ describe('DaemonClient', () => {
     closeServer = close
 
     await expect(async () => {
-      for await (const _ of client.sendChat('hi')) {
+      for await (const _ of client.sendChat('hi', 'session_failed' as SessionId)) {
         // consume
       }
     }).rejects.toThrow('Request to /chat failed with status 500')
