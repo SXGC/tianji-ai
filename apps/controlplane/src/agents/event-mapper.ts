@@ -272,12 +272,17 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
     }
 
     case 'GraphRunCompleted': {
-      const p = env.payload as { graphId: string; finalState: unknown }
+      const p = env.payload as { graphId: string; finalState: unknown; usage?: unknown }
       return [
         ev({
           type: EventType.STEP_FINISHED,
           stepName: `graph:${p.graphId}`,
-          metadata: { stepKind: 'graph', graphId: p.graphId, finalState: p.finalState },
+          metadata: {
+            stepKind: 'graph',
+            graphId: p.graphId,
+            finalState: p.finalState,
+            ...(p.usage === undefined ? {} : { usage: p.usage }),
+          },
         }),
       ]
     }
@@ -299,7 +304,7 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
     }
 
     case 'GraphNodeCompleted': {
-      const p = env.payload as { graphId: string; nodeId: string; output: unknown }
+      const p = env.payload as { graphId: string; nodeId: string; output: unknown; usage?: unknown }
       return [
         ev({
           type: EventType.STEP_FINISHED,
@@ -309,13 +314,14 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
             graphId: p.graphId,
             nodeId: p.nodeId,
             output: p.output,
+            ...(p.usage === undefined ? {} : { usage: p.usage }),
           },
         }),
       ]
     }
 
     case 'GraphNodeFailed': {
-      const p = env.payload as { graphId: string; nodeId: string; error: unknown }
+      const p = env.payload as { graphId: string; nodeId: string; error: unknown; usage?: unknown }
       return [
         ev({
           type: EventType.STEP_FINISHED,
@@ -325,6 +331,7 @@ export function mapToAgUi(env: DomainEventEnvelope, ctx: EventMapperContext): Ba
             graphId: p.graphId,
             nodeId: p.nodeId,
             error: p.error,
+            ...(p.usage === undefined ? {} : { usage: p.usage }),
           },
         }),
       ]

@@ -1,8 +1,9 @@
+import { FakeListChatModel } from '@langchain/core/utils/testing'
 import type { SessionRuntime } from '@tianji/runtime'
 import * as runtimeModule from '@tianji/runtime'
 import { FileSnapshotStore } from '@tianji/runtime'
 import type { ObserverLogger } from '@tianji/runtime'
-import type { GraphRunDomainEvent } from '@tianji/shared'
+import type { DomainEvent, GraphRunDomainEvent, RunId, SessionId, TokenUsage } from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { LoadedAgentContext } from '../context.js'
@@ -12,6 +13,7 @@ import type {
   NodeExecutorContext,
   OrchestrationGraph,
 } from '../orchestration/index.js'
+import { createDeepagentsExecutorFactory } from '../orchestration/index.js'
 import {
   createAgentRuntime,
   createAgentSession,
@@ -301,6 +303,87 @@ function buildSingleNodeGraph(): OrchestrationGraph {
   }
 }
 
+function createNodeRuntimeWithUsage(options: {
+  readonly sessionId: SessionId
+  readonly runId: RunId
+  readonly text: string
+  readonly runUsage: TokenUsage
+  readonly sessionUsage: TokenUsage
+}): SessionRuntime {
+  return {
+    createSession: vi.fn(async () => ({
+      sessionId: options.sessionId,
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+      metadata: {
+        usage: options.sessionUsage,
+      },
+    })),
+    openSession: vi.fn(async () => ({
+      sessionId: options.sessionId,
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+      metadata: {
+        usage: options.sessionUsage,
+      },
+    })),
+    closeSession: vi.fn(async () => ({
+      sessionId: options.sessionId,
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+      metadata: {
+        usage: options.sessionUsage,
+      },
+    })),
+    getSessionSnapshot: vi.fn(async () => ({
+      sessionId: options.sessionId,
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+      metadata: {
+        usage: options.sessionUsage,
+      },
+    })),
+    getRunSnapshot: vi.fn(async () => ({
+      runId: options.runId,
+      sessionId: options.sessionId,
+      status: 'completed',
+      triggerType: 'new',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+      pendingOperations: [],
+      metadata: {
+        usage: options.runUsage,
+      },
+    })),
+    runTurn: vi.fn(async () => options.runId),
+    resumeRun: vi.fn(async () => options.runId),
+    streamEvents: vi.fn(async function* () {
+      yield {
+        type: 'MessageCompleted',
+        runId: options.runId,
+        message: {
+          id: `msg_${options.runId}`,
+          role: 'assistant',
+          content: [{ type: 'text', text: options.text }],
+          createdAt: Date.now(),
+        },
+        timestamp: Date.now(),
+      } as DomainEvent
+      yield {
+        type: 'RunCompleted',
+        runId: options.runId,
+        timestamp: Date.now(),
+      } as DomainEvent
+    }),
+    cancelRun: vi.fn(() => false),
+  }
+}
+
 describe('agent session queryWithGraph', () => {
   /**
    * 准备一个已经 mock 过 createSessionRuntime 的 session 实例。
@@ -381,6 +464,65 @@ describe('agent session queryWithGraph', () => {
     expect((completed as { finalState: Record<string, unknown> }).finalState.result).toBe(
       'ran-worker'
     )
+
+    createSessionRuntimeSpy.mockRestore()
+  })
+
+  it('同一 session 连续两次 queryWithGraph 时，第二次 GraphRunCompleted 仍只带本次 graph usage', async () => {
+    const runtime = createStubRuntime()
+    const graphRunUsage = { inputTokens: 4, outputTokens: 6, totalTokens: 10 }
+    const sessionUsageRun1 = { inputTokens: 40, outputTokens: 60, totalTokens: 100 }
+    const sessionUsageRun2 = { inputTokens: 80, outputTokens: 120, totalTokens: 200 }
+    const nodeRuntime1 = createNodeRuntimeWithUsage({
+      sessionId: 'session_test' as SessionId,
+      runId: 'run_graph_node_1' as RunId,
+      text: 'first result',
+      runUsage: graphRunUsage,
+      sessionUsage: sessionUsageRun1,
+    })
+    const nodeRuntime2 = createNodeRuntimeWithUsage({
+      sessionId: 'session_test' as SessionId,
+      runId: 'run_graph_node_2' as RunId,
+      text: 'second result',
+      runUsage: graphRunUsage,
+      sessionUsage: sessionUsageRun2,
+    })
+    const createSessionRuntimeSpy = vi
+      .spyOn(runtimeModule, 'createSessionRuntime')
+      .mockImplementationOnce(() => runtime)
+      .mockImplementationOnce(() => nodeRuntime1)
+      .mockImplementationOnce(() => nodeRuntime2)
+    const session = await createAgentSession(createFakeContext())
+    const realFactory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['unused'] }),
+    })
+
+    const firstRunEvents: GraphRunDomainEvent[] = []
+    for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
+      compileOptions: { agentExecutorFactory: realFactory },
+    })) {
+      firstRunEvents.push(event as GraphRunDomainEvent)
+    }
+
+    const secondRunEvents: GraphRunDomainEvent[] = []
+    for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
+      compileOptions: { agentExecutorFactory: realFactory },
+    })) {
+      secondRunEvents.push(event as GraphRunDomainEvent)
+    }
+
+    const firstCompleted = firstRunEvents.find((event) => event.type === 'GraphRunCompleted')
+    const secondCompleted = secondRunEvents.find((event) => event.type === 'GraphRunCompleted')
+
+    expect(firstCompleted).toMatchObject({
+      usage: graphRunUsage,
+    })
+    expect(secondCompleted).toMatchObject({
+      usage: graphRunUsage,
+    })
+    expect(secondCompleted).not.toMatchObject({
+      usage: sessionUsageRun2,
+    })
 
     createSessionRuntimeSpy.mockRestore()
   })

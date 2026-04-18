@@ -420,6 +420,294 @@ describe('createDeepagentsExecutorFactory', () => {
     expect(types).toContain('GraphNodeCompleted')
   })
 
+  it('GraphNodeCompleted 只带当前节点 run snapshot 的 usage', async () => {
+    const events: GraphRunDomainEvent[] = []
+    const sessionId = 'session_usage_source' as SessionId
+    const nodeRunId = 'run_node_usage' as RunId
+    vi.mocked(runtimeModule.createSessionRuntime).mockReturnValue({
+      createSession: vi.fn(async () => ({ sessionId })),
+      openSession: vi.fn(async () => undefined),
+      closeSession: vi.fn(async () => undefined),
+      getSessionSnapshot: vi.fn(async () => ({
+        sessionId,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        metadata: {
+          usage: { inputTokens: 100, outputTokens: 100, totalTokens: 200 },
+        },
+      })),
+      getRunSnapshot: vi.fn(async () => ({
+        runId: nodeRunId,
+        sessionId,
+        status: 'completed',
+        triggerType: 'new',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        pendingOperations: [],
+        metadata: {
+          usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 },
+        },
+      })),
+      runTurn: vi.fn(async () => nodeRunId),
+      resumeRun: vi.fn(async () => nodeRunId),
+      cancelRun: vi.fn(() => false),
+      streamEvents: vi.fn(async function* () {
+        yield {
+          type: 'MessageCompleted',
+          runId: nodeRunId,
+          message: {
+            id: 'msg_assistant_usage',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+            createdAt: Date.now(),
+          },
+          timestamp: Date.now(),
+        } as DomainEvent
+        yield {
+          type: 'RunCompleted',
+          runId: nodeRunId,
+          timestamp: Date.now(),
+        } as DomainEvent
+      }),
+    } as unknown as runtimeModule.SessionRuntime)
+
+    const action = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ignored'] }),
+    })(
+      makeAgentNode({ input: ['q'], output: ['a'] }),
+      makeCtx({
+        emitGraphEvent: (event) => events.push(event),
+      })
+    )
+
+    await action({ q: 'hello' }, {} as never)
+
+    expect(events.find((event) => event.type === 'GraphNodeCompleted')).toMatchObject({
+      usage: { inputTokens: 11, outputTokens: 7, totalTokens: 18 },
+    })
+    expect(events.find((event) => event.type === 'GraphNodeCompleted')).not.toMatchObject({
+      usage: { inputTokens: 100, outputTokens: 100, totalTokens: 200 },
+    })
+  })
+
+  it('GraphNodeCompleted 会透传 run snapshot usage 的 cache token 字段', async () => {
+    const events: GraphRunDomainEvent[] = []
+    const sessionId = 'session_usage_cache' as SessionId
+    const nodeRunId = 'run_node_cache' as RunId
+    vi.mocked(runtimeModule.createSessionRuntime).mockReturnValue({
+      createSession: vi.fn(async () => ({ sessionId })),
+      openSession: vi.fn(async () => undefined),
+      closeSession: vi.fn(async () => undefined),
+      getSessionSnapshot: vi.fn(async () => ({
+        sessionId,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        metadata: {
+          usage: {
+            inputTokens: 100,
+            outputTokens: 100,
+            totalTokens: 200,
+            cacheReadTokens: 50,
+            cacheCreationTokens: 20,
+          },
+        },
+      })),
+      getRunSnapshot: vi.fn(async () => ({
+        runId: nodeRunId,
+        sessionId,
+        status: 'completed',
+        triggerType: 'new',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        pendingOperations: [],
+        metadata: {
+          usage: {
+            inputTokens: 11,
+            outputTokens: 7,
+            totalTokens: 18,
+            cacheReadTokens: 5,
+            cacheCreationTokens: 2,
+          },
+        },
+      })),
+      runTurn: vi.fn(async () => nodeRunId),
+      resumeRun: vi.fn(async () => nodeRunId),
+      cancelRun: vi.fn(() => false),
+      streamEvents: vi.fn(async function* () {
+        yield {
+          type: 'MessageCompleted',
+          runId: nodeRunId,
+          message: {
+            id: 'msg_assistant_cache',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+            createdAt: Date.now(),
+          },
+          timestamp: Date.now(),
+        } as DomainEvent
+        yield {
+          type: 'RunCompleted',
+          runId: nodeRunId,
+          timestamp: Date.now(),
+        } as DomainEvent
+      }),
+    } as unknown as runtimeModule.SessionRuntime)
+
+    const action = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ignored'] }),
+    })(
+      makeAgentNode({ input: ['q'], output: ['a'] }),
+      makeCtx({
+        emitGraphEvent: (event) => events.push(event),
+      })
+    )
+
+    await action({ q: 'hello' }, {} as never)
+
+    expect(events.find((event) => event.type === 'GraphNodeCompleted')).toMatchObject({
+      usage: {
+        inputTokens: 11,
+        outputTokens: 7,
+        totalTokens: 18,
+        cacheReadTokens: 5,
+        cacheCreationTokens: 2,
+      },
+    })
+  })
+
+  it('GraphNodeFailed 会带上当前节点 run snapshot 的 usage', async () => {
+    const events: GraphRunDomainEvent[] = []
+    const sessionId = 'session_failed_usage' as SessionId
+    const nodeRunId = 'run_node_failed_usage' as RunId
+    vi.mocked(runtimeModule.createSessionRuntime).mockReturnValue({
+      createSession: vi.fn(async () => ({ sessionId })),
+      openSession: vi.fn(async () => undefined),
+      closeSession: vi.fn(async () => undefined),
+      getSessionSnapshot: vi.fn(async () => ({
+        sessionId,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        metadata: {
+          usage: {
+            inputTokens: 100,
+            outputTokens: 100,
+            totalTokens: 200,
+            cacheReadTokens: 50,
+            cacheCreationTokens: 20,
+          },
+        },
+      })),
+      getRunSnapshot: vi.fn(async () => ({
+        runId: nodeRunId,
+        sessionId,
+        status: 'failed',
+        triggerType: 'new',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        pendingOperations: [],
+        metadata: {
+          usage: {
+            inputTokens: 8,
+            outputTokens: 3,
+            totalTokens: 11,
+            cacheReadTokens: 4,
+            cacheCreationTokens: 1,
+          },
+        },
+      })),
+      runTurn: vi.fn(async () => nodeRunId),
+      resumeRun: vi.fn(async () => nodeRunId),
+      cancelRun: vi.fn(() => false),
+      streamEvents: vi.fn(async function* () {
+        yield* [] as DomainEvent[]
+        throw new Error('stream failed')
+      }),
+    } as unknown as runtimeModule.SessionRuntime)
+
+    const action = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ignored'] }),
+    })(
+      makeAgentNode({ input: ['q'], output: ['a'] }),
+      makeCtx({
+        emitGraphEvent: (event) => events.push(event),
+      })
+    )
+
+    await expect(action({ q: 'hello' }, {} as never)).rejects.toThrow('stream failed')
+
+    expect(events.find((event) => event.type === 'GraphNodeFailed')).toMatchObject({
+      usage: {
+        inputTokens: 8,
+        outputTokens: 3,
+        totalTokens: 11,
+        cacheReadTokens: 4,
+        cacheCreationTokens: 1,
+      },
+    })
+    expect(events.find((event) => event.type === 'GraphNodeFailed')).not.toMatchObject({
+      usage: {
+        inputTokens: 100,
+        outputTokens: 100,
+        totalTokens: 200,
+        cacheReadTokens: 50,
+        cacheCreationTokens: 20,
+      },
+    })
+  })
+
+  it('读取失败路径 usage 失败时，仍然保留原始错误并发出 GraphNodeFailed', async () => {
+    const events: GraphRunDomainEvent[] = []
+    const sessionId = 'session_failed_usage_read_error' as SessionId
+    const nodeRunId = 'run_node_failed_usage_read_error' as RunId
+    vi.mocked(runtimeModule.createSessionRuntime).mockReturnValue({
+      createSession: vi.fn(async () => ({ sessionId })),
+      openSession: vi.fn(async () => undefined),
+      closeSession: vi.fn(async () => undefined),
+      getSessionSnapshot: vi.fn(async () => ({
+        sessionId,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+      })),
+      getRunSnapshot: vi.fn(async () => {
+        throw new Error('snapshot read failed')
+      }),
+      runTurn: vi.fn(async () => nodeRunId),
+      resumeRun: vi.fn(async () => nodeRunId),
+      cancelRun: vi.fn(() => false),
+      streamEvents: vi.fn(async function* () {
+        yield* [] as DomainEvent[]
+        throw new Error('stream failed')
+      }),
+    } as unknown as runtimeModule.SessionRuntime)
+
+    const action = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ignored'] }),
+    })(
+      makeAgentNode({ input: ['q'], output: ['a'] }),
+      makeCtx({
+        emitGraphEvent: (event) => events.push(event),
+      })
+    )
+
+    await expect(action({ q: 'hello' }, {} as never)).rejects.toThrow('stream failed')
+
+    const failedEvent = events.find((event) => event.type === 'GraphNodeFailed')
+    expect(failedEvent).toBeDefined()
+    expect(failedEvent).toMatchObject({
+      error: {
+        message: 'stream failed',
+      },
+    })
+    expect(failedEvent).not.toHaveProperty('usage')
+  })
+
   it('input 字段不存在时抛错', async () => {
     const factory = createDeepagentsExecutorFactory({
       resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),

@@ -523,6 +523,29 @@ cancel 是唯一一条要求命令下行 + 事件回传的双向链路。其他�
 - **busy 门控对 cancel 失效**：`tryLeasePendingCancelCommand` 独立于普通命令的 busy 检查，因为取消在节点 busy 时才有意义。
 - **RUN_FINISHED 由 tianji-agent 发，不由 event-mapper 发**：event-mapper 没有 `threadId` / `runId` 上下文，只能发 `STATE_DELTA`；`RUN_FINISHED` 需要 run 维度信息，由 tianji-agent 在 `TaskCancelled` / `TaskCompleted` 时统一兜底。
 
+### 11.3 GraphRun usage 口径
+
+GraphRun 相关事件里的 `usage` 有两层含义，不能混在一起看：
+
+| 事件层级 | 字段含义 |
+|---|---|
+| `GraphNodeCompleted.usage` / `GraphNodeFailed.usage` | 单个节点这一次终态事件自己的 node-level delta |
+| `GraphRunCompleted.usage` / `GraphRunFailed.usage` / `GraphRunCancelled.usage` | 本次 graph run 内已累计的 graph-level total |
+
+这里的 graph-level total 只来自本次 graph run 内节点终态事件上的 `usage` 累加：
+
+```text
+GraphNodeCompleted.usage / GraphNodeFailed.usage
+  -> graph-runner 累计
+  -> GraphRunCompleted / GraphRunFailed / GraphRunCancelled.usage
+```
+
+几条硬约束：
+
+- graph 终态 `usage` 不是 session 累计 usage。
+- 未知 usage 一律保持 `undefined`，不估算，不补 0。
+- controlplane 的 `event-mapper` 只透传 `usage`，不重算，不修正。
+
 ---
 
 ## 12. 与其他文档的关系

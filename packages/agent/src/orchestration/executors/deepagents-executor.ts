@@ -35,6 +35,7 @@ import type {
   ResolvedNodeCapabilities,
   RunId,
   SessionId,
+  TokenUsage,
 } from '@tianji/shared'
 
 import { type CallMcpTargetPolicy, createCallMcpTool } from '../../mcp/call-mcp-tool.js'
@@ -131,6 +132,7 @@ export function createDeepagentsExecutorFactory(
 
       let runtime: SessionRuntime | undefined
       let currentSessionId: SessionId | undefined
+      let nodeRunId: RunId | undefined
       let shouldCloseTemporarySession = false
 
       try {
@@ -153,13 +155,13 @@ export function createDeepagentsExecutorFactory(
         }
         options.onRuntimeOptions?.(runOptions)
 
-        const runId = await runtime.runTurn(runOptions)
+        nodeRunId = await runtime.runTurn(runOptions)
         const finalAssistantText = await collectFinalAssistantText(
           runtime,
-          runId,
+          nodeRunId,
           ctx.emitRuntimeEvent
         )
-
+        const usage = await readRunUsage(runtime, nodeRunId)
         const stateUpdate = buildStateUpdateFromText(finalAssistantText, node.output)
 
         ctx.emitGraphEvent({
@@ -169,6 +171,7 @@ export function createDeepagentsExecutorFactory(
           nodeId: node.id,
           nodeKind: 'agent',
           output: stateUpdate,
+          ...(usage === undefined ? {} : { usage }),
           timestamp: Date.now(),
         })
         return stateUpdate
@@ -176,6 +179,7 @@ export function createDeepagentsExecutorFactory(
         // 把底层错误归一化为 TianjiError 后广播 failed 事件，再把原始错误再抛出，
         // 让 LangGraph 正常结束 run 并让上层 runner 走 finished reject 路径。
         const tianjiError = toTianjiError(error_)
+        const usage = runtime === undefined ? undefined : await tryReadRunUsage(runtime, nodeRunId)
         ctx.emitGraphEvent({
           type: 'GraphNodeFailed',
           runId: ctx.runId,
@@ -183,6 +187,7 @@ export function createDeepagentsExecutorFactory(
           nodeId: node.id,
           nodeKind: 'agent',
           error: tianjiError,
+          ...(usage === undefined ? {} : { usage }),
           timestamp: Date.now(),
         })
         throw error_
@@ -235,6 +240,64 @@ async function openOrCreateSession(
   }
   const session = await runtime.createSession({})
   return session.sessionId
+}
+
+/**
+ * 失败路径里 best-effort 读取 usage，不能覆盖原始业务错误。
+ */
+async function tryReadRunUsage(
+  runtime: SessionRuntime,
+  runId: RunId | undefined
+): Promise<TokenUsage | undefined> {
+  try {
+    return await readRunUsage(runtime, runId)
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 只从当前节点 run snapshot 中读取 usage，避免混入 session 累计 usage。
+ */
+async function readRunUsage(
+  runtime: SessionRuntime,
+  runId: RunId | undefined
+): Promise<TokenUsage | undefined> {
+  if (runId === undefined) {
+    return undefined
+  }
+
+  const usage = (await runtime.getRunSnapshot(runId))?.metadata?.usage
+  if (typeof usage !== 'object' || usage === null) {
+    return undefined
+  }
+
+  const candidate = usage as {
+    inputTokens?: unknown
+    outputTokens?: unknown
+    totalTokens?: unknown
+    cacheReadTokens?: unknown
+    cacheCreationTokens?: unknown
+  }
+  if (
+    typeof candidate.inputTokens !== 'number' ||
+    typeof candidate.outputTokens !== 'number' ||
+    typeof candidate.totalTokens !== 'number'
+  ) {
+    return undefined
+  }
+
+  return {
+    inputTokens: candidate.inputTokens,
+    outputTokens: candidate.outputTokens,
+    totalTokens: candidate.totalTokens,
+    ...(typeof candidate.cacheReadTokens === 'number'
+      ? { cacheReadTokens: candidate.cacheReadTokens }
+      : {}),
+    ...(typeof candidate.cacheCreationTokens === 'number'
+      ? { cacheCreationTokens: candidate.cacheCreationTokens }
+      : {}),
+  }
 }
 
 /**
