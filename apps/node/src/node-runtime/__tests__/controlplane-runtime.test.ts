@@ -14,7 +14,7 @@ import { createControlPlaneRuntime } from '../controlplane-runtime.js'
 describe('createControlPlaneRuntime', () => {
   it('should wire command polling to task execution', async () => {
     const command: Command = {
-      commandId: 'command-001' as never,
+      commandId: createCommandId('command-001'),
       nodeId: createNodeId('node-001'),
       type: 'task.run',
       state: 'pending',
@@ -102,7 +102,7 @@ describe('createControlPlaneUnifiedEntry session handling', () => {
 
   it('uses ensureAgentSession when sessionIds is provided', async () => {
     const fakeSession = {
-      sessionId: 'session_existing' as never,
+      sessionId: createSessionId('session_existing'),
       queryWithGraph: vi.fn(async function* () {
         yield { runId: 'run-001' } as never
         yield { type: 'GraphRunCompleted', runId: 'run-001', timestamp: Date.now() } as never
@@ -148,7 +148,7 @@ describe('createControlPlaneUnifiedEntry session handling', () => {
 
   it('uses createAgentSession when sessionIds is absent', async () => {
     const fakeSession = {
-      sessionId: 'session_new' as never,
+      sessionId: createSessionId('session_new'),
       queryWithGraph: vi.fn(async function* () {
         yield { runId: 'run-002' } as never
         yield { type: 'GraphRunCompleted', runId: 'run-002', timestamp: Date.now() } as never
