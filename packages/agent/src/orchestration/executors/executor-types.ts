@@ -1,6 +1,7 @@
 import type { LangGraphRunnableConfig } from '@langchain/langgraph'
 import type { ObserverLogger } from '@tianji/observer'
-import type { DomainEvent, GraphRunDomainEvent, RunId } from '@tianji/shared'
+import type { SnapshotStore } from '@tianji/runtime'
+import type { DomainEvent, GraphRunDomainEvent, RunId, SessionId } from '@tianji/shared'
 import type { AcpAgentNode, AgentNode } from '../graph-schema.js'
 
 /**
@@ -18,6 +19,10 @@ export interface NodeExecutorContext {
   readonly emitGraphEvent: (event: GraphRunDomainEvent) => void
   readonly emitRuntimeEvent?: (event: DomainEvent) => void
   readonly abortSignal?: AbortSignal
+  /** 跨轮持久化的会话 ID，由上层 session facade 注入。未设置时节点执行器创建临时会话。 */
+  readonly sessionId?: SessionId
+  /** 与 sessionId 配套的持久化存储，注入后节点执行器使用它替换默认的 InMemorySnapshotStore。 */
+  readonly snapshotStore?: SnapshotStore
 }
 
 /**

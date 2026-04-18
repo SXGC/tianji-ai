@@ -18,11 +18,12 @@ import {
   type SessionRuntime,
   type SessionRuntimeDeepagentsConfig,
   type SessionRuntimeOptions,
+  type SnapshotStore,
   type ToolCatalog,
   createSessionRuntime,
 } from '@tianji/runtime'
 import { TianjiError } from '@tianji/shared'
-import type { AppMessage, DomainEvent, RunId } from '@tianji/shared'
+import type { AppMessage, DomainEvent, RunId, SessionId } from '@tianji/shared'
 
 import type { AgentNode } from '../graph-schema.js'
 import {
@@ -88,8 +89,8 @@ export function createDeepagentsExecutorFactory(
       })
 
       try {
-        const runtime = buildRuntimeForNode(node, options)
-        const session = await runtime.createSession({})
+        const runtime = buildRuntimeForNode(node, options, ctx.snapshotStore)
+        const currentSessionId = await openOrCreateSession(runtime, ctx.sessionId)
 
         const userMessage: AppMessage = {
           id: `msg_user_${startTimestamp}`,
@@ -99,7 +100,7 @@ export function createDeepagentsExecutorFactory(
         }
 
         const runOptions: RunTurnOptions = {
-          sessionId: session.sessionId,
+          sessionId: currentSessionId,
           message: userMessage,
           systemPrompt: fullSystemPrompt,
           abortSignal: ctx.abortSignal,
@@ -125,7 +126,7 @@ export function createDeepagentsExecutorFactory(
           timestamp: Date.now(),
         })
 
-        await runtime.closeSession(session.sessionId)
+        await runtime.closeSession(currentSessionId)
         return stateUpdate
       } catch (error_) {
         // 把底层错误归一化为 TianjiError 后广播 failed 事件，再把原始错误再抛出，
@@ -162,11 +163,37 @@ function toTianjiError(caught: unknown): TianjiError {
 }
 
 /**
+ * 打开已有 session 或新建一个。
+ *
+ * 若提供了 sessionId，尝试 openSession（加载历史）；SESSION_NOT_FOUND 时用同一 ID 新建。
+ * 未提供 sessionId 时创建临时匿名 session（与旧行为兼容）。
+ */
+async function openOrCreateSession(
+  runtime: SessionRuntime,
+  sessionId: SessionId | undefined
+): Promise<SessionId> {
+  if (sessionId !== undefined) {
+    try {
+      await runtime.openSession(sessionId)
+    } catch (err) {
+      if ((err as { code?: string }).code !== 'SESSION_NOT_FOUND') throw err
+      await runtime.createSession({ sessionId })
+    }
+    return sessionId
+  }
+  const session = await runtime.createSession({})
+  return session.sessionId
+}
+
+/**
  * 根据节点配置构造一个全新的 SessionRuntime，实现节点间线程隔离。
+ *
+ * @param snapshotStore - 由上层注入的持久化存储；未提供时使用 InMemorySnapshotStore（临时）。
  */
 function buildRuntimeForNode(
   node: AgentNode,
-  options: CreateDeepagentsExecutorFactoryOptions
+  options: CreateDeepagentsExecutorFactoryOptions,
+  snapshotStore?: SnapshotStore
 ): SessionRuntime {
   // runtime 侧要求 subagents 元素具备 `[key: string]: unknown` 索引签名；
   // agent-schema 定义的 SubAgentDef 字段都属于 unknown 子集，显式复制到字面量即可满足。
@@ -186,7 +213,7 @@ function buildRuntimeForNode(
   }
   const sessionOptions: SessionRuntimeOptions = {
     deepagents: deepagentsConfig,
-    snapshotStore: new InMemorySnapshotStore(),
+    snapshotStore: snapshotStore ?? new InMemorySnapshotStore(),
     toolCatalog: options.toolCatalog,
     logger: options.observer,
   }

@@ -4,6 +4,7 @@ import { errorToLogData } from '@tianji/observer'
 import {
   type ObserverLogger,
   type SessionRuntime,
+  type SnapshotStore,
   ToolRegistry,
   createSessionRuntime,
 } from '@tianji/runtime'
@@ -56,7 +57,7 @@ export interface ChatWithGraphOptions {
   readonly initialState?: Record<string, unknown>
   readonly compileOptions: Omit<
     CompileOptions,
-    'runId' | 'observer' | 'emitGraphEvent' | 'abortSignal'
+    'runId' | 'observer' | 'emitGraphEvent' | 'abortSignal' | 'sessionId' | 'snapshotStore'
   >
 }
 
@@ -74,7 +75,8 @@ export interface AgentSession {
 async function createSessionFacade(
   sessionId: SessionId,
   runtime: SessionRuntime,
-  options?: AgentRuntimeOptions
+  options?: AgentRuntimeOptions,
+  snapshotStore?: SnapshotStore
 ): Promise<AgentSession> {
   const activeGraphControllers = new Set<AbortController>()
 
@@ -116,7 +118,11 @@ async function createSessionFacade(
           graph,
           runId,
           initialState: graphOptions.initialState,
-          compileOptions: graphOptions.compileOptions,
+          compileOptions: {
+            ...graphOptions.compileOptions,
+            sessionId,
+            snapshotStore,
+          },
           observer: options?.logger,
           abortSignal: controller.signal,
           onMermaid: (diagram) => {
@@ -205,7 +211,7 @@ export async function createAgentSession(
     timestamp: Date.now(),
   })
 
-  return createSessionFacade(sessionId, runtime, options)
+  return createSessionFacade(sessionId, runtime, options, context.snapshotStore)
 }
 
 /**
@@ -224,7 +230,7 @@ export async function openAgentSession(
   const { sessionId } = openOptions
   const runtime = await createAgentRuntime(context, runtimeOptions)
   await runtime.openSession(sessionId)
-  return createSessionFacade(sessionId, runtime, runtimeOptions)
+  return createSessionFacade(sessionId, runtime, runtimeOptions, context.snapshotStore)
 }
 
 /**
@@ -259,7 +265,7 @@ export async function ensureAgentSession(
       timestamp: Date.now(),
     })
   }
-  return createSessionFacade(sessionId, runtime, options)
+  return createSessionFacade(sessionId, runtime, options, context.snapshotStore)
 }
 
 /**
@@ -292,7 +298,7 @@ export async function resumeAgentSession(
     timestamp: Date.now(),
   })
 
-  return createSessionFacade(sessionId, runtime, runtimeOptions)
+  return createSessionFacade(sessionId, runtime, runtimeOptions, context.snapshotStore)
 }
 
 function readProviderBaseUrl(context: LoadedAgentContext): string | undefined {

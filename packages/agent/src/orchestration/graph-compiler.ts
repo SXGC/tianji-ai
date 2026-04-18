@@ -1,6 +1,7 @@
 import { type CompiledStateGraph, END, START, Send, StateGraph } from '@langchain/langgraph'
 import type { ObserverLogger } from '@tianji/observer'
-import type { DomainEvent, GraphRunDomainEvent, RunId } from '@tianji/shared'
+import type { SnapshotStore } from '@tianji/runtime'
+import type { DomainEvent, GraphRunDomainEvent, RunId, SessionId } from '@tianji/shared'
 import type {
   AcpExecutorFactory,
   AgentExecutorFactory,
@@ -32,6 +33,10 @@ export interface CompileOptions {
    * 会被塞入 NodeExecutorContext，让节点执行器在 runtime 调用处透传。
    */
   readonly abortSignal?: AbortSignal
+  /** 跨轮持久化的会话 ID，透传至 NodeExecutorContext 供执行器做 open-or-create。 */
+  readonly sessionId?: SessionId
+  /** 与 sessionId 配套的持久化快照存储，注入后执行器不再使用 InMemorySnapshotStore。 */
+  readonly snapshotStore?: SnapshotStore
 }
 
 /**
@@ -65,6 +70,8 @@ export function compileOrchestrationGraph(
     emitGraphEvent: options.emitGraphEvent ?? (() => undefined),
     emitRuntimeEvent: options.emitRuntimeEvent,
     abortSignal: options.abortSignal,
+    sessionId: options.sessionId,
+    snapshotStore: options.snapshotStore,
   }
 
   // Step 3: 添加节点
