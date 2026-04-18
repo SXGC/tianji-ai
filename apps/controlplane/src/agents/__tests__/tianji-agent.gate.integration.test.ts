@@ -69,7 +69,7 @@ describe('TianjiAgent × AgUiEventGate 集成', () => {
     const bus = createEventBus({ lagSink: () => undefined, errorSink: () => undefined })
     const sink: ObserverMemorySink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, logger)
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', 'session_gate', bus, logger)
 
     const stream$ = agent.run({
       threadId: 'session_gate',
@@ -77,7 +77,7 @@ describe('TianjiAgent × AgUiEventGate 集成', () => {
       messages: [{ id: 'u1', role: 'user', content: 'hi' }],
       tools: [],
       context: [],
-      forwardedProps: { sessionId: 'session_gate' },
+      forwardedProps: {},
       state: {},
     })
     // lastValueFrom 立即订阅 Observable，Observable 工厂内的 DB INSERT 同步执行

@@ -49,12 +49,41 @@ describe('TianjiAgent', () => {
     })
   }
 
+  it('sessionId 来自构造函数，forwardedProps 不含 sessionId 时仍能正常启动', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+
+    const bus = createTestBus()
+    const agent = new TianjiAgent(
+      db,
+      'node-1',
+      'agent-1',
+      'session_from_ctor',
+      bus,
+      makeTestLogger()
+    )
+
+    const firstEvent = await firstValueFrom(
+      agent.run({
+        threadId: 'session_from_ctor',
+        runId: 'run_from_ctor',
+        messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
+        tools: [],
+        context: [],
+        forwardedProps: {},
+        state: {},
+      })
+    )
+
+    expect(firstEvent).toMatchObject({ type: 'RUN_STARTED', threadId: 'session_from_ctor' })
+  })
+
   it('clone 后仍保留运行所需的节点和代理信息', async () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
 
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', 'session_clone', bus, makeTestLogger())
     const clonedAgent = agent.clone()
 
     await expect(
@@ -65,7 +94,7 @@ describe('TianjiAgent', () => {
           messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
           tools: [],
           context: [],
-          forwardedProps: { sessionId: 'session_clone' },
+          forwardedProps: {},
           state: {},
         })
       )
@@ -79,7 +108,14 @@ describe('TianjiAgent', () => {
     setupOnlineNode('node-1')
 
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+    const agent = new TianjiAgent(
+      db,
+      'node-1',
+      'agent-1',
+      'session_run_started',
+      bus,
+      makeTestLogger()
+    )
 
     const firstEvent = await firstValueFrom(
       agent.run({
@@ -99,12 +135,12 @@ describe('TianjiAgent', () => {
     })
   })
 
-  it('uses sessionId from forwarded props as AG-UI threadId', async () => {
+  it('uses sessionId from constructor as AG-UI threadId', async () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
 
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', 'session_123', bus, makeTestLogger())
 
     const firstEvent = await firstValueFrom(
       agent.run({
@@ -126,7 +162,7 @@ describe('TianjiAgent', () => {
     setupOnlineNode('node-1')
 
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', 'session_payload', bus, makeTestLogger())
 
     await firstValueFrom(
       agent.run({
@@ -155,7 +191,7 @@ describe('TianjiAgent', () => {
     setupOnlineNode('node-1')
 
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', 'session_owner', bus, makeTestLogger())
 
     await firstValueFrom(
       agent.run({
@@ -188,7 +224,14 @@ describe('TianjiAgent', () => {
     setupOnlineNode('node-1')
 
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+    const agent = new TianjiAgent(
+      db,
+      'node-1',
+      'agent-1',
+      'session_terminal',
+      bus,
+      makeTestLogger()
+    )
 
     const completion = firstValueFrom(
       agent
@@ -237,7 +280,14 @@ describe('TianjiAgent', () => {
   it('节点不存在时首个运行事件仍然是 RUN_STARTED，随后才是 RUN_ERROR', async () => {
     db = createDatabase(':memory:')
 
-    const agent = new TianjiAgent(db, 'missing-node', 'agent-1', undefined, makeTestLogger())
+    const agent = new TianjiAgent(
+      db,
+      'missing-node',
+      'agent-1',
+      'session_missing_node',
+      undefined,
+      makeTestLogger()
+    )
 
     const events = await firstValueFrom(
       agent
@@ -264,7 +314,14 @@ describe('TianjiAgent', () => {
     setupOnlineNode('node-1')
     db.raw.prepare('UPDATE nodes SET status = ? WHERE node_id = ?').run('offline', 'node-1')
 
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
+    const agent = new TianjiAgent(
+      db,
+      'node-1',
+      'agent-1',
+      'session_offline_node',
+      undefined,
+      makeTestLogger()
+    )
 
     const events = await firstValueFrom(
       agent
@@ -307,7 +364,14 @@ describe('TianjiAgent', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
 
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
+    const agent = new TianjiAgent(
+      db,
+      'node-1',
+      'agent-1',
+      'session_payload',
+      undefined,
+      makeTestLogger()
+    )
 
     await firstValueFrom(
       agent.run({
@@ -386,7 +450,7 @@ describe('TianjiAgent.cancelTask', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
     setupRunningTask('node-1', 'task-1', 'agent-1')
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', '', undefined, makeTestLogger())
 
     await agent.cancelTask('task-1')
 
@@ -412,7 +476,7 @@ describe('TianjiAgent.cancelTask', () => {
     setupOnlineNode('node-other')
     setupRunningTask('node-target', 'task-x', 'agent-1')
     // 构造时故意传 'node-other'，验证 cancelTask 用 tasks.node_id 而非构造时的 #nodeId
-    const agent = new TianjiAgent(db, 'node-other', 'agent-1', undefined, makeTestLogger())
+    const agent = new TianjiAgent(db, 'node-other', 'agent-1', '', undefined, makeTestLogger())
 
     await agent.cancelTask('task-x')
 
@@ -425,7 +489,7 @@ describe('TianjiAgent.cancelTask', () => {
   it('不存在的 taskId 抛错', async () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', undefined, makeTestLogger())
+    const agent = new TianjiAgent(db, 'node-1', 'agent-1', '', undefined, makeTestLogger())
 
     await expect(agent.cancelTask('ghost-task')).rejects.toThrow(/not found/i)
   })
@@ -468,7 +532,14 @@ describe('TianjiAgent cancel 终态', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+    const agent = new TianjiAgent(
+      db,
+      'node-1',
+      'agent-1',
+      'session_cancel_1',
+      bus,
+      makeTestLogger()
+    )
 
     const events: BaseEvent[] = []
     const subscription = agent
@@ -519,7 +590,14 @@ describe('TianjiAgent cancel 终态', () => {
     db = createDatabase(':memory:')
     setupOnlineNode('node-1')
     const bus = createTestBus()
-    const agent = new TianjiAgent(db, 'node-1', 'agent-1', bus, makeTestLogger())
+    const agent = new TianjiAgent(
+      db,
+      'node-1',
+      'agent-1',
+      'session_cancel_2',
+      bus,
+      makeTestLogger()
+    )
 
     const events: BaseEvent[] = []
     const subscription = agent

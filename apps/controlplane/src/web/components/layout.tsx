@@ -149,7 +149,6 @@ export function Layout() {
           </div>
         ) : (
           <CopilotChat
-            key={sessionId}
             className="tianji-chat"
             Input={ChatInput}
             Messages={ChatMessages}

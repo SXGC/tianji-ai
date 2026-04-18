@@ -134,7 +134,7 @@ export function createCopilotRoute(
       return c.json({ error: 'session owner mismatch' }, 409)
     }
 
-    const agent = new TianjiAgent(db, nodeId, agentId, bus, logger)
+    const agent = new TianjiAgent(db, nodeId, agentId, sessionId, bus, logger)
     const runtime = new CopilotRuntime({
       agents: { default: agent },
     })
@@ -142,10 +142,6 @@ export function createCopilotRoute(
     const handler = copilotRuntimeNodeHttpEndpoint({
       runtime,
       endpoint: '/api/copilot',
-      properties: {
-        sessionId,
-        owner: { nodeId, agentId },
-      },
     })
 
     return handler(c.req.raw) as Promise<Response>
@@ -180,7 +176,7 @@ export function createCopilotRoute(
 
     // cancelTask 内部从 tasks 表反查 node_id，不依赖构造时的 nodeId / agentId，此处用占位。
     // TODO: 引入 TaskNotFoundError 替代消息匹配，使错误分类更严谨。
-    const agent = new TianjiAgent(db, '', '', bus, logger)
+    const agent = new TianjiAgent(db, '', '', '', bus, logger)
     try {
       await agent.cancelTask(taskId)
     } catch (error) {

@@ -65,6 +65,7 @@ export function IndexRouteComponent() {
 
   return (
     <CopilotKit
+      key={sessionId}
       runtimeUrl="/api/copilot"
       headers={{
         'x-node-id': selectedNodeId,

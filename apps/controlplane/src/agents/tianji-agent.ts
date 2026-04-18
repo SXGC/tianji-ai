@@ -17,14 +17,6 @@ import type { ControlPlaneDb } from '../db/index.js'
 import { AgUiEventGate, isTerminalAgUiEvent } from './ag-ui-event-gate.js'
 import { type EventMapperContext, createInitialStateSnapshot, mapToAgUi } from './event-mapper.js'
 
-type ForwardedPropsWithSession = {
-  readonly sessionId?: string
-  readonly owner?: {
-    readonly nodeId?: string
-    readonly agentId?: string
-  }
-}
-
 /** Task 终态事件类型集合 */
 const TERMINAL_TASK_TYPES = new Set([
   'TaskCompleted',
@@ -47,20 +39,23 @@ export class TianjiAgent extends AbstractAgent {
   readonly #nodeId: string
   /** ControlPlane 内部 agentId，避免与 AbstractAgent.agentId 冲突 */
   readonly #cpAgentId: string
+  readonly #sessionId: string
   readonly #bus: EventBus | undefined
   readonly #logger: ObserverLogger
 
   /**
-   * @param db       - ControlPlane 数据库实例
-   * @param nodeId   - 目标执行节点 ID
-   * @param agentId  - ControlPlane 内部代理 ID
-   * @param bus      - 进程内 EventBus 实例（未提供时 run() 订阅阶段会 crash）
-   * @param logger   - 结构化日志，用于 AgUiEventGate 的泄漏与异常上报（必传）
+   * @param db        - ControlPlane 数据库实例
+   * @param nodeId    - 目标执行节点 ID
+   * @param agentId   - ControlPlane 内部代理 ID
+   * @param sessionId - 会话 ID，由路由层从 x-session-id 请求头读取后注入
+   * @param bus       - 进程内 EventBus 实例（未提供时 run() 订阅阶段会 crash）
+   * @param logger    - 结构化日志，用于 AgUiEventGate 的泄漏与异常上报（必传）
    */
   constructor(
     db: ControlPlaneDb,
     nodeId: string,
     agentId: string,
+    sessionId: string,
     bus: EventBus | undefined,
     logger: ObserverLogger
   ) {
@@ -68,6 +63,7 @@ export class TianjiAgent extends AbstractAgent {
     this.#db = db
     this.#nodeId = nodeId
     this.#cpAgentId = agentId
+    this.#sessionId = sessionId
     this.#bus = bus
     this.#logger = logger
   }
@@ -83,18 +79,7 @@ export class TianjiAgent extends AbstractAgent {
   run(input: RunAgentInput): Observable<BaseEvent> {
     return new Observable<BaseEvent>((subscriber) => {
       const runId = input.runId ?? randomUUID()
-      const forwardedProps = input.forwardedProps as ForwardedPropsWithSession | undefined
-      const sessionId = forwardedProps?.sessionId
-
-      if (typeof sessionId !== 'string' || sessionId.length === 0) {
-        subscriber.next({
-          type: EventType.RUN_ERROR,
-          message: 'Missing sessionId in forwardedProps',
-        } as BaseEvent)
-        subscriber.complete()
-        return
-      }
-
+      const sessionId = this.#sessionId
       const threadId = sessionId
 
       subscriber.next({ type: EventType.RUN_STARTED, threadId, runId } as BaseEvent)
@@ -131,8 +116,8 @@ export class TianjiAgent extends AbstractAgent {
         goal: goalText,
         sessionIds: [sessionId],
         owner: {
-          nodeId: forwardedProps?.owner?.nodeId ?? this.#nodeId,
-          agentId: forwardedProps?.owner?.agentId ?? this.#cpAgentId,
+          nodeId: this.#nodeId,
+          agentId: this.#cpAgentId,
         },
       })
 
@@ -252,7 +237,14 @@ export class TianjiAgent extends AbstractAgent {
   }
 
   clone(): TianjiAgent {
-    return new TianjiAgent(this.#db, this.#nodeId, this.#cpAgentId, this.#bus, this.#logger)
+    return new TianjiAgent(
+      this.#db,
+      this.#nodeId,
+      this.#cpAgentId,
+      this.#sessionId,
+      this.#bus,
+      this.#logger
+    )
   }
 }
 
