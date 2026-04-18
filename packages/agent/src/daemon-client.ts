@@ -1,10 +1,11 @@
 import { type IncomingMessage, request } from 'node:http'
 
-import type { DomainEventEnvelope } from '@tianji/shared'
+import type { DomainEventEnvelope, SessionId } from '@tianji/shared'
 
 import type {
   ChatErrorSseMessage,
   ChatSseMessage,
+  CreateSessionResponse,
   PingResponse,
   ShutdownResponse,
 } from './daemon-protocol.js'
@@ -167,12 +168,27 @@ export class DaemonClient {
     return JSON.parse(body) as ShutdownResponse
   }
 
+  /** Sends a POST /sessions request and returns a new daemon session id. */
+  async createSession(): Promise<CreateSessionResponse> {
+    const res = await httpRequest({
+      host: this.#host,
+      port: this.#port,
+      method: 'POST',
+      path: '/sessions',
+    })
+    this.#lastResponse = res
+    assertOk(res, '/sessions')
+    const body = await readBody(res)
+    this.#lastResponse = undefined
+    return JSON.parse(body) as CreateSessionResponse
+  }
+
   /**
    * Sends a POST /chat request and yields {@link DomainEventEnvelope} objects
    * from the SSE stream. Stops on `chat.done`, throws on `chat.error`.
    */
-  async *sendChat(prompt: string): AsyncIterable<DomainEventEnvelope> {
-    const body = JSON.stringify({ prompt })
+  async *sendChat(prompt: string, sessionId: SessionId): AsyncIterable<DomainEventEnvelope> {
+    const body = JSON.stringify({ prompt, sessionId })
     const res = await httpRequest(
       { host: this.#host, port: this.#port, method: 'POST', path: '/chat' },
       body

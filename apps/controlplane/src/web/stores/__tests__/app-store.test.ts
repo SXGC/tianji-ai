@@ -74,19 +74,51 @@ describe('useAppStore', () => {
     })
 
     it('切换节点时清空 sessionId', () => {
-      useAppStore.getState().setSessionId('session-abc')
+      useAppStore.getState().setSessionId('session-abc', { nodeId: 'node-1', agentId: 'agent-1' })
       expect(useAppStore.getState().sessionId).toBe('session-abc')
 
       useAppStore.getState().selectNode('node-2', 'agent-2')
 
       expect(useAppStore.getState().sessionId).toBeNull()
+      expect(useAppStore.getState().sessionOwner).toBeNull()
     })
   })
 
   describe('setSessionId', () => {
     it('设置 sessionId', () => {
-      useAppStore.getState().setSessionId('sess-xyz')
+      useAppStore.getState().setSessionId('sess-xyz', { nodeId: 'node-1', agentId: 'agent-1' })
       expect(useAppStore.getState().sessionId).toBe('sess-xyz')
+      expect(useAppStore.getState().sessionOwner).toEqual({
+        nodeId: 'node-1',
+        agentId: 'agent-1',
+      })
+    })
+
+    it('clearSessionId 清空 sessionId', () => {
+      useAppStore.getState().setSessionId('sess-xyz', { nodeId: 'node-1', agentId: 'agent-1' })
+      useAppStore.getState().clearSessionId()
+      expect(useAppStore.getState().sessionId).toBeNull()
+      expect(useAppStore.getState().sessionOwner).toBeNull()
+    })
+  })
+
+  describe('isSessionOwnedBySelectedTarget', () => {
+    it('session owner 与当前选中 owner 一致时返回 true', () => {
+      useAppStore.getState().selectNode('node-1', 'agent-1')
+      useAppStore.getState().setSessionId('sess-xyz', { nodeId: 'node-1', agentId: 'agent-1' })
+
+      expect(useAppStore.getState().isSessionOwnedBySelectedTarget()).toBe(true)
+    })
+
+    it('session owner 与当前选中 owner 不一致时返回 false', () => {
+      useAppStore.setState({
+        selectedNodeId: 'node-2',
+        selectedAgentId: 'agent-2',
+        sessionId: 'sess-xyz',
+        sessionOwner: { nodeId: 'node-1', agentId: 'agent-1' },
+      })
+
+      expect(useAppStore.getState().isSessionOwnedBySelectedTarget()).toBe(false)
     })
   })
 })

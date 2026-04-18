@@ -216,6 +216,12 @@ pnpm tianji stop
 
 `apps/controlplane` 现在会在 `/` 提供浏览器聊天界面。启动 controlplane 与 node 后，可直接访问 `http://127.0.0.1:3000/`，选择在线节点并发送 task。使用说明见 [`docs/usage/controlplane.md`](./docs/usage/controlplane.md)。
 
+当前 session 语义补充：
+
+- `sessionId` 会绑定到创建它的 `nodeId + agentId`。
+- controlplane 会在请求边界校验 session owner，不允许跨 node 或 agent 复用已有 session。
+- daemon 当前仍然只支持一个 active session 同时执行；错误语义已经明确成 session 级并发暂不支持。
+
 ## 文档索引
 
 ### 使用文档

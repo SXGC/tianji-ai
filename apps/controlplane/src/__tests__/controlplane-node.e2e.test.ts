@@ -116,6 +116,7 @@ describe('controlplane <-> node e2e', () => {
           'Content-Type': 'application/json',
           'x-node-id': 'node-e2e-cancel',
           'x-agent-id': 'default',
+          'x-session-id': 'session-node-e2e-cancel',
         },
         body: JSON.stringify({
           method: 'agent/run',
@@ -126,7 +127,7 @@ describe('controlplane <-> node e2e', () => {
             messages: [{ id: 'm1', role: 'user', content: 'long running task' }],
             tools: [],
             context: [],
-            forwardedProps: {},
+            forwardedProps: { sessionId: 'session-node-e2e-cancel' },
             state: {},
           },
         }),
@@ -268,6 +269,7 @@ describe('controlplane <-> node e2e', () => {
           'Content-Type': 'application/json',
           'x-node-id': 'node-e2e-002',
           'x-agent-id': 'default',
+          'x-session-id': 'session-node-e2e-002',
         },
         body: JSON.stringify({
           method: 'agent/run',
@@ -280,7 +282,7 @@ describe('controlplane <-> node e2e', () => {
             messages: [{ id: 'msg-1', role: 'user', content: 'run integration task' }],
             tools: [],
             context: [],
-            forwardedProps: {},
+            forwardedProps: { sessionId: 'session-node-e2e-002' },
             state: {},
           },
         }),

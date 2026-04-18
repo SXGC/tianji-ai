@@ -204,7 +204,7 @@ describe('daemon e2e', () => {
     try {
       const ping = await live.client.ping()
       expect(ping.pid).toBeGreaterThan(0)
-      expect(ping.sessionId).toBeTruthy()
+      expect('sessionId' in ping).toBe(false)
     } finally {
       await live.cleanup()
     }
@@ -218,9 +218,10 @@ describe('daemon start/status/stop', () => {
 
     try {
       const ping = await live.client.ping()
-      expect(ping.sessionId).toBeTruthy()
+      expect('sessionId' in ping).toBe(false)
 
-      const events = await collectEnvelopes(live.client.sendChat('hello'))
+      const createdSession = await live.client.createSession()
+      const events = await collectEnvelopes(live.client.sendChat('hello', createdSession.sessionId))
       expect(events.some((event) => event.type === 'MessageDelta')).toBe(true)
     } finally {
       await live.cleanup()
@@ -237,7 +238,6 @@ describe('daemon start/status/stop', () => {
 
       expect(result.exitCode).toBe(0)
       expect(result.stdout).toContain('Daemon running')
-      expect(result.stdout).toContain('sessionId=')
       expect(result.stdout).toContain('controlplane=disabled')
     } finally {
       await live.cleanup()
@@ -270,7 +270,7 @@ describe('daemon start/status/stop', () => {
     try {
       const result = await runCommand(['daemon', 'start', '--fg'], {
         getUserConfigPaths: () => live.paths,
-        runDaemonEntry: vi.fn(async () => undefined),
+        runDaemonEntry: vi.fn(async () => ({ dispose: () => {} })),
         loadConfig: async () => ({
           controlPlane: { baseUrl: 'http://localhost:3000', enrollmentToken: 'tok', nodeId: 'n1' },
         }),
@@ -385,7 +385,7 @@ describe('daemon restart', () => {
   it('starts a fresh daemon when restart is called with no daemon running', async () => {
     const { paths, cleanup } = await createTempCliPaths()
     try {
-      const runDaemonEntry = vi.fn(async () => undefined)
+      const runDaemonEntry = vi.fn(async () => ({ dispose: () => {} }))
       const result = await runCommand(['daemon', 'restart', '--fg'], {
         getUserConfigPaths: () => paths,
         runDaemonEntry,
@@ -403,7 +403,7 @@ describe('daemon restart', () => {
 
   it('restarts a running daemon in foreground mode', async () => {
     const { paths, cleanup: cleanupTemp } = await createTempCliPaths()
-    const replacement = vi.fn(async () => undefined)
+    const replacement = vi.fn(async () => ({ dispose: () => {} }))
 
     try {
       const first = await setupSubprocessDaemon(['first'], paths)
@@ -440,6 +440,7 @@ describe('daemon restart', () => {
       const runDaemonEntry = vi.fn(async () => {
         expect(await pathExists(paths.daemonPortPath)).toBe(false)
         expect(await pathExists(paths.daemonPidPath)).toBe(false)
+        return { dispose: () => {} }
       })
 
       const result = await runCommand(['daemon', 'start', '--fg'], {
@@ -475,7 +476,8 @@ describe('chat and end-to-end flow', () => {
     const liveSession = createStubSession(['hello', ' world'])
     const live = await setupLiveDaemon(liveSession)
     try {
-      const events = await collectEnvelopes(live.client.sendChat('hello'))
+      const createdSession = await live.client.createSession()
+      const events = await collectEnvelopes(live.client.sendChat('hello', createdSession.sessionId))
       const deltas = events.filter((event) => event.type === 'MessageDelta')
       expect(deltas).toHaveLength(2)
     } finally {
@@ -487,8 +489,9 @@ describe('chat and end-to-end flow', () => {
     const prompts: string[] = []
     const live = await setupLiveDaemon(createRecordingSession(prompts))
     try {
-      await collectEnvelopes(live.client.sendChat('first'))
-      await collectEnvelopes(live.client.sendChat('second'))
+      const createdSession = await live.client.createSession()
+      await collectEnvelopes(live.client.sendChat('first', createdSession.sessionId))
+      await collectEnvelopes(live.client.sendChat('second', createdSession.sessionId))
       expect(prompts).toEqual(['first', 'second'])
     } finally {
       await live.cleanup()
@@ -505,7 +508,10 @@ describe('chat and end-to-end flow', () => {
         })
         expect(status1.exitCode).toBe(0)
 
-        const events = await collectEnvelopes(live.client.sendChat('hello'))
+        const createdSession = await live.client.createSession()
+        const events = await collectEnvelopes(
+          live.client.sendChat('hello', createdSession.sessionId)
+        )
         expect(events.some((event) => event.type === 'RunCompleted')).toBe(true)
 
         const stop = await runCommand(['daemon', 'stop'], {

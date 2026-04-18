@@ -26,6 +26,12 @@ export {
   type CreateDeepagentsExecutorFactoryOptions,
 } from './executors/deepagents-executor.js'
 export {
+  createGraphRunCapabilityUpperBound,
+  resolveNodeCapabilities,
+  assertNodeCapabilitiesWithinUpperBound,
+  type CreateGraphRunCapabilityUpperBoundOptions,
+} from './capability-resolver.js'
+export {
   createAcpExecutorFactory,
   type CreateAcpExecutorFactoryOptions,
   type AcpRunnerLike,

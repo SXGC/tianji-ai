@@ -485,7 +485,6 @@ const daemonStatusCommand: CommandDefinition = {
         `${i18n.t('daemon.status', {
           pid: ping.pid,
           port: port ?? 0,
-          sessionId: ping.sessionId ?? '',
           uptime: ping.uptime ?? 0,
         })}${formatControlPlaneStatusDetails({
           status: ping.controlPlane.status,

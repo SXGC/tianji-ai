@@ -358,6 +358,37 @@ describe('SessionRuntime', () => {
     expect(runtimeRecord.options?.deepagents?.model).toBeInstanceOf(ChatOpenAI)
   })
 
+  it('throws when openSession targets a missing session', async () => {
+    const runtime = createTestRuntime({
+      deepagents: { model: fakeModel() },
+      snapshotStore: new InMemorySnapshotStore(),
+      toolCatalog: new ToolRegistry(),
+    })
+
+    await expect(runtime.openSession(createSessionId('session-missing'))).rejects.toMatchObject({
+      code: 'SESSION_NOT_FOUND',
+    })
+  })
+
+  it('openSession returns existing snapshot without resetting messages', async () => {
+    const sessionId = createSessionId('session-existing')
+    const runtime = createTestRuntime({
+      deepagents: { model: fakeModel() },
+      snapshotStore: new InMemorySnapshotStore(),
+      toolCatalog: new ToolRegistry(),
+    })
+
+    await runtime.createSession({
+      sessionId,
+      messages: [createUserMessage('msg-existing', 'hello')],
+    })
+
+    const opened = await runtime.openSession(sessionId)
+
+    expect(opened.messages).toHaveLength(1)
+    expect(opened.messages[0]?.role).toBe('user')
+  })
+
   it('emits observer tool logs with consistent toolCallId across started and completed', async () => {
     const memorySink = createMemorySink()
     const toolRegistry = new ToolRegistry().registerTool({

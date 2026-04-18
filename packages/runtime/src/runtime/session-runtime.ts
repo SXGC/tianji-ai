@@ -190,6 +190,12 @@ class SessionRuntimeImpl implements SessionRuntime {
     return snapshot
   }
 
+  readonly openSession = async (sessionId: SessionId): Promise<SessionSnapshot> => {
+    const snapshot = await this.requireSessionSnapshot(sessionId)
+    ensureSessionEngineMatches(snapshot, this.engine)
+    return snapshot
+  }
+
   readonly closeSession = async (sessionId: SessionId): Promise<SessionSnapshot> => {
     const snapshot = await this.requireSessionSnapshot(sessionId)
     const nextSnapshot: SessionSnapshot = {

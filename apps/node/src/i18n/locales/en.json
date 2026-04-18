@@ -23,7 +23,7 @@
   "daemon.already_running": "Daemon already running (pid={pid})",
   "daemon.started": "Daemon started (pid={pid}, port={port})",
   "daemon.stopped": "Daemon stopped",
-  "daemon.status": "Daemon running (pid={pid}, port={port}, sessionId={sessionId}, uptime={uptime}s)",
+  "daemon.status": "Daemon running (pid={pid}, port={port}, uptime={uptime}s)",
   "daemon.listening": "Daemon listening on port {port}",
   "daemon.connected": "Connected to daemon (pid={pid})",
   "log.waiting": "Waiting for CLI log file: {path}",

@@ -228,4 +228,24 @@ describe('suite/multi-turn', () => {
       expect(timestamps[i]!).toBeGreaterThanOrEqual(timestamps[i - 1]!)
     }
   })
+
+  it('preserves previous messages when reopening an existing session', async () => {
+    const snapshotStore = new InMemorySnapshotStore()
+    const runtime = createTestRuntime({
+      deepagents: {
+        model: fakeModel().respond(new AIMessage('first reply')),
+      },
+      snapshotStore,
+      toolCatalog: new ToolRegistry(),
+    })
+
+    const sessionId = createSessionId('session-multi-turn-open')
+    await runtime.createSession({ sessionId })
+    await driveMultiTurn(runtime, sessionId, [{ id: 'msg-open-1', text: 'first turn' }])
+
+    const reopened = await runtime.openSession(sessionId)
+
+    expect(reopened.messages.length).toBeGreaterThan(0)
+    expect(reopened.messages[0]?.role).toBe('user')
+  })
 })

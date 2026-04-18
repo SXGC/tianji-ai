@@ -12,7 +12,10 @@ export interface AppState {
   selectNode: (nodeId: string, agentId: string) => void
 
   sessionId: string | null
-  setSessionId: (id: string) => void
+  sessionOwner: { nodeId: string; agentId: string } | null
+  setSessionId: (id: string, owner: { nodeId: string; agentId: string }) => void
+  clearSessionId: () => void
+  isSessionOwnedBySelectedTarget: () => boolean
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -31,11 +34,30 @@ export const useAppStore = create<AppState>((set) => ({
   selectedNodeId: null,
   selectedAgentId: null,
   selectNode: (nodeId, agentId) => {
-    set({ selectedNodeId: nodeId, selectedAgentId: agentId, sessionId: null })
+    // 切换 owner 边界时必须重建 session，避免跨 node/agent 复用。
+    set({ selectedNodeId: nodeId, selectedAgentId: agentId, sessionId: null, sessionOwner: null })
   },
 
   sessionId: null,
-  setSessionId: (id) => {
-    set({ sessionId: id })
+  sessionOwner: null,
+  setSessionId: (id, owner) => {
+    set({
+      sessionId: id,
+      sessionOwner: owner,
+    })
+  },
+  clearSessionId: () => {
+    set({ sessionId: null, sessionOwner: null })
+  },
+  isSessionOwnedBySelectedTarget: () => {
+    const state = useAppStore.getState()
+    return (
+      state.sessionId !== null &&
+      state.sessionOwner !== null &&
+      state.selectedNodeId !== null &&
+      state.selectedAgentId !== null &&
+      state.sessionOwner.nodeId === state.selectedNodeId &&
+      state.sessionOwner.agentId === state.selectedAgentId
+    )
   },
 }))
