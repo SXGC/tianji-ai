@@ -12,7 +12,12 @@ import type {
   NodeExecutorContext,
   OrchestrationGraph,
 } from '../orchestration/index.js'
-import { createAgentRuntime, createAgentSession, openAgentSession } from '../session.js'
+import {
+  createAgentRuntime,
+  createAgentSession,
+  ensureAgentSession,
+  openAgentSession,
+} from '../session.js'
 
 vi.mock('@tianji/runtime', async () => {
   const actual = await vi.importActual<typeof import('@tianji/runtime')>('@tianji/runtime')
@@ -172,6 +177,49 @@ describe('agent session', () => {
       expect.objectContaining({
         type: 'SessionCreated',
       })
+    )
+
+    createSessionRuntimeSpy.mockRestore()
+  })
+
+  it('ensureAgentSession opens existing session when snapshot exists', async () => {
+    const runtime = createStubRuntime()
+    const createSessionRuntimeSpy = vi
+      .spyOn(runtimeModule, 'createSessionRuntime')
+      .mockReturnValue(runtime)
+    const emitEvent = vi.fn()
+
+    const session = await ensureAgentSession(createFakeContext(), 'session_existing' as never, {
+      emitEvent,
+    })
+
+    expect(runtime.openSession).toHaveBeenCalledWith('session_existing')
+    expect(runtime.createSession).not.toHaveBeenCalled()
+    expect(session.sessionId).toBe('session_existing')
+    expect(emitEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'SessionCreated' }))
+
+    createSessionRuntimeSpy.mockRestore()
+  })
+
+  it('ensureAgentSession creates session with given sessionId when snapshot is missing', async () => {
+    const runtime = createStubRuntime()
+    vi.mocked(runtime.openSession).mockRejectedValueOnce(
+      Object.assign(new Error('missing session'), { code: 'SESSION_NOT_FOUND' })
+    )
+    const createSessionRuntimeSpy = vi
+      .spyOn(runtimeModule, 'createSessionRuntime')
+      .mockReturnValue(runtime)
+    const emitEvent = vi.fn()
+
+    const session = await ensureAgentSession(createFakeContext(), 'session_new' as never, {
+      emitEvent,
+    })
+
+    expect(runtime.openSession).toHaveBeenCalledWith('session_new')
+    expect(runtime.createSession).toHaveBeenCalledWith({ sessionId: 'session_new' })
+    expect(session.sessionId).toBe('session_new')
+    expect(emitEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'SessionCreated', sessionId: 'session_new' })
     )
 
     createSessionRuntimeSpy.mockRestore()

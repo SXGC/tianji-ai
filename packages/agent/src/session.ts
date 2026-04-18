@@ -228,6 +228,35 @@ export async function openAgentSession(
 }
 
 /**
+ * 确保会话存在：snapshot 存在则 open（保留历史），不存在则用指定 sessionId 新建。
+ *
+ * @param context   - 已加载的 agent bootstrap 上下文
+ * @param sessionId - 要复用或新建的 session ID（由 controlplane 分配）
+ * @param options   - 运行时选项（logger、emitEvent）
+ * @returns 复用或新建后的 AgentSession 实例
+ */
+export async function ensureAgentSession(
+  context: LoadedAgentContext,
+  sessionId: SessionId,
+  options?: AgentRuntimeOptions
+): Promise<AgentSession> {
+  const runtime = await createAgentRuntime(context, options)
+  let isNewSession = false
+  await runtime.openSession(sessionId).catch(async () => {
+    isNewSession = true
+    await runtime.createSession({ sessionId })
+  })
+  if (isNewSession) {
+    await options?.emitEvent?.({
+      type: 'SessionCreated',
+      sessionId,
+      timestamp: Date.now(),
+    })
+  }
+  return createSessionFacade(sessionId, runtime, options)
+}
+
+/**
  * 会话恢复入口：从指定检查点重建 runtime session，并通过 pipeline 发射 SessionResumed 事件。
  *
  * 按照 spec §三，SessionResumed 必须由 agent 层发射，checkpointId 随 payload 携带。

@@ -28,6 +28,7 @@ export {
 export {
   createAgentRuntime,
   createAgentSession,
+  ensureAgentSession,
   openAgentSession,
   resumeAgentSession,
   type AgentRuntimeOptions,
