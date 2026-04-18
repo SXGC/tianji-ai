@@ -176,7 +176,7 @@ export function createDeepagentsExecutorFactory(
         // 把底层错误归一化为 TianjiError 后广播 failed 事件，再把原始错误再抛出，
         // 让 LangGraph 正常结束 run 并让上层 runner 走 finished reject 路径。
         const tianjiError = toTianjiError(error_)
-        const usage = runtime === undefined ? undefined : await readRunUsage(runtime, nodeRunId)
+        const usage = runtime === undefined ? undefined : await tryReadRunUsage(runtime, nodeRunId)
         ctx.emitGraphEvent({
           type: 'GraphNodeFailed',
           runId: ctx.runId,
@@ -237,6 +237,20 @@ async function openOrCreateSession(
   }
   const session = await runtime.createSession({})
   return session.sessionId
+}
+
+/**
+ * 失败路径里 best-effort 读取 usage，不能覆盖原始业务错误。
+ */
+async function tryReadRunUsage(
+  runtime: SessionRuntime,
+  runId: RunId | undefined
+): Promise<TokenUsage | undefined> {
+  try {
+    return await readRunUsage(runtime, runId)
+  } catch {
+    return undefined
+  }
 }
 
 /**

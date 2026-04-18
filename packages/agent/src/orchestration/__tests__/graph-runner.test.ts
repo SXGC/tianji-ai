@@ -181,6 +181,69 @@ describe('graph-runner terminal usage', () => {
     })
   })
 
+  it('GraphNodeCompleted.usage 和 GraphNodeFailed.usage 会共同累计进 GraphRunFailed.usage', async () => {
+    const completedUsage = {
+      inputTokens: 2,
+      outputTokens: 1,
+      totalTokens: 3,
+      cacheReadTokens: 1,
+      cacheCreationTokens: 1,
+    }
+    const failedUsage = {
+      inputTokens: 5,
+      outputTokens: 2,
+      totalTokens: 7,
+      cacheReadTokens: 3,
+      cacheCreationTokens: 1,
+    }
+    const factory: AgentExecutorFactory =
+      (node, ctx: NodeExecutorContext): NodeAction =>
+      async () => {
+        ctx.emitGraphEvent({
+          type: 'GraphNodeCompleted',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          nodeKind: 'agent',
+          output: { result: 'partial' },
+          usage: completedUsage,
+          timestamp: Date.now(),
+        })
+        ctx.emitGraphEvent({
+          type: 'GraphNodeFailed',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          nodeKind: 'agent',
+          error: new TianjiError('internal', 'TEST', 'boom'),
+          usage: failedUsage,
+          timestamp: Date.now(),
+        })
+        throw new Error('boom')
+      }
+
+    const result = runOrchestrationGraph({
+      graph: buildMinimalGraph(),
+      runId: 'run_failed_mixed_usage_test' as RunId,
+      compileOptions: { agentExecutorFactory: factory },
+    })
+
+    const collectionPromise = collectEvents(result.events)
+    await expect(result.finished).rejects.toThrow('boom')
+    const collectedEvents = (await collectionPromise) as GraphRunDomainEvent[]
+    const graphFailed = collectedEvents.find((event) => event.type === 'GraphRunFailed')
+
+    expect(graphFailed).toMatchObject({
+      usage: {
+        inputTokens: 7,
+        outputTokens: 3,
+        totalTokens: 10,
+        cacheReadTokens: 4,
+        cacheCreationTokens: 2,
+      },
+    })
+  })
+
   it('GraphNodeFailed.usage 会累计进 GraphRunCancelled.usage', async () => {
     const failedUsage = {
       inputTokens: 9,
@@ -223,6 +286,74 @@ describe('graph-runner terminal usage', () => {
 
     expect(graphCancelled).toMatchObject({
       usage: failedUsage,
+    })
+  })
+
+  it('GraphNodeCompleted.usage 和 GraphNodeFailed.usage 会共同累计进 GraphRunCancelled.usage', async () => {
+    const completedUsage = {
+      inputTokens: 4,
+      outputTokens: 2,
+      totalTokens: 6,
+      cacheReadTokens: 2,
+      cacheCreationTokens: 1,
+    }
+    const failedUsage = {
+      inputTokens: 9,
+      outputTokens: 4,
+      totalTokens: 13,
+      cacheReadTokens: 6,
+      cacheCreationTokens: 2,
+    }
+    const controller = new AbortController()
+    const factory: AgentExecutorFactory =
+      (node, ctx: NodeExecutorContext): NodeAction =>
+      async () => {
+        ctx.emitGraphEvent({
+          type: 'GraphNodeCompleted',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          nodeKind: 'agent',
+          output: { result: 'partial' },
+          usage: completedUsage,
+          timestamp: Date.now(),
+        })
+        ctx.emitGraphEvent({
+          type: 'GraphNodeFailed',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          nodeKind: 'agent',
+          error: new TianjiError('internal', 'TEST', 'aborted'),
+          usage: failedUsage,
+          timestamp: Date.now(),
+        })
+        controller.abort()
+        const abortError = new Error('aborted')
+        abortError.name = 'AbortError'
+        throw abortError
+      }
+
+    const result = runOrchestrationGraph({
+      graph: buildMinimalGraph(),
+      runId: 'run_cancelled_mixed_usage_test' as RunId,
+      compileOptions: { agentExecutorFactory: factory },
+      abortSignal: controller.signal,
+    })
+
+    const collectionPromise = collectEvents(result.events)
+    await expect(result.finished).rejects.toThrow('aborted')
+    const collectedEvents = (await collectionPromise) as GraphRunDomainEvent[]
+    const graphCancelled = collectedEvents.find((event) => event.type === 'GraphRunCancelled')
+
+    expect(graphCancelled).toMatchObject({
+      usage: {
+        inputTokens: 13,
+        outputTokens: 6,
+        totalTokens: 19,
+        cacheReadTokens: 8,
+        cacheCreationTokens: 3,
+      },
     })
   })
 })
