@@ -6,10 +6,15 @@
  * - 验证错误路径：真实异常时发 GraphRunFailed，不发 GraphRunCancelled。
  */
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import type { DomainEvent, RunId } from '@tianji/shared'
+import { type DomainEvent, type GraphRunDomainEvent, type RunId, TianjiError } from '@tianji/shared'
 import { describe, expect, it } from 'vitest'
 
 import { createDeepagentsExecutorFactory } from '../executors/deepagents-executor.js'
+import type {
+  AgentExecutorFactory,
+  NodeAction,
+  NodeExecutorContext,
+} from '../executors/executor-types.js'
 import { runOrchestrationGraph } from '../graph-runner.js'
 import type { OrchestrationGraph } from '../graph-schema.js'
 
@@ -132,5 +137,92 @@ describe('graph-runner GraphRunStarted mermaidDiagram', () => {
     expect((startedEvent as { type: string; mermaidDiagram: string }).mermaidDiagram).toMatch(
       /^flowchart/
     )
+  })
+})
+
+describe('graph-runner terminal usage', () => {
+  it('GraphNodeFailed.usage 会累计进 GraphRunFailed.usage', async () => {
+    const failedUsage = {
+      inputTokens: 5,
+      outputTokens: 2,
+      totalTokens: 7,
+      cacheReadTokens: 3,
+      cacheCreationTokens: 1,
+    }
+    const factory: AgentExecutorFactory =
+      (node, ctx: NodeExecutorContext): NodeAction =>
+      async () => {
+        ctx.emitGraphEvent({
+          type: 'GraphNodeFailed',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          nodeKind: 'agent',
+          error: new TianjiError('internal', 'TEST', 'boom'),
+          usage: failedUsage,
+          timestamp: Date.now(),
+        })
+        throw new Error('boom')
+      }
+
+    const result = runOrchestrationGraph({
+      graph: buildMinimalGraph(),
+      runId: 'run_failed_usage_test' as RunId,
+      compileOptions: { agentExecutorFactory: factory },
+    })
+
+    const collectionPromise = collectEvents(result.events)
+    await expect(result.finished).rejects.toThrow('boom')
+    const collectedEvents = (await collectionPromise) as GraphRunDomainEvent[]
+    const graphFailed = collectedEvents.find((event) => event.type === 'GraphRunFailed')
+
+    expect(graphFailed).toMatchObject({
+      usage: failedUsage,
+    })
+  })
+
+  it('GraphNodeFailed.usage 会累计进 GraphRunCancelled.usage', async () => {
+    const failedUsage = {
+      inputTokens: 9,
+      outputTokens: 4,
+      totalTokens: 13,
+      cacheReadTokens: 6,
+      cacheCreationTokens: 2,
+    }
+    const controller = new AbortController()
+    const factory: AgentExecutorFactory =
+      (node, ctx: NodeExecutorContext): NodeAction =>
+      async () => {
+        ctx.emitGraphEvent({
+          type: 'GraphNodeFailed',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          nodeKind: 'agent',
+          error: new TianjiError('internal', 'TEST', 'aborted'),
+          usage: failedUsage,
+          timestamp: Date.now(),
+        })
+        controller.abort()
+        const abortError = new Error('aborted')
+        abortError.name = 'AbortError'
+        throw abortError
+      }
+
+    const result = runOrchestrationGraph({
+      graph: buildMinimalGraph(),
+      runId: 'run_cancelled_usage_test' as RunId,
+      compileOptions: { agentExecutorFactory: factory },
+      abortSignal: controller.signal,
+    })
+
+    const collectionPromise = collectEvents(result.events)
+    await expect(result.finished).rejects.toThrow('aborted')
+    const collectedEvents = (await collectionPromise) as GraphRunDomainEvent[]
+    const graphCancelled = collectedEvents.find((event) => event.type === 'GraphRunCancelled')
+
+    expect(graphCancelled).toMatchObject({
+      usage: failedUsage,
+    })
   })
 })

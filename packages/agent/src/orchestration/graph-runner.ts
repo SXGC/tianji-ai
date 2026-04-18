@@ -48,7 +48,7 @@ export function runOrchestrationGraph(
   let graphUsage: TokenUsage | undefined
 
   const trackGraphUsage = (event: DomainEvent): void => {
-    if (event.type !== 'GraphNodeCompleted') {
+    if (event.type !== 'GraphNodeCompleted' && event.type !== 'GraphNodeFailed') {
       return
     }
     if (event.usage === undefined) {
@@ -161,6 +161,7 @@ export function runOrchestrationGraph(
           graphId: options.graph.id,
           graphVersion: options.graph.version,
           reason: 'abort',
+          ...(graphUsage === undefined ? {} : { usage: graphUsage }),
           timestamp: Date.now(),
         })
       } else {
@@ -170,6 +171,7 @@ export function runOrchestrationGraph(
           graphId: options.graph.id,
           graphVersion: options.graph.version,
           error: toTianjiError(error),
+          ...(graphUsage === undefined ? {} : { usage: graphUsage }),
           timestamp: Date.now(),
         })
       }

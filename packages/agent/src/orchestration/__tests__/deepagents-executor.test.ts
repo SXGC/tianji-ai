@@ -485,6 +485,88 @@ describe('createDeepagentsExecutorFactory', () => {
     })
   })
 
+  it('GraphNodeFailed 会带上当前节点 run snapshot 的 usage', async () => {
+    const events: GraphRunDomainEvent[] = []
+    const sessionId = 'session_failed_usage' as SessionId
+    const nodeRunId = 'run_node_failed_usage' as RunId
+    vi.mocked(runtimeModule.createSessionRuntime).mockReturnValue({
+      createSession: vi.fn(async () => ({ sessionId })),
+      openSession: vi.fn(async () => undefined),
+      closeSession: vi.fn(async () => undefined),
+      getSessionSnapshot: vi.fn(async () => ({
+        sessionId,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        metadata: {
+          usage: {
+            inputTokens: 100,
+            outputTokens: 100,
+            totalTokens: 200,
+            cacheReadTokens: 50,
+            cacheCreationTokens: 20,
+          },
+        },
+      })),
+      getRunSnapshot: vi.fn(async () => ({
+        runId: nodeRunId,
+        sessionId,
+        status: 'failed',
+        triggerType: 'new',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        pendingOperations: [],
+        metadata: {
+          usage: {
+            inputTokens: 8,
+            outputTokens: 3,
+            totalTokens: 11,
+            cacheReadTokens: 4,
+            cacheCreationTokens: 1,
+          },
+        },
+      })),
+      runTurn: vi.fn(async () => nodeRunId),
+      resumeRun: vi.fn(async () => nodeRunId),
+      cancelRun: vi.fn(() => false),
+      streamEvents: vi.fn(async function* () {
+        yield* [] as DomainEvent[]
+        throw new Error('stream failed')
+      }),
+    } as unknown as runtimeModule.SessionRuntime)
+
+    const action = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ignored'] }),
+    })(
+      makeAgentNode({ input: ['q'], output: ['a'] }),
+      makeCtx({
+        emitGraphEvent: (event) => events.push(event),
+      })
+    )
+
+    await expect(action({ q: 'hello' }, {} as never)).rejects.toThrow('stream failed')
+
+    expect(events.find((event) => event.type === 'GraphNodeFailed')).toMatchObject({
+      usage: {
+        inputTokens: 8,
+        outputTokens: 3,
+        totalTokens: 11,
+        cacheReadTokens: 4,
+        cacheCreationTokens: 1,
+      },
+    })
+    expect(events.find((event) => event.type === 'GraphNodeFailed')).not.toMatchObject({
+      usage: {
+        inputTokens: 100,
+        outputTokens: 100,
+        totalTokens: 200,
+        cacheReadTokens: 50,
+        cacheCreationTokens: 20,
+      },
+    })
+  })
+
   it('input 字段不存在时抛错', async () => {
     const factory = createDeepagentsExecutorFactory({
       resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),

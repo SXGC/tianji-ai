@@ -176,6 +176,7 @@ export function createDeepagentsExecutorFactory(
         // 把底层错误归一化为 TianjiError 后广播 failed 事件，再把原始错误再抛出，
         // 让 LangGraph 正常结束 run 并让上层 runner 走 finished reject 路径。
         const tianjiError = toTianjiError(error_)
+        const usage = runtime === undefined ? undefined : await readRunUsage(runtime, nodeRunId)
         ctx.emitGraphEvent({
           type: 'GraphNodeFailed',
           runId: ctx.runId,
@@ -183,6 +184,7 @@ export function createDeepagentsExecutorFactory(
           nodeId: node.id,
           nodeKind: 'agent',
           error: tianjiError,
+          ...(usage === undefined ? {} : { usage }),
           timestamp: Date.now(),
         })
         throw error_
