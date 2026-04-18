@@ -42,8 +42,8 @@ function ChatInput({ inProgress, onSend, onStop, chatReady, hideStopButton }: In
   const submit = async () => {
     const nextValue = value.trim()
     if (nextValue.length === 0 || inProgress) return
-    await onSend(nextValue)
     setValue('')
+    await onSend(nextValue)
   }
 
   const canSend = chatReady !== false && value.trim().length > 0 && !inProgress
