@@ -228,12 +228,13 @@ export async function openAgentSession(
 }
 
 /**
- * 确保会话存在：snapshot 存在则 open（保留历史），不存在则用指定 sessionId 新建。
+ * 确保会话存在：session 不存在则用指定 sessionId 新建，已存在则 open（保留历史）。
  *
  * @param context   - 已加载的 agent bootstrap 上下文
  * @param sessionId - 要复用或新建的 session ID（由 controlplane 分配）
  * @param options   - 运行时选项（logger、emitEvent）
  * @returns 复用或新建后的 AgentSession 实例
+ * @throws 当 openSession 因非「session 不存在」原因失败时（例如 IO 错误），原样抛出
  */
 export async function ensureAgentSession(
   context: LoadedAgentContext,
@@ -242,10 +243,15 @@ export async function ensureAgentSession(
 ): Promise<AgentSession> {
   const runtime = await createAgentRuntime(context, options)
   let isNewSession = false
-  await runtime.openSession(sessionId).catch(async () => {
+  try {
+    await runtime.openSession(sessionId)
+  } catch (err) {
+    if ((err as { code?: string }).code !== 'SESSION_NOT_FOUND') {
+      throw err
+    }
     isNewSession = true
     await runtime.createSession({ sessionId })
-  })
+  }
   if (isNewSession) {
     await options?.emitEvent?.({
       type: 'SessionCreated',

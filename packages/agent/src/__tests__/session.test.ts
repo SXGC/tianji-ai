@@ -196,7 +196,7 @@ describe('agent session', () => {
     expect(runtime.openSession).toHaveBeenCalledWith('session_existing')
     expect(runtime.createSession).not.toHaveBeenCalled()
     expect(session.sessionId).toBe('session_existing')
-    expect(emitEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'SessionCreated' }))
+    expect(emitEvent).not.toHaveBeenCalled()
 
     createSessionRuntimeSpy.mockRestore()
   })
@@ -221,6 +221,24 @@ describe('agent session', () => {
     expect(emitEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'SessionCreated', sessionId: 'session_new' })
     )
+    expect(emitEvent).toHaveBeenCalledTimes(1)
+
+    createSessionRuntimeSpy.mockRestore()
+  })
+
+  it('ensureAgentSession rethrows non-SESSION_NOT_FOUND errors from openSession', async () => {
+    const runtime = createStubRuntime()
+    const ioError = Object.assign(new Error('disk full'), { code: 'ENOSPC' })
+    vi.mocked(runtime.openSession).mockRejectedValueOnce(ioError)
+    const createSessionRuntimeSpy = vi
+      .spyOn(runtimeModule, 'createSessionRuntime')
+      .mockReturnValue(runtime)
+
+    await expect(
+      ensureAgentSession(createFakeContext(), 'session_io_fail' as never)
+    ).rejects.toMatchObject({ code: 'ENOSPC' })
+
+    expect(runtime.createSession).not.toHaveBeenCalled()
 
     createSessionRuntimeSpy.mockRestore()
   })
