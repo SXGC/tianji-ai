@@ -44,7 +44,6 @@ export function runOrchestrationGraph(
 ): OrchestrationRunResult {
   const eventQueue: DomainEvent[] = []
   const eventResolvers: ((value: IteratorResult<DomainEvent>) => void)[] = []
-  const accountedNodeTerminals = new Set<string>()
   let done = false
   let graphUsage: TokenUsage | undefined
 
@@ -55,11 +54,6 @@ export function runOrchestrationGraph(
     if (event.usage === undefined) {
       return
     }
-    if (accountedNodeTerminals.has(event.nodeId)) {
-      return
-    }
-
-    accountedNodeTerminals.add(event.nodeId)
     graphUsage = addTokenUsage(graphUsage, event.usage)
   }
 

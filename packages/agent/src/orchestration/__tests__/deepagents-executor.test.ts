@@ -398,6 +398,93 @@ describe('createDeepagentsExecutorFactory', () => {
     })
   })
 
+  it('GraphNodeCompleted 会透传 run snapshot usage 的 cache token 字段', async () => {
+    const events: GraphRunDomainEvent[] = []
+    const sessionId = 'session_usage_cache' as SessionId
+    const nodeRunId = 'run_node_cache' as RunId
+    vi.mocked(runtimeModule.createSessionRuntime).mockReturnValue({
+      createSession: vi.fn(async () => ({ sessionId })),
+      openSession: vi.fn(async () => undefined),
+      closeSession: vi.fn(async () => undefined),
+      getSessionSnapshot: vi.fn(async () => ({
+        sessionId,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        metadata: {
+          usage: {
+            inputTokens: 100,
+            outputTokens: 100,
+            totalTokens: 200,
+            cacheReadTokens: 50,
+            cacheCreationTokens: 20,
+          },
+        },
+      })),
+      getRunSnapshot: vi.fn(async () => ({
+        runId: nodeRunId,
+        sessionId,
+        status: 'completed',
+        triggerType: 'new',
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        pendingOperations: [],
+        metadata: {
+          usage: {
+            inputTokens: 11,
+            outputTokens: 7,
+            totalTokens: 18,
+            cacheReadTokens: 5,
+            cacheCreationTokens: 2,
+          },
+        },
+      })),
+      runTurn: vi.fn(async () => nodeRunId),
+      resumeRun: vi.fn(async () => nodeRunId),
+      cancelRun: vi.fn(() => false),
+      streamEvents: vi.fn(async function* () {
+        yield {
+          type: 'MessageCompleted',
+          runId: nodeRunId,
+          message: {
+            id: 'msg_assistant_cache',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'done' }],
+            createdAt: Date.now(),
+          },
+          timestamp: Date.now(),
+        } as DomainEvent
+        yield {
+          type: 'RunCompleted',
+          runId: nodeRunId,
+          timestamp: Date.now(),
+        } as DomainEvent
+      }),
+    } as unknown as runtimeModule.SessionRuntime)
+
+    const action = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ignored'] }),
+    })(
+      makeAgentNode({ input: ['q'], output: ['a'] }),
+      makeCtx({
+        emitGraphEvent: (event) => events.push(event),
+      })
+    )
+
+    await action({ q: 'hello' }, {} as never)
+
+    expect(events.find((event) => event.type === 'GraphNodeCompleted')).toMatchObject({
+      usage: {
+        inputTokens: 11,
+        outputTokens: 7,
+        totalTokens: 18,
+        cacheReadTokens: 5,
+        cacheCreationTokens: 2,
+      },
+    })
+  })
+
   it('input 字段不存在时抛错', async () => {
     const factory = createDeepagentsExecutorFactory({
       resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),

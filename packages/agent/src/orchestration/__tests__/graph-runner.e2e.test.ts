@@ -2,9 +2,8 @@
  * orchestration e2e 测试。
  *
  * 业务职责：
- * - 验证 runOrchestrationGraph + 真实 createDeepagentsExecutorFactory + FakeListChatModel
- *   能完整跑通一个多节点编排，并广播图级事件。
- * - 不使用任何 mock：走完整的 graph-runner / graph-compiler / deepagents-executor 路径。
+ * - 验证 runOrchestrationGraph + createDeepagentsExecutorFactory 能完整跑通多节点编排，并广播图级事件。
+ * - 图编译和 graph-runner 走真实链路；部分用例会 mock createSessionRuntime，把节点 usage 固定到可预测值。
  */
 import { FakeListChatModel } from '@langchain/core/utils/testing'
 import type { SessionRuntime } from '@tianji/runtime'
@@ -291,6 +290,71 @@ describe('orchestration e2e', () => {
     expect(coderStarts.length).toBe(2) // 因为循环了一次
   })
 
+  it('loop 图中同一节点多次成功时，GraphRunCompleted usage 会累计每次执行', async () => {
+    mockRuntimeUsageSequence([
+      { text: '代码 v1', usage: { inputTokens: 3, outputTokens: 1, totalTokens: 4 } },
+      {
+        text: '{"review":"待改进","approved":false}',
+        usage: { inputTokens: 5, outputTokens: 2, totalTokens: 7 },
+      },
+      { text: '代码 v2', usage: { inputTokens: 11, outputTokens: 5, totalTokens: 16 } },
+      {
+        text: '{"review":"通过","approved":true}',
+        usage: { inputTokens: 17, outputTokens: 9, totalTokens: 26 },
+      },
+    ])
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['unused'] }),
+    })
+    const graph: OrchestrationGraph = {
+      id: 'review-loop-usage',
+      name: 'review-loop-usage',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: {
+        code: { type: 'string' },
+        review: { type: 'string' },
+        approved: { type: 'boolean', default: false },
+      },
+      nodes: [
+        {
+          id: 'coder',
+          type: 'agent',
+          agent: { model: 'fake', systemPrompt: '编码者' },
+          output: ['code'],
+        },
+        {
+          id: 'reviewer',
+          type: 'agent',
+          agent: { model: 'fake', systemPrompt: '审查者' },
+          input: ['code'],
+          output: ['review', 'approved'],
+        },
+        {
+          id: 'router1',
+          type: 'router',
+          condition: {
+            field: 'approved',
+            branches: { true: '__end__', false: 'coder' },
+          },
+        },
+      ],
+      edges: [
+        { from: '__start__', to: 'coder' },
+        { from: 'coder', to: 'reviewer' },
+        { from: 'reviewer', to: 'router1' },
+      ],
+    }
+
+    const events = await collectGraphEvents(graph, 'run_usage_loop' as RunId, factory)
+    const graphCompleted = events.find((event) => event.type === 'GraphRunCompleted')
+
+    expect(graphCompleted).toMatchObject({
+      usage: { inputTokens: 36, outputTokens: 17, totalTokens: 53 },
+    })
+  })
+
   it('单节点 graph 的 GraphRunCompleted usage 等于 GraphNodeCompleted usage', async () => {
     mockRuntimeUsageSequence([
       { text: 'single result', usage: { inputTokens: 10, outputTokens: 4, totalTokens: 14 } },
@@ -378,6 +442,78 @@ describe('orchestration e2e', () => {
 
     expect(graphCompleted).toMatchObject({
       usage: { inputTokens: 30, outputTokens: 12, totalTokens: 42 },
+    })
+  })
+
+  it('graph-level usage 会累加 cache token 字段', async () => {
+    mockRuntimeUsageSequence([
+      {
+        text: 'plan result',
+        usage: {
+          inputTokens: 10,
+          outputTokens: 4,
+          totalTokens: 14,
+          cacheReadTokens: 3,
+          cacheCreationTokens: 1,
+        },
+      },
+      {
+        text: 'code result',
+        usage: {
+          inputTokens: 20,
+          outputTokens: 8,
+          totalTokens: 28,
+          cacheReadTokens: 7,
+          cacheCreationTokens: 2,
+        },
+      },
+    ])
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['unused'] }),
+    })
+    const graph: OrchestrationGraph = {
+      id: 'serial-cache-usage',
+      name: 'serial-cache-usage',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: {
+        plan: { type: 'string' },
+        code: { type: 'string' },
+      },
+      nodes: [
+        {
+          id: 'planner',
+          type: 'agent',
+          agent: { model: 'fake', systemPrompt: 'planner' },
+          output: ['plan'],
+        },
+        {
+          id: 'coder',
+          type: 'agent',
+          agent: { model: 'fake', systemPrompt: 'coder' },
+          input: ['plan'],
+          output: ['code'],
+        },
+      ],
+      edges: [
+        { from: '__start__', to: 'planner' },
+        { from: 'planner', to: 'coder' },
+        { from: 'coder', to: '__end__' },
+      ],
+    }
+
+    const events = await collectGraphEvents(graph, 'run_usage_cache' as RunId, factory)
+    const graphCompleted = events.find((event) => event.type === 'GraphRunCompleted')
+
+    expect(graphCompleted).toMatchObject({
+      usage: {
+        inputTokens: 30,
+        outputTokens: 12,
+        totalTokens: 42,
+        cacheReadTokens: 10,
+        cacheCreationTokens: 3,
+      },
     })
   })
 

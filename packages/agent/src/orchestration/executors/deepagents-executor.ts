@@ -257,6 +257,8 @@ async function readRunUsage(
     inputTokens?: unknown
     outputTokens?: unknown
     totalTokens?: unknown
+    cacheReadTokens?: unknown
+    cacheCreationTokens?: unknown
   }
   if (
     typeof candidate.inputTokens !== 'number' ||
@@ -270,6 +272,12 @@ async function readRunUsage(
     inputTokens: candidate.inputTokens,
     outputTokens: candidate.outputTokens,
     totalTokens: candidate.totalTokens,
+    ...(typeof candidate.cacheReadTokens === 'number'
+      ? { cacheReadTokens: candidate.cacheReadTokens }
+      : {}),
+    ...(typeof candidate.cacheCreationTokens === 'number'
+      ? { cacheCreationTokens: candidate.cacheCreationTokens }
+      : {}),
   }
 }
 
