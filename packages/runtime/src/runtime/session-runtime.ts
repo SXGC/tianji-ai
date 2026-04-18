@@ -35,6 +35,7 @@ import {
   type RuntimeTracingContext,
   type RuntimeTracingState,
   createRuntimeTracingState,
+  mergeTracingContexts,
 } from '../langsmith.js'
 import { InMemorySnapshotStore } from '../snapshot-store.js'
 import type { SnapshotStore } from '../snapshot-store.js'
@@ -535,32 +536,25 @@ class SessionRuntimeImpl implements SessionRuntime {
     input: ExecuteRunInput,
     deepagents: SessionRuntimeDeepagentsConfig
   ): RuntimeTracingContext {
-    const metadata: Record<string, unknown> = {
-      sessionId: activeRun.sessionId,
-      runId: activeRun.runId,
-      triggerType: input.triggerType,
-      model:
-        typeof deepagents.model === 'string'
-          ? deepagents.model
-          : (deepagents.model.constructor?.name ?? 'unknown'),
-    }
-
-    if (input.parentRunId !== undefined) {
-      metadata.parentRunId = input.parentRunId
-    }
-
-    if (input.threadId !== undefined) {
-      metadata.threadId = input.threadId
-    }
-
-    if (input.checkpointId !== undefined) {
-      metadata.checkpointId = input.checkpointId
-    }
-
-    return {
+    const runtimeContext: RuntimeTracingContext = {
       tags: ['tianji', 'runtime', `trigger:${input.triggerType}`],
-      metadata,
+      metadata: {
+        sessionId: activeRun.sessionId,
+        runId: activeRun.runId,
+        triggerType: input.triggerType,
+        model:
+          typeof deepagents.model === 'string'
+            ? deepagents.model
+            : (deepagents.model.constructor?.name ?? 'unknown'),
+        ...(input.parentRunId !== undefined ? { parentRunId: input.parentRunId } : {}),
+        ...(input.threadId !== undefined ? { threadId: input.threadId } : {}),
+        ...(input.checkpointId !== undefined ? { checkpointId: input.checkpointId } : {}),
+      },
     }
+
+    return (
+      mergeTracingContexts(this.options.externalTracingContext, runtimeContext) ?? runtimeContext
+    )
   }
 
   private async requireSessionSnapshot(sessionId: SessionId): Promise<SessionSnapshot> {

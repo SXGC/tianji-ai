@@ -146,6 +146,13 @@ console.log(resolved.config.runtime?.tracing?.langsmith?.project)
 - `logger?: ObserverLogger`：可选注入 observer logger，作为 runtime 向外部日志系统写入记录的公共边界；runtime 本身不定义 sink、文件路径或渲染策略。
 - `snapshotStore` / `toolCatalog`：继续作为稳定公共 API 暴露。
 
+### Graph trace propagation
+
+- `runtime.tracing.langsmith` 仍然是唯一的 LangSmith tracing 配置入口。
+- 编排图不会共享一个 `SessionRuntime` 实例；每个节点仍使用独立 runtime。
+- graph 层只透传 tracing context（tags / metadata），由 runtime 在每次 run 执行时与自身 tracing metadata 合并。
+- LangSmith 中可通过 `graphRunId`、`graphId`、`nodeId` 聚合查看整轮 graph run 的节点运行。
+
 ### Run 快照与事件观测
 
 - `RunSnapshot` 现在会额外持有 `triggerType`，并在恢复链路中通过可选 `parentRunId` 标记来源 run。

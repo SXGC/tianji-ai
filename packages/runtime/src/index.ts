@@ -42,6 +42,7 @@ export {
   type CreateSessionOptions,
   type DeepagentsInterruptRecord,
   type ObserverLogger,
+  type RuntimeTracingContext,
   type RuntimeLangsmithTracingConfig,
   type DeepagentsRunWorkflowState,
   type GraphRunHandle,

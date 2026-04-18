@@ -22,6 +22,7 @@ import type {
 
 import type { ObserverLogger } from '@tianji/observer'
 import type { ReplayableEventStream } from '../event-stream.js'
+import type { RuntimeTracingContext } from '../langsmith.js'
 import type { LlmGenerationConfig } from '../llm/index.js'
 import type { SnapshotStore } from '../snapshot-store.js'
 import type { RuntimeToolDefinition, ToolCatalog, ToolRegistry } from '../tool-catalog.js'
@@ -81,6 +82,7 @@ export interface SessionRuntimeOptions {
   readonly engine?: Extract<SessionRuntimeEngine, 'deepagents'>
   readonly deepagents?: SessionRuntimeDeepagentsConfig
   readonly tracing?: SessionRuntimeTracingConfig
+  readonly externalTracingContext?: RuntimeTracingContext
   readonly logger?: ObserverLogger
   readonly snapshotStore?: SnapshotStore
   readonly toolCatalog?: ToolCatalog | ToolRegistry | readonly RuntimeToolDefinition[]

@@ -180,4 +180,69 @@ describe('runtime langsmith tracing', () => {
       })
     )
   })
+
+  it('merges external tracing context with runtime run tracing context', async () => {
+    const streamEventsMock = vi.fn(async () => createChatModelEndAsyncIterable())
+
+    createDeepAgentMock.mockReturnValue({
+      streamEvents: streamEventsMock,
+      getState: vi.fn(async () => createStateSnapshot()),
+    })
+
+    const runtime = createSessionRuntime({
+      deepagents: {
+        model: new FakeListChatModel({ responses: ['done'] }),
+      },
+      tracing: {
+        langsmith: {
+          enabled: true,
+          project: 'runtime-project',
+          apiKey: 'ls-key',
+          tags: ['configured'],
+          metadata: { service: 'tianji-runtime' },
+        },
+      },
+      externalTracingContext: {
+        tags: ['graph', 'graph:default'],
+        metadata: {
+          graphRunId: 'run_graph_1',
+          graphId: 'default',
+          nodeId: 'planner',
+          entrypoint: 'daemon',
+          runId: 'graph-layer-run-id-should-not-win',
+        },
+      },
+      snapshotStore: new InMemorySnapshotStore(),
+      toolCatalog: new ToolRegistry(),
+    })
+
+    const session = await runtime.createSession({
+      sessionId: 'session-langsmith' as never,
+    })
+
+    const runId = await runtime.runTurn({
+      sessionId: session.sessionId,
+      message: createUserMessage('msg-langsmith', 'trace this'),
+    })
+
+    for await (const _event of runtime.streamEvents(runId)) {
+      // consume to completion
+    }
+
+    expect(streamEventsMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        tags: ['configured', 'graph', 'graph:default', 'tianji', 'runtime', 'trigger:new'],
+        metadata: expect.objectContaining({
+          service: 'tianji-runtime',
+          graphRunId: 'run_graph_1',
+          graphId: 'default',
+          nodeId: 'planner',
+          entrypoint: 'daemon',
+          sessionId: 'session-langsmith',
+          runId,
+        }),
+      })
+    )
+  })
 })

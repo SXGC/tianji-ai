@@ -34,6 +34,7 @@ export async function buildDefaultGraph(
   const executorFactoryOptions = {
     ...options.executorFactoryOptions,
     resolveModel: (modelRef: string) => resolveAgentModel(modelRef, context.config.providers),
+    tracing: context.config.runtime?.tracing,
   } satisfies CreateDeepagentsExecutorFactoryOptions
 
   if (request.graph !== undefined) {
