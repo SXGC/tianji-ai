@@ -1,5 +1,11 @@
 import type { ObserverLogger } from '@tianji/observer'
-import { type DomainEvent, type RunId, TianjiError } from '@tianji/shared'
+import {
+  type DomainEvent,
+  type RunId,
+  TianjiError,
+  type TokenUsage,
+  addTokenUsage,
+} from '@tianji/shared'
 import { type CompileOptions, compileOrchestrationGraph } from './graph-compiler.js'
 import { renderOrchestrationGraphMermaid } from './graph-mermaid.js'
 import type { OrchestrationGraph } from './graph-schema.js'
@@ -38,10 +44,28 @@ export function runOrchestrationGraph(
 ): OrchestrationRunResult {
   const eventQueue: DomainEvent[] = []
   const eventResolvers: ((value: IteratorResult<DomainEvent>) => void)[] = []
+  const accountedNodeTerminals = new Set<string>()
   let done = false
+  let graphUsage: TokenUsage | undefined
+
+  const trackGraphUsage = (event: DomainEvent): void => {
+    if (event.type !== 'GraphNodeCompleted') {
+      return
+    }
+    if (event.usage === undefined) {
+      return
+    }
+    if (accountedNodeTerminals.has(event.nodeId)) {
+      return
+    }
+
+    accountedNodeTerminals.add(event.nodeId)
+    graphUsage = addTokenUsage(graphUsage, event.usage)
+  }
 
   const emit = (event: DomainEvent): void => {
     if (done) return
+    trackGraphUsage(event)
     if (eventResolvers.length > 0) {
       const resolve = eventResolvers.shift()
       // 长度判断后立即 shift，理论上不可能为 undefined
@@ -126,6 +150,7 @@ export function runOrchestrationGraph(
         graphId: options.graph.id,
         graphVersion: options.graph.version,
         finalState,
+        ...(graphUsage === undefined ? {} : { usage: graphUsage }),
         timestamp: Date.now(),
       })
 

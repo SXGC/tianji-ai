@@ -33,6 +33,7 @@ import type {
   ResolvedNodeCapabilities,
   RunId,
   SessionId,
+  TokenUsage,
 } from '@tianji/shared'
 
 import { type CallMcpTargetPolicy, createCallMcpTool } from '../../mcp/call-mcp-tool.js'
@@ -128,6 +129,7 @@ export function createDeepagentsExecutorFactory(
 
       let runtime: SessionRuntime | undefined
       let currentSessionId: SessionId | undefined
+      let nodeRunId: RunId | undefined
       let shouldCloseTemporarySession = false
 
       try {
@@ -150,13 +152,13 @@ export function createDeepagentsExecutorFactory(
         }
         options.onRuntimeOptions?.(runOptions)
 
-        const runId = await runtime.runTurn(runOptions)
+        nodeRunId = await runtime.runTurn(runOptions)
         const finalAssistantText = await collectFinalAssistantText(
           runtime,
-          runId,
+          nodeRunId,
           ctx.emitRuntimeEvent
         )
-
+        const usage = await readRunUsage(runtime, nodeRunId)
         const stateUpdate = buildStateUpdateFromText(finalAssistantText, node.output)
 
         ctx.emitGraphEvent({
@@ -166,6 +168,7 @@ export function createDeepagentsExecutorFactory(
           nodeId: node.id,
           nodeKind: 'agent',
           output: stateUpdate,
+          ...(usage === undefined ? {} : { usage }),
           timestamp: Date.now(),
         })
         return stateUpdate
@@ -232,6 +235,42 @@ async function openOrCreateSession(
   }
   const session = await runtime.createSession({})
   return session.sessionId
+}
+
+/**
+ * 只从当前节点 run snapshot 中读取 usage，避免混入 session 累计 usage。
+ */
+async function readRunUsage(
+  runtime: SessionRuntime,
+  runId: RunId | undefined
+): Promise<TokenUsage | undefined> {
+  if (runId === undefined) {
+    return undefined
+  }
+
+  const usage = (await runtime.getRunSnapshot(runId))?.metadata?.usage
+  if (typeof usage !== 'object' || usage === null) {
+    return undefined
+  }
+
+  const candidate = usage as {
+    inputTokens?: unknown
+    outputTokens?: unknown
+    totalTokens?: unknown
+  }
+  if (
+    typeof candidate.inputTokens !== 'number' ||
+    typeof candidate.outputTokens !== 'number' ||
+    typeof candidate.totalTokens !== 'number'
+  ) {
+    return undefined
+  }
+
+  return {
+    inputTokens: candidate.inputTokens,
+    outputTokens: candidate.outputTokens,
+    totalTokens: candidate.totalTokens,
+  }
 }
 
 /**

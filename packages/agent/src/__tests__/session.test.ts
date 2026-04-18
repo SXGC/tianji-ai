@@ -385,6 +385,87 @@ describe('agent session queryWithGraph', () => {
     createSessionRuntimeSpy.mockRestore()
   })
 
+  it('同一 session 连续两次 queryWithGraph 时，第二次 GraphRunCompleted 仍只带本次 graph usage', async () => {
+    const runtime = createStubRuntime()
+    vi.mocked(runtime.getSessionSnapshot)
+      .mockResolvedValueOnce({
+        sessionId: 'session_test' as never,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        metadata: {
+          usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 },
+        },
+      })
+      .mockResolvedValueOnce({
+        sessionId: 'session_test' as never,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+        metadata: {
+          usage: { inputTokens: 8, outputTokens: 12, totalTokens: 20 },
+        },
+      })
+    const createSessionRuntimeSpy = vi
+      .spyOn(runtimeModule, 'createSessionRuntime')
+      .mockReturnValue(runtime)
+    const session = await createAgentSession(createFakeContext())
+
+    const fixedUsageFactory: AgentExecutorFactory =
+      (node, ctx: NodeExecutorContext): NodeAction =>
+      async () => {
+        ctx.emitGraphEvent({
+          type: 'GraphNodeStarted',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          nodeKind: 'agent',
+          timestamp: Date.now(),
+        })
+        const output = { result: `ran-${node.id}` }
+        ctx.emitGraphEvent({
+          type: 'GraphNodeCompleted',
+          runId: ctx.runId,
+          graphId: ctx.graphId,
+          nodeId: node.id,
+          nodeKind: 'agent',
+          output,
+          usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 },
+          timestamp: Date.now(),
+        })
+        return output
+      }
+
+    const firstRunEvents: GraphRunDomainEvent[] = []
+    for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
+      compileOptions: { agentExecutorFactory: fixedUsageFactory },
+    })) {
+      firstRunEvents.push(event as GraphRunDomainEvent)
+    }
+
+    const secondRunEvents: GraphRunDomainEvent[] = []
+    for await (const event of session.queryWithGraph(buildSingleNodeGraph(), {
+      compileOptions: { agentExecutorFactory: fixedUsageFactory },
+    })) {
+      secondRunEvents.push(event as GraphRunDomainEvent)
+    }
+
+    const firstCompleted = firstRunEvents.find((event) => event.type === 'GraphRunCompleted')
+    const secondCompleted = secondRunEvents.find((event) => event.type === 'GraphRunCompleted')
+
+    expect(firstCompleted).toMatchObject({
+      usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 },
+    })
+    expect(secondCompleted).toMatchObject({
+      usage: { inputTokens: 4, outputTokens: 6, totalTokens: 10 },
+    })
+    expect(secondCompleted).not.toMatchObject({
+      usage: { inputTokens: 8, outputTokens: 12, totalTokens: 20 },
+    })
+
+    createSessionRuntimeSpy.mockRestore()
+  })
+
   it('会把 orchestration mermaid 写入 logger', async () => {
     const runtime = createStubRuntime()
     const createSessionRuntimeSpy = vi
