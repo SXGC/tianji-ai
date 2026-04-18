@@ -2,6 +2,14 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
+vi.mock('mermaid', () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({ svg: '<svg></svg>' }),
+  },
+}))
+
+import mermaid from 'mermaid'
 import * as api from '../../../services/debug-api.js'
 import { MAX_EVENTS, useDebugStore } from '../../../stores/debug-store.js'
 import { EventListTab } from '../event-list-tab.js'
@@ -141,5 +149,61 @@ describe('use-history-pagination 业务行为', () => {
     Object.defineProperty(list, 'scrollTop', { value: 400, configurable: true, writable: true })
     fireEvent.scroll(list)
     await vi.waitFor(() => expect(useDebugStore.getState().lastError).toBe('net down'))
+  })
+})
+
+describe('GraphRunCompleted mermaid 联动', () => {
+  beforeEach(() => {
+    vi.mocked(mermaid.render).mockResolvedValue({ svg: '<svg></svg>' })
+  })
+
+  test('选中 GraphRunCompleted 事件时，详情抽屉展示 mermaid 图', async () => {
+    const runAggregateId = 'run-abc123'
+    const mermaidText = 'flowchart TD\n  A-->B'
+
+    useDebugStore.setState({
+      panelOpen: true,
+      tab: 'events',
+      mode: 'history',
+      events: [
+        {
+          ...mockEvent(2),
+          type: 'GraphRunCompleted',
+          aggregateType: 'GraphRun',
+          aggregateId: runAggregateId,
+          payload: { finalState: {}, runId: runAggregateId },
+        },
+        {
+          ...mockEvent(1),
+          type: 'GraphRunStarted',
+          aggregateType: 'GraphRun',
+          aggregateId: runAggregateId,
+          payload: { mermaidDiagram: mermaidText, runId: runAggregateId },
+        },
+      ],
+    })
+
+    render(<EventListTab />)
+    const rows = screen.getAllByTestId('event-row')
+
+    // 第一行是 GraphRunCompleted（cursor 2，排在前面）
+    fireEvent.click(rows[0]!)
+
+    // mermaid-diagram 容器应出现
+    await screen.findByTestId('mermaid-diagram')
+  })
+
+  test('选中非 GraphRunCompleted 事件时，不展示 mermaid 图', () => {
+    useDebugStore.setState({
+      panelOpen: true,
+      tab: 'events',
+      mode: 'history',
+      events: [mockEvent(1)],
+    })
+
+    render(<EventListTab />)
+    fireEvent.click(screen.getByTestId('event-row'))
+
+    expect(screen.queryByTestId('mermaid-diagram')).toBeNull()
   })
 })

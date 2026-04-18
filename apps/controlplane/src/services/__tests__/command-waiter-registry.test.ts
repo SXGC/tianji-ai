@@ -36,6 +36,28 @@ describe('CommandWaiterRegistry', () => {
     await expect(Promise.all([waiter1, waiter2])).resolves.toEqual([true, true])
   })
 
+  it('should only wake waiters of the notified node id', async () => {
+    const registry = new CommandWaiterRegistry()
+    const controller1 = new AbortController()
+    const controller2 = new AbortController()
+
+    const waiter1 = registry.wait('node-1', controller1.signal)
+    let node2Settled = false
+    const waiter2 = registry.wait('node-2', controller2.signal).then((value) => {
+      node2Settled = true
+      return value
+    })
+
+    registry.notify('node-1')
+
+    await expect(waiter1).resolves.toBe(true)
+    await Promise.resolve()
+    expect(node2Settled).toBe(false)
+
+    controller2.abort()
+    await expect(waiter2).resolves.toBe(false)
+  })
+
   it('should not throw when notifying non-existent node id', () => {
     const registry = new CommandWaiterRegistry()
 

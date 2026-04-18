@@ -1,7 +1,17 @@
 import { type CompiledStateGraph, END, START, Send, StateGraph } from '@langchain/langgraph'
 import type { ObserverLogger } from '@tianji/observer'
 import type { SnapshotStore } from '@tianji/runtime'
-import type { DomainEvent, GraphRunDomainEvent, RunId, SessionId } from '@tianji/shared'
+import type {
+  DomainEvent,
+  GraphRunCapabilityUpperBound,
+  GraphRunDomainEvent,
+  RunId,
+  SessionId,
+} from '@tianji/shared'
+import {
+  createGraphRunCapabilityUpperBound,
+  resolveNodeCapabilities as defaultResolveNodeCapabilities,
+} from './capability-resolver.js'
 import type {
   AcpExecutorFactory,
   AgentExecutorFactory,
@@ -28,6 +38,10 @@ export interface CompileOptions {
   readonly runId: RunId
   readonly emitGraphEvent?: (event: GraphRunDomainEvent) => void
   readonly emitRuntimeEvent?: (event: DomainEvent) => void
+  /** graph-run 级能力上限；未提供时默认空 allowlist。 */
+  readonly graphRunCapabilityUpperBound?: GraphRunCapabilityUpperBound
+  /** graph-run 级节点能力解析入口；未提供时使用默认 resolver。 */
+  readonly resolveNodeCapabilities?: NonNullable<NodeExecutorContext['resolveNodeCapabilities']>
   /**
    * 顶层 run 的 abortSignal。
    * 会被塞入 NodeExecutorContext，让节点执行器在 runtime 调用处透传。
@@ -58,6 +72,13 @@ export function compileOrchestrationGraph(
     throw new Error(`编排图校验失败:\n${errorList}`)
   }
 
+  const graphRunCapabilityUpperBound =
+    options.graphRunCapabilityUpperBound ?? createGraphRunCapabilityUpperBound()
+  const resolveNodeCapabilities: NonNullable<NodeExecutorContext['resolveNodeCapabilities']> =
+    options.resolveNodeCapabilities ?? defaultResolveNodeCapabilities
+
+  validateGraphCapabilities(graph, graphRunCapabilityUpperBound, resolveNodeCapabilities)
+
   const stateAnnotation = compileStateChannels(graph.state)
 
   // 任意类型签名以便 langgraph 接受
@@ -69,6 +90,8 @@ export function compileOrchestrationGraph(
     observer: options.observer,
     emitGraphEvent: options.emitGraphEvent ?? (() => undefined),
     emitRuntimeEvent: options.emitRuntimeEvent,
+    graphRunCapabilityUpperBound,
+    resolveNodeCapabilities,
     abortSignal: options.abortSignal,
     sessionId: options.sessionId,
     snapshotStore: options.snapshotStore,
@@ -115,6 +138,19 @@ export function compileOrchestrationGraph(
   })
 
   return compiled
+}
+
+function validateGraphCapabilities(
+  graph: OrchestrationGraph,
+  graphRunCapabilityUpperBound: GraphRunCapabilityUpperBound,
+  resolveNodeCapabilities: NonNullable<NodeExecutorContext['resolveNodeCapabilities']>
+): void {
+  for (const node of graph.nodes) {
+    if (node.type !== 'agent') {
+      continue
+    }
+    resolveNodeCapabilities(node, graphRunCapabilityUpperBound)
+  }
 }
 
 /** langgraph builder 的最小类型接口，用于绕过泛型限制 */

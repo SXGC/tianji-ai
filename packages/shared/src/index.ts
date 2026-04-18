@@ -85,6 +85,17 @@ export * from './policy.js'
 export * from './snapshot.js'
 export * from './tool.js'
 export * from './command.js'
+export type {
+  CallMcpDiscoverInput,
+  CallMcpDiscoverResult,
+  CallMcpInput,
+  CallMcpInvokeInput,
+  CallMcpInvokeResult,
+  GraphRunCapabilityUpperBound,
+  McpServerSummary,
+  McpToolSummary,
+  ResolvedNodeCapabilities,
+} from './mcp.js'
 export * from './node-types.js'
 export * from './orchestration-graph.js'
 export * from './storage/event-log.js'

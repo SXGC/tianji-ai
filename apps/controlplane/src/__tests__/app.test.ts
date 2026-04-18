@@ -9,47 +9,53 @@ describe('createApp', () => {
     const db = createDatabase(':memory:')
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
-    const { app, monitor } = createApp(db, logger)
+    const { app, monitor, registry } = createApp(db, logger)
+    try {
+      const response = await app.request('http://localhost/health')
 
-    const response = await app.request('http://localhost/health')
-
-    expect(response.status).toBe(200)
-    await expect(response.json()).resolves.toEqual({ status: 'ok' })
-
-    monitor.stop()
-    db.close()
+      expect(response.status).toBe(200)
+      await expect(response.json()).resolves.toEqual({ status: 'ok' })
+    } finally {
+      registry.destroy()
+      monitor.stop()
+      db.close()
+    }
   })
 
   it('returns the controlplane spa shell at root', async () => {
     const db = createDatabase(':memory:')
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
-    const { app, monitor } = createApp(db, logger)
+    const { app, monitor, registry } = createApp(db, logger)
+    try {
+      const response = await app.request('http://localhost/')
+      const html = await response.text()
 
-    const response = await app.request('http://localhost/')
-    const html = await response.text()
-
-    expect(response.status).toBe(200)
-    expect(response.headers.get('content-type')).toContain('text/html')
-    expect(html).toContain('<div id="root"></div>')
-    expect(html).toMatch(/(?:\/main\.tsx|\/assets\/.*\.js)/)
-
-    monitor.stop()
-    db.close()
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type')).toContain('text/html')
+      expect(html).toContain('<div id="root"></div>')
+      expect(html).toMatch(/(?:\/main\.tsx|\/assets\/.*\.js)/)
+    } finally {
+      registry.destroy()
+      monitor.stop()
+      db.close()
+    }
   })
 
   it('does not intercept api routes when serving web ui', async () => {
     const db = createDatabase(':memory:')
     const sink = createMemorySink()
     const logger = createObserverLogger({ sinks: [sink] })
-    const { app, monitor } = createApp(db, logger)
+    const { app, monitor, registry } = createApp(db, logger)
+    try {
+      const response = await app.request('http://localhost/api/ui/nodes')
 
-    const response = await app.request('http://localhost/api/ui/nodes')
-
-    expect(response.status).toBe(200)
-    expect(response.headers.get('content-type') ?? '').toContain('application/json')
-
-    monitor.stop()
-    db.close()
+      expect(response.status).toBe(200)
+      expect(response.headers.get('content-type') ?? '').toContain('application/json')
+    } finally {
+      registry.destroy()
+      monitor.stop()
+      db.close()
+    }
   })
 })

@@ -558,6 +558,7 @@ describe('unified entry routing', () => {
             runId: 'run-native-test' as never,
             graphId: 'default',
             graphVersion: 1,
+            mermaidDiagram: '',
             timestamp: Date.now(),
           }
           await new Promise<void>((resolve) => {

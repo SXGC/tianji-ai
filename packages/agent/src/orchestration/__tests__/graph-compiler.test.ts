@@ -12,6 +12,10 @@ function noopAction(value: unknown): NodeAction {
   return async () => ({ result: value })
 }
 
+function countOccurrences(values: readonly string[], target: string): number {
+  return values.filter((value) => value === target).length
+}
+
 const stubAgentFactory: AgentExecutorFactory = (node) => noopAction(`ran-${node.id}`)
 
 function makeGraph(overrides: Partial<OrchestrationGraph> = {}): OrchestrationGraph {
@@ -105,6 +109,132 @@ describe('compileOrchestrationGraph - basic nodes and edges', () => {
     expect(seen[0]?.runId).toBe('run_abc')
     expect(seen[0]?.graphId).toBe('g1')
   })
+
+  it('节点声明未知 skill id 时编译直接失败且不会创建节点执行器', () => {
+    const factory = vi.fn(stubAgentFactory)
+    const graph = makeGraph({
+      nodes: [
+        {
+          id: 'a',
+          type: 'agent',
+          agent: {
+            model: 'fake',
+            systemPrompt: 'sp',
+            skills: ['unknown-skill'],
+          },
+        },
+      ],
+      edges: [{ from: '__start__', to: 'a' }],
+    })
+
+    expect(() =>
+      compileOrchestrationGraph(graph, {
+        agentExecutorFactory: factory,
+        runId: 'run_test_capability_skill' as RunId,
+      })
+    ).toThrow(/Capability skills is outside graph-run upper bound: unknown-skill/)
+    expect(factory).not.toHaveBeenCalled()
+  })
+
+  it('节点声明未知 tool 时编译直接失败且不会创建节点执行器', () => {
+    const factory = vi.fn(stubAgentFactory)
+    const graph = makeGraph({
+      nodes: [
+        {
+          id: 'a',
+          type: 'agent',
+          agent: {
+            model: 'fake',
+            systemPrompt: 'sp',
+            tools: ['unknown-tool'],
+          },
+        },
+      ],
+      edges: [{ from: '__start__', to: 'a' }],
+    })
+
+    expect(() =>
+      compileOrchestrationGraph(graph, {
+        agentExecutorFactory: factory,
+        runId: 'run_test_capability_tool' as RunId,
+      })
+    ).toThrow(/Capability tools is outside graph-run upper bound: unknown-tool/)
+    expect(factory).not.toHaveBeenCalled()
+  })
+
+  it('节点声明超出 graph-run 能力上限的 mcpTargets 时编译直接失败且不会创建节点执行器', () => {
+    const factory = vi.fn(stubAgentFactory)
+    const graph = makeGraph({
+      nodes: [
+        {
+          id: 'a',
+          type: 'agent',
+          agent: {
+            model: 'fake',
+            systemPrompt: 'sp',
+            mcpTargets: ['unknown-mcp-target'],
+          },
+        },
+      ],
+      edges: [{ from: '__start__', to: 'a' }],
+    })
+
+    expect(() =>
+      compileOrchestrationGraph(graph, {
+        agentExecutorFactory: factory,
+        runId: 'run_test_capability_mcp' as RunId,
+      })
+    ).toThrow(/Capability mcpTargets is outside graph-run upper bound: unknown-mcp-target/)
+    expect(factory).not.toHaveBeenCalled()
+  })
+
+  it('编译阶段使用调用方提供的能力上限和 resolver，并把它们透传给节点执行器上下文', () => {
+    const upperBound = {
+      skills: ['allowed-skill'],
+      tools: ['allowed-tool'],
+      mcpTargets: ['allowed-target'],
+    } as const
+    const resolver = vi.fn(() => ({
+      skills: ['allowed-skill'],
+      tools: ['allowed-tool'],
+      mcpTargets: ['allowed-target'],
+    }))
+    const seen: NodeExecutorContext[] = []
+    const factory = vi.fn((_node, ctx) => {
+      seen.push(ctx)
+      return async () => ({})
+    })
+    const graph = makeGraph({
+      nodes: [
+        {
+          id: 'a',
+          type: 'agent',
+          agent: {
+            model: 'fake',
+            systemPrompt: 'sp',
+            skills: ['allowed-skill'],
+            tools: ['allowed-tool'],
+            mcpTargets: ['allowed-target'],
+          },
+        },
+      ],
+      edges: [{ from: '__start__', to: 'a' }],
+    })
+
+    expect(() =>
+      compileOrchestrationGraph(graph, {
+        agentExecutorFactory: factory,
+        runId: 'run_test_capability_options' as RunId,
+        graphRunCapabilityUpperBound: upperBound,
+        resolveNodeCapabilities: resolver,
+      })
+    ).not.toThrow()
+    expect(resolver).toHaveBeenCalledTimes(1)
+    expect(resolver).toHaveBeenCalledWith(graph.nodes[0], upperBound)
+    expect(factory).toHaveBeenCalledTimes(1)
+    expect(seen[0]?.graphRunCapabilityUpperBound).toBe(upperBound)
+    expect(seen[0]?.resolveNodeCapabilities).toBe(resolver)
+  })
 })
 
 const echoStateFactory: AgentExecutorFactory = (node) => async () => {
@@ -114,43 +244,16 @@ const echoStateFactory: AgentExecutorFactory = (node) => async () => {
 }
 
 describe('compileOrchestrationGraph - router', () => {
-  it('router 把控制流按条件分到不同分支', async () => {
-    const graph: OrchestrationGraph = {
-      id: 'g',
-      name: 't',
-      version: 1,
-      source: 'static',
-      locked: false,
-      state: {
-        approved: { type: 'boolean', default: false },
-        count: { type: 'number', default: 0 },
-      },
-      nodes: [
-        { id: 'setter_true', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
-        {
-          id: 'router1',
-          type: 'router',
-          condition: {
-            field: 'approved',
-            branches: { true: '__end__', false: 'setter_true' },
-          },
-        },
-      ],
-      edges: [
-        { from: '__start__', to: 'setter_true' },
-        { from: 'setter_true', to: 'router1' },
-      ],
+  it('router 命中 false 分支时只执行对应目标节点', async () => {
+    const calls: string[] = []
+    const trackingFactory: AgentExecutorFactory = (node) => async () => {
+      calls.push(node.id)
+      if (node.id === 'setter_false') return { approved: false }
+      if (node.id === 'false_branch') return { route: 'false_branch' }
+      if (node.id === 'true_branch') return { route: 'true_branch' }
+      return {}
     }
 
-    const compiled = compileOrchestrationGraph(graph, {
-      agentExecutorFactory: echoStateFactory,
-      runId: 'run_test_router' as RunId,
-    })
-    const finalState = await compiled.invoke({})
-    expect(finalState.approved).toBe(true)
-  })
-
-  it('router 直接到 __end__ 时图正常结束', async () => {
     const graph: OrchestrationGraph = {
       id: 'g',
       name: 't',
@@ -159,30 +262,85 @@ describe('compileOrchestrationGraph - router', () => {
       locked: false,
       state: {
         approved: { type: 'boolean', default: true },
+        route: { type: 'string', default: '' },
       },
       nodes: [
-        { id: 'setter_true', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        { id: 'setter_false', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        { id: 'false_branch', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        { id: 'true_branch', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
         {
           id: 'router1',
           type: 'router',
           condition: {
             field: 'approved',
-            branches: { true: '__end__', false: 'setter_true' },
+            branches: { true: 'true_branch', false: 'false_branch' },
+          },
+        },
+      ],
+      edges: [
+        { from: '__start__', to: 'setter_false' },
+        { from: 'setter_false', to: 'router1' },
+        { from: 'false_branch', to: '__end__' },
+        { from: 'true_branch', to: '__end__' },
+      ],
+    }
+
+    const compiled = compileOrchestrationGraph(graph, {
+      agentExecutorFactory: trackingFactory,
+      runId: 'run_test_router_false_branch' as RunId,
+    })
+    const finalState = await compiled.invoke({})
+    expect(finalState.approved).toBe(false)
+    expect(finalState.route).toBe('false_branch')
+    expect(calls).toEqual(['setter_false', 'false_branch'])
+  })
+
+  it('router 命中 __end__ 分支时不会继续执行其他节点', async () => {
+    const calls: string[] = []
+    const trackingFactory: AgentExecutorFactory = (node) => async () => {
+      calls.push(node.id)
+      if (node.id === 'setter_true') return { approved: true }
+      if (node.id === 'should_not_run') return { route: 'unexpected' }
+      return {}
+    }
+
+    const graph: OrchestrationGraph = {
+      id: 'g',
+      name: 't',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: {
+        approved: { type: 'boolean', default: true },
+        route: { type: 'string', default: '' },
+      },
+      nodes: [
+        { id: 'setter_true', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        { id: 'should_not_run', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
+        {
+          id: 'router1',
+          type: 'router',
+          condition: {
+            field: 'approved',
+            branches: { true: '__end__', false: 'should_not_run' },
           },
         },
       ],
       edges: [
         { from: '__start__', to: 'setter_true' },
         { from: 'setter_true', to: 'router1' },
+        { from: 'should_not_run', to: '__end__' },
       ],
     }
 
     const compiled = compileOrchestrationGraph(graph, {
-      agentExecutorFactory: echoStateFactory,
+      agentExecutorFactory: trackingFactory,
       runId: 'run_test_router_end' as RunId,
     })
     const finalState = await compiled.invoke({})
     expect(finalState.approved).toBe(true)
+    expect(finalState.route).toBe('')
+    expect(calls).toEqual(['setter_true'])
   })
 })
 
@@ -222,41 +380,57 @@ describe('compileOrchestrationGraph - fork/join', () => {
       runId: 'run_test_fork' as RunId,
     })
     const finalState = await compiled.invoke({})
+    const logs = finalState.logs as string[]
 
-    expect(calls).toContain('left')
-    expect(calls).toContain('right')
-    expect(calls).toContain('merge')
-    expect(finalState.logs as string[]).toEqual(
-      expect.arrayContaining(['start_node', 'left', 'right', 'merge'])
-    )
+    expect(countOccurrences(calls, 'start_node')).toBe(1)
+    expect(countOccurrences(calls, 'left')).toBe(1)
+    expect(countOccurrences(calls, 'right')).toBe(1)
+    expect(countOccurrences(calls, 'merge')).toBe(1)
+    expect(logs).toHaveLength(4)
+    expect(countOccurrences(logs, 'start_node')).toBe(1)
+    expect(countOccurrences(logs, 'left')).toBe(1)
+    expect(countOccurrences(logs, 'right')).toBe(1)
+    expect(countOccurrences(logs, 'merge')).toBe(1)
   })
 })
 
 describe('compileOrchestrationGraph - human-gate', () => {
-  it('human-gate 节点编译时被加入 interruptBefore', async () => {
+  it('human-gate 会在 gate 前中断，且 gate 后节点不会执行', async () => {
+    const calls: string[] = []
+    const trackingFactory: AgentExecutorFactory = (node) => async () => {
+      calls.push(node.id)
+      return { logs: [node.id] }
+    }
+
     const graph: OrchestrationGraph = {
       id: 'g',
       name: 't',
       version: 1,
       source: 'static',
       locked: false,
-      state: { x: { type: 'string' } },
+      state: { logs: { type: 'list', reducer: 'append', default: [] } },
       nodes: [
         { id: 'a', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
         { id: 'gate', type: 'human-gate', prompt: '请确认' },
+        { id: 'after_gate', type: 'agent', agent: { model: 'fake', systemPrompt: '' } },
       ],
       edges: [
         { from: '__start__', to: 'a' },
         { from: 'a', to: 'gate' },
-        { from: 'gate', to: '__end__' },
+        { from: 'gate', to: 'after_gate' },
+        { from: 'after_gate', to: '__end__' },
       ],
     }
 
-    expect(() =>
-      compileOrchestrationGraph(graph, {
-        agentExecutorFactory: stubAgentFactory,
-        runId: 'run_test_human_gate' as RunId,
-      })
-    ).not.toThrow()
+    const compiled = compileOrchestrationGraph(graph, {
+      agentExecutorFactory: trackingFactory,
+      runId: 'run_test_human_gate' as RunId,
+    })
+    const finalState = (await compiled.invoke({})) as Record<string, unknown>
+
+    expect(calls).toEqual(['a'])
+    expect(finalState.logs).toEqual(['a'])
+    expect(finalState).toHaveProperty('__interrupt__')
+    expect(Array.isArray(finalState.__interrupt__)).toBe(true)
   })
 })

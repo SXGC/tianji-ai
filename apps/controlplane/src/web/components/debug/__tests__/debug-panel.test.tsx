@@ -28,6 +28,31 @@ describe('DebugToggleButtonImpl', () => {
     fireEvent.click(btn)
     expect(useDebugStore.getState().panelOpen).toBe(false)
   })
+
+  test('在按钮上 pointerdown + 全局 pointermove 会移动按钮位置', () => {
+    render(<DebugToggleButtonImpl />)
+    const btn = screen.getByRole('button', { name: /debug/i })
+
+    const initialLeft = Number.parseInt(btn.style.left, 10)
+    const initialTop = Number.parseInt(btn.style.top, 10)
+
+    // pointerdown 起始点 (50, 50)
+    fireEvent.pointerDown(btn, { clientX: 50, clientY: 50 })
+
+    // pointermove (+30, +20)
+    act(() => {
+      window.dispatchEvent(
+        new PointerEvent('pointermove', { clientX: 80, clientY: 70, bubbles: true })
+      )
+    })
+
+    act(() => {
+      window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }))
+    })
+
+    expect(Number.parseInt(btn.style.left, 10)).toBe(initialLeft + 30)
+    expect(Number.parseInt(btn.style.top, 10)).toBe(initialTop + 20)
+  })
 })
 
 describe('DebugPanelImpl', () => {

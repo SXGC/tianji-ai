@@ -109,3 +109,28 @@ describe('graph-runner 普通错误语义', () => {
     expect(eventTypes).not.toContain('GraphRunCancelled')
   })
 })
+
+describe('graph-runner GraphRunStarted mermaidDiagram', () => {
+  it('GraphRunStarted 事件应包含非空的 mermaidDiagram 字段', async () => {
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['result value'] }),
+    })
+
+    const result = runOrchestrationGraph({
+      graph: buildMinimalGraph(),
+      runId: 'run_mermaid_test' as RunId,
+      compileOptions: { agentExecutorFactory: factory },
+    })
+
+    const collectionPromise = collectEvents(result.events)
+    await result.finished
+    const collected = await collectionPromise
+
+    const startedEvent = collected.find((e) => e.type === 'GraphRunStarted')
+    expect(startedEvent).toBeDefined()
+    // mermaidDiagram 由 renderOrchestrationGraphMermaid 生成，以 'flowchart' 开头
+    expect((startedEvent as { type: string; mermaidDiagram: string }).mermaidDiagram).toMatch(
+      /^flowchart/
+    )
+  })
+})

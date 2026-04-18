@@ -45,9 +45,30 @@ export {
   type UnifiedCancelRequest,
   type UnifiedStreamRequest,
 } from './unified-entry.js'
-export { buildDefaultGraph, type DefaultGraphBuildResult } from './default-graph-builder.js'
+export {
+  buildDefaultGraph,
+  type BuildDefaultGraphOptions,
+  type DefaultGraphBuildResult,
+} from './default-graph-builder.js'
 export { TianjiAcpAgent, mapRuntimeEventToSessionUpdate } from './acp/index.js'
 export { runAcpAgent } from './acp-entry.js'
 export { DaemonClient, type DaemonClientOptions } from './daemon-client.js'
 export { DaemonServer, type DaemonServerOptions } from './daemon-server.js'
+export {
+  createSessionScopedMcpSkillRegistry,
+  type CreateSessionScopedMcpSkillRegistryOptions,
+  type SessionScopedMcpSkillFile,
+  type SessionScopedMcpSkillRegistry,
+} from './mcp/registry.js'
+export {
+  assertSafeMcpTarget,
+  generateMcpSkillMarkdown,
+  toLogicalMcpSkillId,
+} from './mcp/skill-generator.js'
+export {
+  createCallMcpTool,
+  type CallMcpExecutionCapabilities,
+  type CallMcpTargetPolicy,
+  type CallMcpToolOptions,
+} from './mcp/call-mcp-tool.js'
 export * from './orchestration/index.js'

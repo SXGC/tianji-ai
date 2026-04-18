@@ -2,9 +2,10 @@ import type { BaseEvent } from '@ag-ui/client'
 import { createMemorySink, createObserverLogger } from '@tianji/observer'
 import { createEventBus } from '@tianji/shared'
 import { firstValueFrom, toArray } from 'rxjs'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { type ControlPlaneDb, createDatabase } from '../../db/index.js'
+import { CommandWaiterRegistry } from '../../services/command-waiter-registry.js'
 import { TianjiAgent } from '../tianji-agent.js'
 
 /** TianjiAgent 构造必传 logger；测试环境走内存 sink，避免噪声泄漏到 stdout。 */
@@ -217,6 +218,49 @@ describe('TianjiAgent', () => {
       sessionIds: ['session_owner'],
       owner: { nodeId: 'node-1', agentId: 'agent-1' },
     })
+  })
+
+  it('run 在 notify waiter registry 时，对应 task 行已落库', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-1')
+
+    const registry = new CommandWaiterRegistry()
+    const notifySpy = vi.spyOn(registry, 'notify').mockImplementation((nodeId: string) => {
+      const row = db.raw
+        .prepare(
+          `SELECT t.task_id
+           FROM tasks t
+           INNER JOIN commands c ON c.command_id = t.command_id
+           WHERE c.node_id = ?
+             AND c.type = 'task.run'
+           LIMIT 1`
+        )
+        .get(nodeId) as { task_id: string } | undefined
+      expect(row).toBeDefined()
+    })
+    const agent = new TianjiAgent(
+      db,
+      'node-1',
+      'agent-1',
+      createTestBus(),
+      makeTestLogger(),
+      registry
+    )
+
+    await firstValueFrom(
+      agent.run({
+        threadId: 'session_notify',
+        runId: 'run_notify',
+        messages: [{ id: 'msg-1', role: 'user', content: 'hello' }],
+        tools: [],
+        context: [],
+        forwardedProps: { sessionId: 'session_notify' },
+        state: {},
+      })
+    )
+
+    expect(notifySpy).toHaveBeenCalledTimes(1)
+    expect(notifySpy).toHaveBeenCalledWith('node-1')
   })
 
   it('任务终态后运行流中只出现一个 RUN_STARTED', async () => {
@@ -484,6 +528,28 @@ describe('TianjiAgent.cancelTask', () => {
       node_id: string
     }
     expect(row.node_id).toBe('node-target')
+  })
+
+  it('插入 task.cancel 命令后通知 task 所在 node', async () => {
+    db = createDatabase(':memory:')
+    setupOnlineNode('node-target')
+    setupOnlineNode('node-other')
+    setupRunningTask('node-target', 'task-notify', 'agent-1')
+    const registry = new CommandWaiterRegistry()
+    const notifySpy = vi.spyOn(registry, 'notify')
+    const agent = new TianjiAgent(
+      db,
+      'node-other',
+      'agent-1',
+      undefined,
+      makeTestLogger(),
+      registry
+    )
+
+    await agent.cancelTask('task-notify')
+
+    expect(notifySpy).toHaveBeenCalledTimes(1)
+    expect(notifySpy).toHaveBeenCalledWith('node-target')
   })
 
   it('不存在的 taskId 抛错', async () => {
