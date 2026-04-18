@@ -8,6 +8,27 @@ import { useHistoryPagination } from './hooks/use-history-pagination.js'
 
 const SCROLL_THRESHOLD_PX = 200
 
+/**
+ * 选中 GraphRunCompleted 事件时，从 store 找同 aggregateId 的 GraphRunStarted，取其 mermaidDiagram。
+ *
+ * 用 typeof 守卫而非 as 断言：字段缺失（旧事件）返回 null 是正常路径；
+ * 字段存在但类型异常（例如重命名或后端契约漂移）则用 error 日志暴露，避免静默失效。
+ */
+function findMermaidDiagram(selectedEvent: DebugEvent, events: DebugEvent[]): string | null {
+  if (selectedEvent.type !== 'GraphRunCompleted') return null
+  const started = events.find(
+    (e) => e.type === 'GraphRunStarted' && e.aggregateId === selectedEvent.aggregateId
+  )
+  if (started === undefined) return null
+  const raw = started.payload.mermaidDiagram
+  if (raw === undefined) return null
+  if (typeof raw !== 'string') {
+    console.error('[debug] GraphRunStarted.payload.mermaidDiagram is not a string', typeof raw, raw)
+    return null
+  }
+  return raw
+}
+
 /** 事件列表主体 Tab，含降序渲染、溢出提示、错误 banner 与历史分页。 */
 export function EventListTab(): JSX.Element {
   const events = useDebugStore((s) => s.events)
@@ -16,7 +37,18 @@ export function EventListTab(): JSX.Element {
   const reportFailure = useDebugStore((s) => s.reportFailure)
   const loadMore = useHistoryPagination()
   const [selected, setSelected] = useState<DebugEvent | null>(null)
+  const [mermaidDiagram, setMermaidDiagram] = useState<string | null>(null)
   const loadingRef = useRef(false)
+
+  const handleSelect = (ev: DebugEvent): void => {
+    setSelected(ev)
+    setMermaidDiagram(findMermaidDiagram(ev, events))
+  }
+
+  const handleClose = (): void => {
+    setSelected(null)
+    setMermaidDiagram(null)
+  }
 
   const onScroll = (e: UIEvent<HTMLDivElement>): void => {
     const el = e.currentTarget
@@ -57,7 +89,7 @@ export function EventListTab(): JSX.Element {
             key={ev.eventId}
             type="button"
             data-testid="event-row"
-            onClick={() => setSelected(ev)}
+            onClick={() => handleSelect(ev)}
             style={{
               display: 'block',
               width: '100%',
@@ -78,7 +110,7 @@ export function EventListTab(): JSX.Element {
         ))}
         {reachedEnd && <div style={{ padding: 8, color: '#888' }}>已到底部</div>}
       </div>
-      <EventDetailDrawer event={selected} onClose={() => setSelected(null)} />
+      <EventDetailDrawer event={selected} mermaidDiagram={mermaidDiagram} onClose={handleClose} />
     </div>
   )
 }

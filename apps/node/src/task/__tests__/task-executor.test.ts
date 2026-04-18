@@ -260,6 +260,7 @@ describe('TaskExecutorConfig', () => {
               runId: 'run-graph-completed' as never,
               graphId: 'default',
               graphVersion: 1,
+              mermaidDiagram: '',
               timestamp: Date.now(),
             },
             {
@@ -297,6 +298,7 @@ describe('TaskExecutorConfig', () => {
               runId: 'run-graph-failed' as never,
               graphId: 'default',
               graphVersion: 1,
+              mermaidDiagram: '',
               timestamp: Date.now(),
             },
             {
@@ -1045,6 +1047,7 @@ describe('TaskExecutorConfig', () => {
                 runId,
                 graphId: 'default',
                 graphVersion: 1,
+                mermaidDiagram: '',
                 timestamp: now,
               }
               throw abortError

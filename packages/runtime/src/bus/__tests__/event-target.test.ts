@@ -24,6 +24,7 @@ describe('resolveTarget', () => {
       runId: 'gr_1',
       graphId: 'g1',
       graphVersion: 1,
+      mermaidDiagram: '',
       timestamp: 0,
     }
     const target = resolveTarget(event)

@@ -192,6 +192,7 @@ describe('TaskExecutor + unified entry integration', () => {
               runId: 'run-test' as never,
               graphId: 'default',
               graphVersion: 1,
+              mermaidDiagram: '',
               timestamp: Date.now(),
             }
             yield startedEvent
