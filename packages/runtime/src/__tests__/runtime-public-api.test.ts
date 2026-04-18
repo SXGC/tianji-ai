@@ -22,6 +22,7 @@ import {
   type SessionRuntimeDeepagentsConfig,
   type SessionRuntimeEngine,
   type SessionRuntimeOptions,
+  type SessionRuntimeTracingConfig,
   ToolRegistry,
   createSessionRuntime,
 } from '../index.js'
@@ -61,6 +62,9 @@ describe('runtime public API v2 boundary', () => {
     expectTypeOf<SessionRuntimeOptions['deepagents']>().toEqualTypeOf<
       SessionRuntimeDeepagentsConfig | undefined
     >()
+    expectTypeOf<SessionRuntimeOptions['tracing']>().toEqualTypeOf<
+      SessionRuntimeTracingConfig | undefined
+    >()
     expectTypeOf<SessionRuntimeOptions['logger']>().toEqualTypeOf<ObserverLogger | undefined>()
     expect(runtime.createSession).toBeDefined()
     expect(runtime.closeSession).toBeDefined()
@@ -75,6 +79,12 @@ describe('runtime public API v2 boundary', () => {
   it('keeps logger as an optional observer boundary only', () => {
     expectTypeOf<Pick<SessionRuntimeOptions, 'logger'>>().toMatchTypeOf<{
       logger?: ObserverLogger
+    }>({})
+  })
+
+  it('accepts optional tracing config without changing the runtime boundary', () => {
+    expectTypeOf<Pick<SessionRuntimeOptions, 'tracing'>>().toMatchTypeOf<{
+      tracing?: SessionRuntimeTracingConfig
     }>({})
   })
 

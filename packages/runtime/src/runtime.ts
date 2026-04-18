@@ -9,7 +9,12 @@
  * - 被 packages/runtime/src/index.ts 的具名导出引用。
  * - 被 __tests__/ 下各测试文件通过 `../runtime.js` 深路径 import。
  */
-export type { RuntimeProviderConfig, SessionRuntimeDeepagentsConfig } from './types.js'
+export type {
+  RuntimeLangsmithTracingConfig,
+  RuntimeProviderConfig,
+  SessionRuntimeDeepagentsConfig,
+  SessionRuntimeTracingConfig,
+} from './types.js'
 export type { ObserverLogger } from '@tianji/observer'
 export type {
   AbortSignalScope,

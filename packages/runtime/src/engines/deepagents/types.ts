@@ -3,6 +3,7 @@
  *
  * 该模块仅供 engines/deepagents-engine.ts 及其子模块使用，不对外导出。
  */
+import type { RunnableConfig } from '@langchain/core/runnables'
 import type { StateSnapshot } from '@langchain/langgraph'
 import type {
   AppMessage,
@@ -16,6 +17,7 @@ import type {
 } from '@tianji/shared'
 
 import type { ObserverLogger } from '@tianji/observer'
+import type { RuntimeTracingContext, RuntimeTracingState } from '../../langsmith.js'
 import type { LlmGenerationConfig } from '../../llm/index.js'
 import type { ToolCatalog } from '../../tool-catalog.js'
 import type { SessionRuntimeDeepagentsConfig } from '../../types.js'
@@ -47,6 +49,8 @@ export interface ExecuteDeepagentsRunOptions {
     current: number
   }
   readonly llmRawDir?: string
+  readonly tracing?: RuntimeTracingState
+  readonly tracingContext?: RuntimeTracingContext
   readonly logger?: ObserverLogger
   readonly emitEvent: (event: DomainEvent) => void
 }
@@ -63,13 +67,15 @@ export interface DeepagentsAgentEvent {
 export interface DeepagentsAgentInstance {
   readonly streamEvents: (
     input: unknown,
-    options: {
+    options: RunnableConfig<{
+      readonly thread_id: string
+      readonly checkpoint_id?: string
+    }> & {
       readonly version: 'v2'
       readonly configurable: {
         readonly thread_id: string
         readonly checkpoint_id?: string
       }
-      readonly signal: AbortSignal
     }
   ) => Promise<AsyncIterable<DeepagentsAgentEvent>>
   readonly getState: (options: {

@@ -182,6 +182,7 @@ export async function createAgentRuntime(
       },
       backend,
     },
+    tracing: context.config.runtime?.tracing,
     snapshotStore: context.snapshotStore,
     toolCatalog,
     logger: options?.logger,

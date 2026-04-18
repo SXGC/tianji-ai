@@ -633,6 +633,7 @@ describe('GraphRun 事件映射', () => {
           runId: 'run-001',
           graphId: 'graph-abc',
           graphVersion: 3,
+          mermaidDiagram: '',
           timestamp: 1000,
         }),
         freshCtx()

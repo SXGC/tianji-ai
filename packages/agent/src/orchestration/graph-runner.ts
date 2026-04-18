@@ -91,8 +91,10 @@ export function runOrchestrationGraph(
     abortSignal: options.abortSignal,
   })
 
+  const mermaidDiagram = renderOrchestrationGraphMermaid(options.graph)
+
   if (options.onMermaid !== undefined) {
-    options.onMermaid(renderOrchestrationGraphMermaid(options.graph))
+    options.onMermaid(mermaidDiagram)
   }
 
   emit({
@@ -100,6 +102,7 @@ export function runOrchestrationGraph(
     runId: options.runId,
     graphId: options.graph.id,
     graphVersion: options.graph.version,
+    mermaidDiagram,
     timestamp: Date.now(),
   })
 

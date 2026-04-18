@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 
 import { useDebugStore } from '../../stores/debug-store.js'
+import { useDraggable } from './hooks/use-draggable.js'
 
 /**
  * 判断在模块顶层完成，值在 build 时被 Vite 内联为常量 false 或 true。
@@ -15,21 +16,25 @@ const DEBUG_ENABLED = import.meta.env.VITE_ENABLE_DEBUG === 'true'
  */
 export function DebugToggleButtonImpl(): JSX.Element {
   const togglePanel = useDebugStore((s) => s.togglePanel)
+  const { x, y, startDrag } = useDraggable(window.innerWidth - 80, window.innerHeight - 52)
   return (
     <button
       type="button"
       onClick={togglePanel}
+      onPointerDown={(e) => startDrag(e.nativeEvent)}
       aria-label="Debug"
       style={{
         position: 'fixed',
-        right: 16,
-        bottom: 16,
+        left: x,
+        top: y,
         zIndex: 9999,
         padding: '8px 12px',
         borderRadius: 8,
         border: '1px solid #333',
         background: '#111',
         color: '#fff',
+        cursor: 'grab',
+        userSelect: 'none',
       }}
     >
       Debug

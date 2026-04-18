@@ -19,6 +19,7 @@ describe('runtime config loader', () => {
   afterEach(async () => {
     Reflect.deleteProperty(process.env, 'OPENAI_API_KEY')
     Reflect.deleteProperty(process.env, 'ANTHROPIC_API_KEY')
+    Reflect.deleteProperty(process.env, 'LANGSMITH_API_KEY')
 
     await Promise.all(createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
   })
@@ -104,6 +105,125 @@ describe('runtime config loader', () => {
       ['user', true],
       ['workspace', true],
     ])
+  })
+
+  it('should merge runtime.langsmith tracing config from user and workspace layers', async () => {
+    const sandbox = await createSandbox()
+    const workspaceRoot = join(sandbox, 'workspace')
+    const homeDir = join(sandbox, 'home')
+    const userConfigPath = join(homeDir, '.config', 'tianji-ai', 'tianji.json')
+    const workspaceConfigPath = join(
+      homeDir,
+      '.config',
+      'tianji-ai',
+      'workspaces',
+      `${createWorkspaceId(workspaceRoot)}.json`
+    )
+
+    await mkdir(workspaceRoot, { recursive: true })
+    await mkdir(homeDir, { recursive: true })
+
+    process.env.OPENAI_API_KEY = 'sk-default'
+    process.env.LANGSMITH_API_KEY = 'ls-key'
+
+    await writeJson(userConfigPath, {
+      runtime: {
+        tracing: {
+          langsmith: {
+            enabled: true,
+            project: 'user-project',
+            apiKey: '${env:LANGSMITH_API_KEY}',
+            tags: ['user'],
+          },
+        },
+      },
+    })
+
+    await writeJson(workspaceConfigPath, {
+      runtime: {
+        tracing: {
+          langsmith: {
+            project: 'workspace-project',
+            metadata: { source: 'workspace' },
+          },
+        },
+      },
+    })
+
+    const result = await loadResolvedConfig({ workspaceRoot, userHomeDir: homeDir })
+
+    expect(result.config.runtime?.tracing?.langsmith).toEqual({
+      enabled: true,
+      project: 'workspace-project',
+      apiKey: 'ls-key',
+      tags: ['user'],
+      metadata: { source: 'workspace' },
+    })
+  })
+
+  it('should fail when langsmith tracing is enabled without project after merge', async () => {
+    const sandbox = await createSandbox()
+    const workspaceRoot = join(sandbox, 'workspace')
+    const homeDir = join(sandbox, 'home')
+
+    await mkdir(workspaceRoot, { recursive: true })
+    await mkdir(homeDir, { recursive: true })
+
+    process.env.OPENAI_API_KEY = 'sk-default'
+    process.env.LANGSMITH_API_KEY = 'ls-key'
+
+    await writeJson(join(homeDir, '.config', 'tianji-ai', 'tianji.json'), {
+      runtime: {
+        tracing: {
+          langsmith: {
+            enabled: true,
+            apiKey: '${env:LANGSMITH_API_KEY}',
+          },
+        },
+      },
+    })
+
+    await expect(loadResolvedConfig({ workspaceRoot, userHomeDir: homeDir })).rejects.toMatchObject(
+      {
+        code: 'config.schema_error',
+        details: {
+          fieldPath: 'runtime.tracing.langsmith.project',
+          phase: 'schema',
+        },
+      } satisfies Partial<RuntimeConfigError>
+    )
+  })
+
+  it('should fail when langsmith tracing is enabled without apiKey after merge', async () => {
+    const sandbox = await createSandbox()
+    const workspaceRoot = join(sandbox, 'workspace')
+    const homeDir = join(sandbox, 'home')
+
+    await mkdir(workspaceRoot, { recursive: true })
+    await mkdir(homeDir, { recursive: true })
+
+    process.env.OPENAI_API_KEY = 'sk-default'
+
+    await writeJson(join(homeDir, '.config', 'tianji-ai', 'tianji.json'), {
+      runtime: {
+        tracing: {
+          langsmith: {
+            enabled: true,
+            project: 'user-project',
+          },
+        },
+      },
+    })
+
+    await expect(loadResolvedConfig({ workspaceRoot, userHomeDir: homeDir })).rejects.toMatchObject(
+      {
+        code: 'config.schema_error',
+        details: {
+          fieldPath: 'runtime.tracing.langsmith.apiKey',
+          phase: 'schema',
+        },
+      } satisfies Partial<RuntimeConfigError>
+    )
   })
 
   it('should fail when default config placeholders cannot be resolved', async () => {

@@ -207,9 +207,31 @@ export type ToolConfigConfig = z.infer<typeof ToolConfigSchema>
 /**
  * Schema for runtime configuration.
  */
+export const LangsmithTracingConfigSchema = z
+  .object({
+    enabled: z.boolean().optional(),
+    project: z.string().min(1).optional(),
+    apiKey: z.string().min(1).optional(),
+    apiUrl: z.string().min(1).optional(),
+    tags: z.array(z.string().min(1)).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict()
+
+/**
+ * Schema for runtime tracing configuration.
+ */
+export const RuntimeTracingConfigSchema = z.object({
+  langsmith: LangsmithTracingConfigSchema.optional(),
+})
+
+/**
+ * Schema for runtime configuration.
+ */
 export const RuntimeConfigSchema = z.object({
   retry: RetryConfigSchema.optional(),
   tool: ToolConfigSchema.optional(),
+  tracing: RuntimeTracingConfigSchema.optional(),
 })
 
 export type RuntimeConfig = z.infer<typeof RuntimeConfigSchema>
@@ -514,7 +536,7 @@ export const DEFAULT_TOOL_CONFIG: Required<Omit<ToolConfigConfig, 'pathPolicy'>>
 /**
  * Default runtime configuration.
  */
-export const DEFAULT_RUNTIME_CONFIG: Required<RuntimeConfig> = {
+export const DEFAULT_RUNTIME_CONFIG: Required<Pick<RuntimeConfig, 'retry' | 'tool'>> = {
   retry: DEFAULT_RETRY_CONFIG,
   tool: DEFAULT_TOOL_CONFIG,
 }

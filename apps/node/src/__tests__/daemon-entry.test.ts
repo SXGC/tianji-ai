@@ -95,6 +95,7 @@ function createMockAgentSession(sessionId = 'session-1'): AgentSession {
           runId: 'run_graph_test',
           graphId: 'test',
           graphVersion: 1,
+          mermaidDiagram: '',
           timestamp: 0,
         }
       })(),
@@ -447,6 +448,7 @@ describe('runDaemonEntry', () => {
               runId: 'run_graph_terminal',
               graphId: 'test',
               graphVersion: 1,
+              mermaidDiagram: '',
               timestamp: 0,
             }
             yield {
@@ -508,6 +510,7 @@ describe('runDaemonEntry', () => {
               runId: 'run_graph_fresh',
               graphId: 'test',
               graphVersion: 1,
+              mermaidDiagram: '',
               timestamp: 0,
             }
             yield {
@@ -565,6 +568,7 @@ describe('runDaemonEntry', () => {
               runId: 'run_graph_existing',
               graphId: 'test',
               graphVersion: 1,
+              mermaidDiagram: '',
               timestamp: 0,
             }
           })(),

@@ -17,6 +17,7 @@ interface GraphRunFields {
 
 export interface GraphRunStartedEvent extends GraphRunFields {
   readonly type: 'GraphRunStarted'
+  readonly mermaidDiagram: string
 }
 
 export interface GraphRunCompletedEvent extends GraphRunFields {

@@ -368,12 +368,13 @@ function resolveMergedConfig(config: TianjiConfig): {
   readonly config: TianjiConfig
   readonly resolvedEnvVars: readonly string[]
 } {
+  let result: {
+    readonly config: TianjiConfig
+    readonly resolvedVars: string[]
+  }
+
   try {
-    const result = resolveConfigPlaceholders(config)
-    return {
-      config: result.config,
-      resolvedEnvVars: result.resolvedVars,
-    }
+    result = resolveConfigPlaceholders(config)
   } catch (error) {
     if (error instanceof ConfigPlaceholderError) {
       throw new RuntimeConfigError(
@@ -396,6 +397,43 @@ function resolveMergedConfig(config: TianjiConfig): {
       }
     )
   }
+
+  validateResolvedRuntimeConfig(result.config)
+
+  return {
+    config: result.config,
+    resolvedEnvVars: result.resolvedVars,
+  }
+}
+
+function validateResolvedRuntimeConfig(config: TianjiConfig): void {
+  const langsmith = config.runtime?.tracing?.langsmith
+  if (langsmith?.enabled !== true) {
+    return
+  }
+
+  const missingFields: string[] = []
+
+  if (langsmith.project === undefined || langsmith.project.length === 0) {
+    missingFields.push('runtime.tracing.langsmith.project')
+  }
+
+  if (langsmith.apiKey === undefined || langsmith.apiKey.length === 0) {
+    missingFields.push('runtime.tracing.langsmith.apiKey')
+  }
+
+  if (missingFields.length === 0) {
+    return
+  }
+
+  throw new RuntimeConfigError(
+    'config.schema_error',
+    `Invalid merged runtime config: ${missingFields.join(', ')} ${missingFields.length === 1 ? 'is' : 'are'} required when LangSmith tracing is enabled`,
+    {
+      fieldPath: missingFields[0],
+      phase: 'schema',
+    }
+  )
 }
 
 function toLayerSnapshot(
