@@ -7,12 +7,27 @@
  * - 验证 input 缺失快速失败、多 output 自动追加 JSON 指令等边界行为。
  */
 import { FakeListChatModel } from '@langchain/core/utils/testing'
-import type { DomainEvent, GraphRunDomainEvent, RunId } from '@tianji/shared'
-import { describe, expect, it, vi } from 'vitest'
+import * as runtimeModule from '@tianji/runtime'
+import type { DomainEvent, GraphRunDomainEvent, RunId, SessionId } from '@tianji/shared'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createDeepagentsExecutorFactory } from '../executors/deepagents-executor.js'
 import type { NodeExecutorContext } from '../executors/executor-types.js'
 import type { AgentNode } from '../graph-schema.js'
+
+vi.mock('@tianji/runtime', async () => {
+  const actual = await vi.importActual<typeof import('@tianji/runtime')>('@tianji/runtime')
+
+  return {
+    ...actual,
+    createSessionRuntime: vi.fn(actual.createSessionRuntime),
+  }
+})
+
+afterEach(async () => {
+  const actual = await vi.importActual<typeof import('@tianji/runtime')>('@tianji/runtime')
+  vi.mocked(runtimeModule.createSessionRuntime).mockImplementation(actual.createSessionRuntime)
+})
 
 function makeCtx(overrides: Partial<NodeExecutorContext> = {}): NodeExecutorContext {
   return {
@@ -36,6 +51,250 @@ function makeAgentNode(overrides: Partial<AgentNode> = {}): AgentNode {
 }
 
 describe('createDeepagentsExecutorFactory', () => {
+  it('节点 runtime 只收到解析后的 skill 路径子集', async () => {
+    let capturedSessionOptions: Parameters<typeof runtimeModule.createSessionRuntime>[0] | undefined
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),
+      resolveSkillPath: (skillId) => `/skills/${skillId}/SKILL.md`,
+      onSessionRuntimeOptions: (options) => {
+        capturedSessionOptions = options
+      },
+    })
+    const node = makeAgentNode({
+      agent: {
+        model: 'fake',
+        systemPrompt: 'You are helpful.',
+        skills: ['skill.a', 'skill.b'],
+      },
+    })
+    const action = factory(
+      node,
+      makeCtx({
+        graphRunCapabilityUpperBound: {
+          skills: ['skill.a', 'skill.b'],
+          tools: [],
+          mcpTargets: [],
+        },
+        resolveNodeCapabilities: () => ({
+          skills: ['skill.a'],
+          tools: [],
+          mcpTargets: [],
+        }),
+      })
+    )
+
+    await action({}, {} as never)
+
+    expect(capturedSessionOptions?.deepagents?.skills).toEqual(['/skills/skill.a/SKILL.md'])
+  })
+
+  it('节点 runtime 只收到裁剪后的 ToolCatalog', async () => {
+    let capturedSessionOptions: Parameters<typeof runtimeModule.createSessionRuntime>[0] | undefined
+    const sharedTools = new runtimeModule.ToolRegistry()
+      .registerTool({
+        spec: {
+          name: 'alpha',
+          description: 'alpha tool',
+          parameters: { type: 'object', properties: {} },
+        },
+        execute: async () => undefined,
+      })
+      .registerTool({
+        spec: {
+          name: 'beta',
+          description: 'beta tool',
+          parameters: { type: 'object', properties: {} },
+        },
+        execute: async () => undefined,
+      })
+
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),
+      toolRegistry: sharedTools,
+      onSessionRuntimeOptions: (options) => {
+        capturedSessionOptions = options
+      },
+    })
+    const node = makeAgentNode({
+      agent: {
+        model: 'fake',
+        systemPrompt: 'You are helpful.',
+        tools: ['alpha', 'beta'],
+      },
+    })
+    const action = factory(
+      node,
+      makeCtx({
+        graphRunCapabilityUpperBound: {
+          skills: [],
+          tools: ['alpha', 'beta'],
+          mcpTargets: [],
+        },
+        resolveNodeCapabilities: () => ({
+          skills: [],
+          tools: ['alpha'],
+          mcpTargets: [],
+        }),
+      })
+    )
+
+    await action({}, {} as never)
+
+    expect(
+      (
+        capturedSessionOptions?.toolCatalog as readonly {
+          readonly spec: { readonly name: string }
+        }[]
+      ).map((definition) => definition.spec.name)
+    ).toEqual(['alpha'])
+  })
+
+  it('节点未声明工具时，不看到共享整包 tools', async () => {
+    let capturedSessionOptions: Parameters<typeof runtimeModule.createSessionRuntime>[0] | undefined
+    const sharedTools = new runtimeModule.ToolRegistry()
+      .registerTool({
+        spec: {
+          name: 'alpha',
+          description: 'alpha tool',
+          parameters: { type: 'object', properties: {} },
+        },
+        execute: async () => undefined,
+      })
+      .registerTool({
+        spec: {
+          name: 'beta',
+          description: 'beta tool',
+          parameters: { type: 'object', properties: {} },
+        },
+        execute: async () => undefined,
+      })
+
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),
+      graphRunCapabilityUpperBound: {
+        skills: [],
+        tools: [],
+        mcpTargets: [],
+      },
+      toolRegistry: sharedTools,
+      onSessionRuntimeOptions: (options) => {
+        capturedSessionOptions = options
+      },
+    })
+    const node = makeAgentNode({
+      agent: {
+        model: 'fake',
+        systemPrompt: 'You are helpful.',
+      },
+    })
+    const action = factory(node, makeCtx())
+
+    await action({}, {} as never)
+
+    expect(capturedSessionOptions?.toolCatalog).toEqual([])
+  })
+
+  it('声明 call_mcp 时注入节点级 call_mcp 工具', async () => {
+    let capturedSessionOptions: Parameters<typeof runtimeModule.createSessionRuntime>[0] | undefined
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),
+      onSessionRuntimeOptions: (options) => {
+        capturedSessionOptions = options
+      },
+      listMcpServers: () => [
+        {
+          target: 'github',
+          name: 'GitHub MCP',
+          description: 'GitHub access',
+          tools: [
+            {
+              name: 'list_pull_requests',
+              qualifiedName: 'github.list_pull_requests',
+              requiredParameters: [],
+              optionalParameterCount: 0,
+            },
+          ],
+        },
+      ],
+      discoverMcp: async (target) => ({
+        target,
+        server: target,
+        tools: [],
+      }),
+      invokeMcp: async (target) => ({
+        target,
+        server: 'github',
+        tool: target,
+        content: {},
+        isError: false,
+      }),
+    })
+    const node = makeAgentNode({
+      agent: {
+        model: 'fake',
+        systemPrompt: 'You are helpful.',
+        tools: ['call_mcp'],
+        mcpTargets: ['github'],
+      },
+    })
+    const action = factory(
+      node,
+      makeCtx({
+        graphRunCapabilityUpperBound: {
+          skills: [],
+          tools: ['call_mcp'],
+          mcpTargets: ['github'],
+        },
+      })
+    )
+
+    await action({}, {} as never)
+
+    expect(
+      (
+        capturedSessionOptions?.toolCatalog as readonly {
+          readonly spec: { readonly name: string }
+        }[]
+      ).map((definition) => definition.spec.name)
+    ).toEqual(['call_mcp'])
+  })
+
+  it('临时 session 在失败路径也会关闭', async () => {
+    const closeSession = vi.fn(async () => undefined)
+    const sessionId = 'session_temp_failure' as SessionId
+    vi.mocked(runtimeModule.createSessionRuntime).mockReturnValue({
+      createSession: vi.fn(async () => ({ sessionId })),
+      openSession: vi.fn(async () => undefined),
+      runTurn: vi.fn(async () => 'run_failure' as never),
+      closeSession,
+      streamEvents: vi.fn(async function* () {
+        yield {
+          type: 'MessageCompleted',
+          runId: 'run_failure' as RunId,
+          message: {
+            id: 'msg_assistant',
+            role: 'assistant',
+            content: [{ type: 'text', text: 'not json' }],
+            createdAt: Date.now(),
+          },
+          timestamp: Date.now(),
+        } as DomainEvent
+      }),
+    } as unknown as runtimeModule.SessionRuntime)
+
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ignored'] }),
+    })
+    const node = makeAgentNode({
+      input: ['task'],
+      output: ['code', 'tests'],
+    })
+    const action = factory(node, makeCtx())
+
+    await expect(action({ task: 'do it' }, {} as never)).rejects.toThrow()
+    expect(closeSession).toHaveBeenCalledWith(sessionId)
+  })
+
   it('节点执行后从 state 读 input 并把结果写回 output', async () => {
     const factory = createDeepagentsExecutorFactory({
       resolveModel: () => new FakeListChatModel({ responses: ['hello world'] }),

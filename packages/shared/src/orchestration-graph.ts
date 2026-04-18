@@ -31,6 +31,13 @@ export interface AgentNode {
     readonly tools?: readonly string[]
     readonly subagents?: readonly SubAgentDef[]
     readonly skills?: readonly string[]
+    /**
+     * 节点级 call_mcp allowlist。
+     *
+     * 这里只声明该节点允许访问的 MCP 目标，不是 hint，也不是默认全开。
+     * 最终可访问集合必须再和 graph-run 级上限取交集。
+     */
+    readonly mcpTargets?: readonly string[]
   }
   readonly input?: readonly string[]
   readonly output?: readonly string[]

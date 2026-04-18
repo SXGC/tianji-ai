@@ -15,16 +15,31 @@ import type { ObserverLogger } from '@tianji/observer'
 import {
   InMemorySnapshotStore,
   type RunTurnOptions,
+  type RuntimeToolDefinition,
   type SessionRuntime,
   type SessionRuntimeDeepagentsConfig,
   type SessionRuntimeOptions,
   type SnapshotStore,
   type ToolCatalog,
+  type ToolRegistry,
   createSessionRuntime,
 } from '@tianji/runtime'
 import { TianjiError } from '@tianji/shared'
-import type { AppMessage, DomainEvent, RunId, SessionId } from '@tianji/shared'
+import type {
+  AppMessage,
+  DomainEvent,
+  GraphRunCapabilityUpperBound,
+  McpServerSummary,
+  ResolvedNodeCapabilities,
+  RunId,
+  SessionId,
+} from '@tianji/shared'
 
+import { type CallMcpTargetPolicy, createCallMcpTool } from '../../mcp/call-mcp-tool.js'
+import {
+  createGraphRunCapabilityUpperBound,
+  resolveNodeCapabilities as defaultResolveNodeCapabilities,
+} from '../capability-resolver.js'
 import type { AgentNode } from '../graph-schema.js'
 import {
   buildOutputInstructionSuffix,
@@ -44,6 +59,27 @@ export interface CreateDeepagentsExecutorFactoryOptions {
   readonly resolveModel: (modelRef: string) => string | BaseLanguageModel
   /** 所有节点共享的工具目录，可选。 */
   readonly toolCatalog?: ToolCatalog
+  /** 共享 ToolRegistry，可按节点 selected tools 切片。 */
+  readonly toolRegistry?: ToolRegistry
+  /** graph-run 级别的能力上限。未提供时默认空 allowlist。 */
+  readonly graphRunCapabilityUpperBound?: GraphRunCapabilityUpperBound
+  /** 节点能力解析入口，默认使用 capability-resolver。 */
+  readonly resolveNodeCapabilities?: (
+    node: AgentNode,
+    upperBound: GraphRunCapabilityUpperBound
+  ) => ResolvedNodeCapabilities
+  /** 节点 skill id 到实际技能路径的映射。 */
+  readonly resolveSkillPath?: (skillId: string) => string
+  /** call_mcp 需要的 MCP server 摘要列表。 */
+  readonly listMcpServers?: () => readonly McpServerSummary[]
+  /** call_mcp 的 discover 注入实现。 */
+  readonly discoverMcp?: Parameters<typeof createCallMcpTool>[0]['discoverMcp']
+  /** call_mcp 的 invoke 注入实现。 */
+  readonly invokeMcp?: Parameters<typeof createCallMcpTool>[0]['invokeMcp']
+  /** call_mcp 只读 invoke 白名单。 */
+  readonly readonlyInvokeTargets?: readonly string[]
+  /** call_mcp target policy。 */
+  readonly targetPolicies?: Readonly<Record<string, CallMcpTargetPolicy>>
   /** 观测日志句柄，可选。 */
   readonly observer?: ObserverLogger
   /**
@@ -51,6 +87,8 @@ export interface CreateDeepagentsExecutorFactoryOptions {
    * 仅供测试使用，生产代码不应依赖此钩子。
    */
   readonly onRuntimeOptions?: (options: RunTurnOptions) => void
+  /** 测试钩子：观察 createSessionRuntime 实际接收到的 SessionRuntimeOptions。 */
+  readonly onSessionRuntimeOptions?: (options: SessionRuntimeOptions) => void
 }
 
 /**
@@ -88,9 +126,14 @@ export function createDeepagentsExecutorFactory(
         timestamp: startTimestamp,
       })
 
+      let runtime: SessionRuntime | undefined
+      let currentSessionId: SessionId | undefined
+      let shouldCloseTemporarySession = false
+
       try {
-        const runtime = buildRuntimeForNode(node, options, ctx.snapshotStore)
-        const currentSessionId = await openOrCreateSession(runtime, ctx.sessionId)
+        runtime = buildRuntimeForNode(node, options, ctx, ctx.snapshotStore)
+        currentSessionId = await openOrCreateSession(runtime, ctx.sessionId)
+        shouldCloseTemporarySession = ctx.sessionId === undefined
 
         const userMessage: AppMessage = {
           id: `msg_user_${startTimestamp}`,
@@ -125,12 +168,6 @@ export function createDeepagentsExecutorFactory(
           output: stateUpdate,
           timestamp: Date.now(),
         })
-
-        // 外部注入了 sessionId 表示持久化 session，不关闭以保留 open 状态供下一轮加载。
-        // 临时 session（ctx.sessionId 未设置）正常关闭以清理资源。
-        if (ctx.sessionId === undefined) {
-          await runtime.closeSession(currentSessionId)
-        }
         return stateUpdate
       } catch (error_) {
         // 把底层错误归一化为 TianjiError 后广播 failed 事件，再把原始错误再抛出，
@@ -146,6 +183,14 @@ export function createDeepagentsExecutorFactory(
           timestamp: Date.now(),
         })
         throw error_
+      } finally {
+        if (
+          shouldCloseTemporarySession &&
+          runtime !== undefined &&
+          currentSessionId !== undefined
+        ) {
+          await runtime.closeSession(currentSessionId)
+        }
       }
     }
 
@@ -197,8 +242,17 @@ async function openOrCreateSession(
 function buildRuntimeForNode(
   node: AgentNode,
   options: CreateDeepagentsExecutorFactoryOptions,
+  ctx: NodeExecutorContext,
   snapshotStore?: SnapshotStore
 ): SessionRuntime {
+  const graphRunCapabilityUpperBound =
+    ctx.graphRunCapabilityUpperBound ??
+    options.graphRunCapabilityUpperBound ??
+    createGraphRunCapabilityUpperBound()
+  const resolveNodeCapabilities =
+    ctx.resolveNodeCapabilities ?? options.resolveNodeCapabilities ?? defaultResolveNodeCapabilities
+  const nodeCapabilities = resolveNodeCapabilities(node, graphRunCapabilityUpperBound)
+
   // runtime 侧要求 subagents 元素具备 `[key: string]: unknown` 索引签名；
   // agent-schema 定义的 SubAgentDef 字段都属于 unknown 子集，显式复制到字面量即可满足。
   const subagents = node.agent.subagents?.map(
@@ -210,18 +264,100 @@ function buildRuntimeForNode(
       model: sa.model,
     })
   )
+  const skills = resolveSkillPaths(nodeCapabilities, options.resolveSkillPath)
+  const toolCatalog = buildNodeToolCatalog(nodeCapabilities, options, graphRunCapabilityUpperBound)
   const deepagentsConfig: SessionRuntimeDeepagentsConfig = {
     model: options.resolveModel(node.agent.model),
     subagents,
-    skills: node.agent.skills,
+    skills: skills.length > 0 ? skills : undefined,
   }
   const sessionOptions: SessionRuntimeOptions = {
     deepagents: deepagentsConfig,
     snapshotStore: snapshotStore ?? new InMemorySnapshotStore(),
-    toolCatalog: options.toolCatalog,
+    toolCatalog,
     logger: options.observer,
   }
+  options.onSessionRuntimeOptions?.(sessionOptions)
   return createSessionRuntime(sessionOptions)
+}
+
+function resolveSkillPaths(
+  nodeCapabilities: ResolvedNodeCapabilities,
+  resolveSkillPath?: (skillId: string) => string
+): readonly string[] {
+  if (nodeCapabilities.skills.length === 0) {
+    return []
+  }
+
+  if (resolveSkillPath === undefined) {
+    throw new Error('resolveSkillPath is required when node declares skills')
+  }
+
+  const resolvedSkills: string[] = []
+  for (const skillId of nodeCapabilities.skills) {
+    const skillPath = resolveSkillPath(skillId)
+    if (typeof skillPath !== 'string' || skillPath.length === 0) {
+      throw new Error(`Failed to resolve skill path for skill id: ${skillId}`)
+    }
+    resolvedSkills.push(skillPath)
+  }
+  return resolvedSkills
+}
+
+function buildNodeToolCatalog(
+  nodeCapabilities: ResolvedNodeCapabilities,
+  options: CreateDeepagentsExecutorFactoryOptions,
+  graphRunCapabilityUpperBound: GraphRunCapabilityUpperBound
+): readonly RuntimeToolDefinition[] {
+  if (nodeCapabilities.tools.length === 0) {
+    return []
+  }
+
+  const sharedToolCatalog = options.toolRegistry ?? options.toolCatalog
+  const runtimeTools: RuntimeToolDefinition[] = []
+
+  for (const toolName of nodeCapabilities.tools) {
+    if (toolName === 'call_mcp') {
+      runtimeTools.push(
+        buildNodeScopedCallMcpTool(options, nodeCapabilities, graphRunCapabilityUpperBound)
+      )
+      continue
+    }
+
+    const toolDefinition = sharedToolCatalog?.getTool(toolName)
+    if (toolDefinition === undefined) {
+      throw new Error(`Tool "${toolName}" is not registered`)
+    }
+    runtimeTools.push(toolDefinition)
+  }
+
+  return runtimeTools
+}
+
+function buildNodeScopedCallMcpTool(
+  options: CreateDeepagentsExecutorFactoryOptions,
+  nodeCapabilities: ResolvedNodeCapabilities,
+  graphRunCapabilityUpperBound: GraphRunCapabilityUpperBound
+): RuntimeToolDefinition {
+  if (
+    options.listMcpServers === undefined ||
+    options.discoverMcp === undefined ||
+    options.invokeMcp === undefined
+  ) {
+    throw new Error('call_mcp requires listMcpServers, discoverMcp, and invokeMcp callbacks')
+  }
+
+  return createCallMcpTool({
+    getCapabilities: () => ({
+      nodeCapabilities,
+      graphRunUpperBound: graphRunCapabilityUpperBound,
+      readonlyInvokeTargets: options.readonlyInvokeTargets,
+      targetPolicies: options.targetPolicies,
+    }),
+    listServers: options.listMcpServers,
+    discoverMcp: options.discoverMcp,
+    invokeMcp: options.invokeMcp,
+  })
 }
 
 /**
