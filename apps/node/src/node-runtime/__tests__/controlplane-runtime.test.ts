@@ -6,7 +6,7 @@ import {
   createSessionId,
   createTaskId,
 } from '@tianji/shared'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ControlPlaneRuntimeDeps } from '../controlplane-runtime.js'
 import { createControlPlaneRuntime } from '../controlplane-runtime.js'
