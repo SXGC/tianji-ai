@@ -126,7 +126,11 @@ export function createDeepagentsExecutorFactory(
           timestamp: Date.now(),
         })
 
-        await runtime.closeSession(currentSessionId)
+        // 外部注入了 sessionId 表示持久化 session，不关闭以保留 open 状态供下一轮加载。
+        // 临时 session（ctx.sessionId 未设置）正常关闭以清理资源。
+        if (ctx.sessionId === undefined) {
+          await runtime.closeSession(currentSessionId)
+        }
         return stateUpdate
       } catch (error_) {
         // 把底层错误归一化为 TianjiError 后广播 failed 事件，再把原始错误再抛出，
