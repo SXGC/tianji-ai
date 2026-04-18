@@ -5,6 +5,7 @@
 
 import type { TianjiError } from '../errors.js'
 import type { RunId } from '../identifiers.js'
+import type { TokenUsage } from '../snapshot.js'
 
 export type GraphNodeKind = 'agent' | 'acp-agent' | 'human-gate' | 'fork'
 
@@ -23,11 +24,13 @@ export interface GraphRunStartedEvent extends GraphRunFields {
 export interface GraphRunCompletedEvent extends GraphRunFields {
   readonly type: 'GraphRunCompleted'
   readonly finalState: Record<string, unknown>
+  readonly usage?: TokenUsage
 }
 
 export interface GraphRunFailedEvent extends GraphRunFields {
   readonly type: 'GraphRunFailed'
   readonly error: TianjiError
+  readonly usage?: TokenUsage
 }
 
 /**
@@ -37,6 +40,7 @@ export interface GraphRunFailedEvent extends GraphRunFields {
 export interface GraphRunCancelledEvent extends GraphRunFields {
   readonly type: 'GraphRunCancelled'
   readonly reason: 'abort'
+  readonly usage?: TokenUsage
 }
 
 interface GraphNodeFields {
@@ -54,11 +58,13 @@ export interface GraphNodeStartedEvent extends GraphNodeFields {
 export interface GraphNodeCompletedEvent extends GraphNodeFields {
   readonly type: 'GraphNodeCompleted'
   readonly output: Record<string, unknown>
+  readonly usage?: TokenUsage
 }
 
 export interface GraphNodeFailedEvent extends GraphNodeFields {
   readonly type: 'GraphNodeFailed'
   readonly error: TianjiError
+  readonly usage?: TokenUsage
 }
 
 export type GraphRunDomainEvent =
