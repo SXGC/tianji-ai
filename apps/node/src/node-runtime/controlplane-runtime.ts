@@ -131,7 +131,15 @@ async function createControlPlaneUnifiedEntry(
 
   return {
     run: async (request) => {
-      const session = await sessionModule.createAgentSession(nativeAgentContext, runtimeOptions)
+      const existingSessionId = command.payload.sessionIds?.[0]
+      const session =
+        existingSessionId !== undefined
+          ? await sessionModule.ensureAgentSession(
+              nativeAgentContext,
+              existingSessionId,
+              runtimeOptions
+            )
+          : await sessionModule.createAgentSession(nativeAgentContext, runtimeOptions)
       config.emitTaskEvent({
         type: 'TaskSessionAttached',
         taskId: String(command.payload.taskId),
