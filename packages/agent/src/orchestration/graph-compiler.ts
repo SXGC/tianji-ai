@@ -1,6 +1,6 @@
 import { type CompiledStateGraph, END, START, Send, StateGraph } from '@langchain/langgraph'
 import type { ObserverLogger } from '@tianji/observer'
-import type { SnapshotStore } from '@tianji/runtime'
+import type { RuntimeTracingContext, SnapshotStore } from '@tianji/runtime'
 import type {
   DomainEvent,
   GraphRunCapabilityUpperBound,
@@ -51,6 +51,7 @@ export interface CompileOptions {
   readonly sessionId?: SessionId
   /** 与 sessionId 配套的持久化快照存储，注入后执行器不再使用 InMemorySnapshotStore。 */
   readonly snapshotStore?: SnapshotStore
+  readonly graphTracingContext?: RuntimeTracingContext
 }
 
 /**
@@ -95,6 +96,7 @@ export function compileOrchestrationGraph(
     abortSignal: options.abortSignal,
     sessionId: options.sessionId,
     snapshotStore: options.snapshotStore,
+    graphTracingContext: options.graphTracingContext,
   }
 
   // Step 3: 添加节点

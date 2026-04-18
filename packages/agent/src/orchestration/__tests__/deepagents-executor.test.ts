@@ -50,7 +50,101 @@ function makeAgentNode(overrides: Partial<AgentNode> = {}): AgentNode {
   }
 }
 
+interface TestTracingContext {
+  readonly tags?: readonly string[]
+  readonly metadata?: Record<string, unknown>
+}
+
 describe('createDeepagentsExecutorFactory', () => {
+  it('节点 runtime 构造时会收到 graph tracing config', async () => {
+    const graphTracingConfig = {
+      langsmith: {
+        enabled: true,
+        project: 'graph-trace-project',
+        apiKey: 'graph-trace-key',
+        tags: ['graph'],
+        metadata: { scope: 'graph' },
+      },
+    }
+    let capturedSessionOptions: Parameters<typeof runtimeModule.createSessionRuntime>[0] | undefined
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),
+      tracing: graphTracingConfig,
+      onSessionRuntimeOptions: (options) => {
+        capturedSessionOptions = options
+      },
+    } as never)
+    const action = factory(makeAgentNode(), makeCtx())
+
+    await action({}, {} as never)
+
+    expect(capturedSessionOptions?.tracing).toEqual(graphTracingConfig)
+  })
+
+  it('节点 runtime 构造时会收到 graph 级和 node 级 tracing context', async () => {
+    const graphTracingContext: TestTracingContext = {
+      tags: ['tianji', 'graph', 'graph:default'],
+      metadata: {
+        graphRunId: 'run_graph_1',
+        graphId: 'default',
+        graphVersion: 1,
+        entrypoint: 'daemon',
+        graphSessionId: 'session_graph_1',
+      },
+    }
+    let capturedSessionOptions: Parameters<typeof runtimeModule.createSessionRuntime>[0] | undefined
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['ok'] }),
+      tracing: {
+        langsmith: {
+          enabled: true,
+          project: 'graph-project',
+          apiKey: 'ls-key',
+        },
+      },
+      onSessionRuntimeOptions: (options) => {
+        capturedSessionOptions = options
+      },
+    } as never)
+    const node = makeAgentNode({
+      id: 'planner',
+      agent: {
+        model: 'openai/gpt-5.4',
+        systemPrompt: '你是规划器',
+      },
+    })
+    const action = factory(
+      node,
+      makeCtx({
+        graphTracingContext,
+      } as never)
+    )
+
+    await action({}, {} as never)
+
+    expect(
+      (
+        capturedSessionOptions as
+          | {
+              readonly externalTracingContext?: TestTracingContext
+            }
+          | undefined
+      )?.externalTracingContext
+    ).toEqual({
+      tags: ['tianji', 'graph', 'graph:default'],
+      metadata: {
+        graphRunId: 'run_graph_1',
+        graphId: 'default',
+        graphVersion: 1,
+        entrypoint: 'daemon',
+        graphSessionId: 'session_graph_1',
+        nodeId: 'planner',
+        nodeKind: 'agent',
+        agentModelRef: 'openai/gpt-5.4',
+      },
+    })
+  })
+
   it('节点 runtime 只收到解析后的 skill 路径子集', async () => {
     let capturedSessionOptions: Parameters<typeof runtimeModule.createSessionRuntime>[0] | undefined
     const factory = createDeepagentsExecutorFactory({
