@@ -96,6 +96,23 @@ export function buildDeepagentsRunnableConfig(input: {
   }
 }
 
+export function mergeTracingContexts(
+  base: RuntimeTracingContext | undefined,
+  local: RuntimeTracingContext | undefined
+): RuntimeTracingContext | undefined {
+  const tags = mergeTags(base?.tags, local?.tags)
+  const metadata = mergeMetadata(base?.metadata, local?.metadata)
+
+  if (tags === undefined && metadata === undefined) {
+    return undefined
+  }
+
+  return {
+    tags,
+    metadata,
+  }
+}
+
 function mergeTags(
   baseTags: readonly string[] | undefined,
   localTags: readonly string[] | undefined

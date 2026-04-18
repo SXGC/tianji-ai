@@ -119,7 +119,93 @@ async function collectGraphEvents(
   return events
 }
 
+interface TestTracingContext {
+  readonly tags?: readonly string[]
+  readonly metadata?: Record<string, unknown>
+}
+
 describe('orchestration e2e', () => {
+  it('graph run 会把统一的 graph tracing context 提供给节点执行器', async () => {
+    const graphTracingContext: TestTracingContext = {
+      tags: ['tianji', 'graph', 'graph:single'],
+      metadata: {
+        graphRunId: 'run_graph_trace_1',
+        graphId: 'single',
+        graphVersion: 1,
+        entrypoint: 'cli',
+      },
+    }
+    const seenContexts: unknown[] = []
+
+    const graph: OrchestrationGraph = {
+      id: 'single',
+      name: 'single-node',
+      version: 1,
+      source: 'static',
+      locked: false,
+      state: {
+        done: { type: 'string' },
+      },
+      nodes: [
+        {
+          id: 'planner',
+          type: 'agent',
+          agent: { model: 'fake', systemPrompt: '你是规划者' },
+          output: ['done'],
+        },
+      ],
+      edges: [
+        { from: '__start__', to: 'planner' },
+        { from: 'planner', to: '__end__' },
+      ],
+    }
+    const factory = createDeepagentsExecutorFactory({
+      resolveModel: () => new FakeListChatModel({ responses: ['done'] }),
+      tracing: {
+        langsmith: {
+          enabled: true,
+          project: 'graph-project',
+          apiKey: 'ls-key',
+        },
+      },
+      onSessionRuntimeOptions: (options) => {
+        seenContexts.push(
+          (
+            options as
+              | {
+                  readonly externalTracingContext?: unknown
+                }
+              | undefined
+          )?.externalTracingContext
+        )
+      },
+    } as never)
+
+    const result = runOrchestrationGraph({
+      graph,
+      runId: 'run_graph_trace_1' as RunId,
+      compileOptions: {
+        agentExecutorFactory: factory,
+        graphTracingContext,
+      } as never,
+    })
+
+    for await (const _event of result.events) {
+      // consume
+    }
+    await result.finished
+
+    expect(seenContexts).toContainEqual(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          graphRunId: 'run_graph_trace_1',
+          graphId: 'single',
+          entrypoint: 'cli',
+        }),
+      })
+    )
+  })
+
   it('两节点串行管线 planner→coder', async () => {
     // FakeListChatModel.bindTools() 会克隆模型实例并把 i 重置在克隆体上独立递增。
     // deepagents 内部调用 bindTools 后，原实例的计数器与执行链分离，

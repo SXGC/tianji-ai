@@ -16,9 +16,11 @@ import {
   InMemorySnapshotStore,
   type RunTurnOptions,
   type RuntimeToolDefinition,
+  type RuntimeTracingContext,
   type SessionRuntime,
   type SessionRuntimeDeepagentsConfig,
   type SessionRuntimeOptions,
+  type SessionRuntimeTracingConfig,
   type SnapshotStore,
   type ToolCatalog,
   type ToolRegistry,
@@ -58,6 +60,7 @@ export interface CreateDeepagentsExecutorFactoryOptions {
    * 测试中可返回 FakeListChatModel；生产中可直接返回 model 字符串以便 runtime 自行解析 provider。
    */
   readonly resolveModel: (modelRef: string) => string | BaseLanguageModel
+  readonly tracing?: SessionRuntimeTracingConfig
   /** 所有节点共享的工具目录，可选。 */
   readonly toolCatalog?: ToolCatalog
   /** 共享 ToolRegistry，可按节点 selected tools 切片。 */
@@ -336,12 +339,33 @@ function buildRuntimeForNode(
   }
   const sessionOptions: SessionRuntimeOptions = {
     deepagents: deepagentsConfig,
+    tracing: options.tracing,
+    externalTracingContext: buildNodeTracingContext(node, ctx),
     snapshotStore: snapshotStore ?? new InMemorySnapshotStore(),
     toolCatalog,
     logger: options.observer,
   }
   options.onSessionRuntimeOptions?.(sessionOptions)
   return createSessionRuntime(sessionOptions)
+}
+
+function buildNodeTracingContext(
+  node: AgentNode,
+  ctx: NodeExecutorContext
+): RuntimeTracingContext | undefined {
+  if (ctx.graphTracingContext === undefined) {
+    return undefined
+  }
+
+  return {
+    tags: ctx.graphTracingContext.tags,
+    metadata: {
+      ...(ctx.graphTracingContext.metadata ?? {}),
+      nodeId: node.id,
+      nodeKind: node.type,
+      agentModelRef: node.agent.model,
+    },
+  }
 }
 
 function resolveSkillPaths(

@@ -1,6 +1,6 @@
 import type { LangGraphRunnableConfig } from '@langchain/langgraph'
 import type { ObserverLogger } from '@tianji/observer'
-import type { SnapshotStore } from '@tianji/runtime'
+import type { RuntimeTracingContext, SnapshotStore } from '@tianji/runtime'
 import type {
   DomainEvent,
   GraphRunCapabilityUpperBound,
@@ -37,6 +37,7 @@ export interface NodeExecutorContext {
     node: AgentNode,
     upperBound: GraphRunCapabilityUpperBound
   ) => ResolvedNodeCapabilities
+  readonly graphTracingContext?: RuntimeTracingContext
 }
 
 /**

@@ -16,6 +16,7 @@ export type {
   SessionRuntimeTracingConfig,
 } from './types.js'
 export type { ObserverLogger } from '@tianji/observer'
+export type { RuntimeTracingContext } from './langsmith.js'
 export type {
   AbortSignalScope,
   ActiveRun,

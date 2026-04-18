@@ -1,4 +1,5 @@
 import type { ObserverLogger } from '@tianji/observer'
+import type { RuntimeTracingContext } from '@tianji/runtime'
 import {
   type DomainEvent,
   type RunId,
@@ -15,7 +16,9 @@ export interface RunOrchestrationGraphOptions {
   readonly compileOptions: Omit<
     CompileOptions,
     'runId' | 'observer' | 'emitGraphEvent' | 'emitRuntimeEvent' | 'abortSignal'
-  >
+  > & {
+    readonly graphTracingContext?: RuntimeTracingContext
+  }
   readonly runId: RunId
   readonly initialState?: Record<string, unknown>
   readonly observer?: ObserverLogger
@@ -107,6 +110,7 @@ export function runOrchestrationGraph(
     emitGraphEvent: emit,
     emitRuntimeEvent: emit,
     abortSignal: options.abortSignal,
+    graphTracingContext: options.compileOptions.graphTracingContext,
   })
 
   const mermaidDiagram = renderOrchestrationGraphMermaid(options.graph)

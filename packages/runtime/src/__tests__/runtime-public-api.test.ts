@@ -88,6 +88,15 @@ describe('runtime public API v2 boundary', () => {
     }>({})
   })
 
+  it('accepts optional external tracing context without widening the runtime boundary', () => {
+    expectTypeOf<Pick<SessionRuntimeOptions, 'externalTracingContext'>>().toMatchTypeOf<{
+      externalTracingContext?: {
+        tags?: readonly string[]
+        metadata?: Record<string, unknown>
+      }
+    }>({})
+  })
+
   it('requires a checkpointer when interruptOn is configured', () => {
     expect(() =>
       createSessionRuntime({
