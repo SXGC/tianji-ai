@@ -1,5 +1,11 @@
 import * as agentModule from '@tianji/agent'
-import { type Command, createNodeId, createTaskId } from '@tianji/shared'
+import {
+  type Command,
+  createCommandId,
+  createNodeId,
+  createSessionId,
+  createTaskId,
+} from '@tianji/shared'
 import { describe, expect, it, vi } from 'vitest'
 
 import type { ControlPlaneRuntimeDeps } from '../controlplane-runtime.js'
@@ -90,6 +96,10 @@ describe('createControlPlaneUnifiedEntry session handling', () => {
     }
   }
 
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   it('uses ensureAgentSession when sessionIds is provided', async () => {
     const fakeSession = {
       sessionId: 'session_existing' as never,
@@ -109,7 +119,7 @@ describe('createControlPlaneUnifiedEntry session handling', () => {
     })
 
     const command: Command = {
-      commandId: 'cmd-001' as never,
+      commandId: createCommandId('cmd-001'),
       nodeId: createNodeId('node-001'),
       type: 'task.run',
       state: 'pending',
@@ -118,7 +128,7 @@ describe('createControlPlaneUnifiedEntry session handling', () => {
         taskId: createTaskId('task-001'),
         agentId: 'default',
         goal: 'hello',
-        sessionIds: ['session_existing' as never],
+        sessionIds: [createSessionId('session_existing')],
       },
     }
 
@@ -134,9 +144,6 @@ describe('createControlPlaneUnifiedEntry session handling', () => {
       'session_existing',
       undefined
     )
-
-    ensureSpy.mockRestore()
-    vi.restoreAllMocks()
   })
 
   it('uses createAgentSession when sessionIds is absent', async () => {
@@ -158,7 +165,7 @@ describe('createControlPlaneUnifiedEntry session handling', () => {
     })
 
     const command: Command = {
-      commandId: 'cmd-002' as never,
+      commandId: createCommandId('cmd-002'),
       nodeId: createNodeId('node-001'),
       type: 'task.run',
       state: 'pending',
@@ -178,8 +185,5 @@ describe('createControlPlaneUnifiedEntry session handling', () => {
     await runtime.onCommand(command)
 
     expect(createSpy).toHaveBeenCalled()
-
-    createSpy.mockRestore()
-    vi.restoreAllMocks()
   })
 })
