@@ -12,6 +12,9 @@ export default defineConfig({
       '@tianji/observer': fileURLToPath(
         new URL('../../packages/observer/src/index.ts', import.meta.url)
       ),
+      '@tianji/runtime': fileURLToPath(
+        new URL('../../packages/runtime/src/index.ts', import.meta.url)
+      ),
       '@tianji/shared': fileURLToPath(
         new URL('../../packages/shared/src/index.ts', import.meta.url)
       ),

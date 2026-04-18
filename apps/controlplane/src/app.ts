@@ -13,12 +13,14 @@ import { createNodeHeartbeatRoute } from './routes/node-heartbeat.js'
 import { createNodeRegisterRoute } from './routes/node-register.js'
 import { createUiNodesRoute } from './routes/ui-nodes.js'
 import { createWebUiRoute } from './routes/web-ui.js'
+import { CommandWaiterRegistry } from './services/command-waiter-registry.js'
 import { ObservationMonitor } from './services/observation-monitor.js'
 import { SqliteEventLogStore } from './storage/event-log-sqlite.js'
 
 export interface ControlPlaneApp {
   readonly app: Hono
   readonly monitor: ObservationMonitor
+  readonly registry: CommandWaiterRegistry
 }
 
 export interface CreateAppOptions {
@@ -52,6 +54,7 @@ export function createApp(
   const { emitEvent, enterCorrelation, bus } = options
   const app = new Hono()
   const eventLogStore = new SqliteEventLogStore(db.raw)
+  const registry = new CommandWaiterRegistry()
 
   app.get('/health', (c) => c.json({ status: 'ok' }))
 
@@ -66,7 +69,7 @@ export function createApp(
 
   app.route('/', createNodeRegisterRoute(db, logger, emitEvent))
   app.route('/', createNodeHeartbeatRoute(db, logger))
-  app.route('/', createCommandPollRoute(db, logger))
+  app.route('/', createCommandPollRoute(db, logger, registry))
   app.route('/', createEventLogMaxSequenceRoute(db, logger, eventLogStore))
   // bus 由 Task 5 统一注入；未注入时跳过路由注册（等同于 404），
   // 避免在无 bus 的测试环境中启动时 throw。
@@ -75,7 +78,7 @@ export function createApp(
   }
 
   app.route('/', createUiNodesRoute(db))
-  app.route('/', createCopilotRoute(db, logger, bus))
+  app.route('/', createCopilotRoute(db, logger, bus, registry))
   if (process.env.TIANJI_DEBUG === 'true') {
     app.route('/', createDebugEventsRoute(db))
     app.route('/', createDebugNodesRoute(db))
@@ -85,5 +88,6 @@ export function createApp(
   return {
     app,
     monitor: new ObservationMonitor(db, logger, emitEvent, enterCorrelation),
+    registry,
   }
 }
