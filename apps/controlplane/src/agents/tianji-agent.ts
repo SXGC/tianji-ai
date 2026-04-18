@@ -14,6 +14,7 @@ import type { ObserverLogger } from '@tianji/observer'
 import type { EventBus, SubscriptionHandle } from '@tianji/shared'
 import { Observable } from 'rxjs'
 import type { ControlPlaneDb } from '../db/index.js'
+import type { CommandWaiterRegistry } from '../services/command-waiter-registry.js'
 import { AgUiEventGate, isTerminalAgUiEvent } from './ag-ui-event-gate.js'
 import { type EventMapperContext, createInitialStateSnapshot, mapToAgUi } from './event-mapper.js'
 
@@ -49,6 +50,7 @@ export class TianjiAgent extends AbstractAgent {
   readonly #cpAgentId: string
   readonly #bus: EventBus | undefined
   readonly #logger: ObserverLogger
+  readonly #registry: CommandWaiterRegistry | undefined
 
   /**
    * @param db       - ControlPlane 数据库实例
@@ -62,7 +64,8 @@ export class TianjiAgent extends AbstractAgent {
     nodeId: string,
     agentId: string,
     bus: EventBus | undefined,
-    logger: ObserverLogger
+    logger: ObserverLogger,
+    registry?: CommandWaiterRegistry
   ) {
     super({ description: `Tianji agent for node ${nodeId}` })
     this.#db = db
@@ -70,6 +73,7 @@ export class TianjiAgent extends AbstractAgent {
     this.#cpAgentId = agentId
     this.#bus = bus
     this.#logger = logger
+    this.#registry = registry
   }
 
   /**
@@ -147,6 +151,7 @@ export class TianjiAgent extends AbstractAgent {
           'INSERT INTO tasks (task_id, command_id, node_id, agent_id, goal, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         )
         .run(taskId, commandId, this.#nodeId, this.#cpAgentId, goalText, 'pending', now, now)
+      this.#registry?.notify(this.#nodeId)
 
       // 订阅 EventBus，消费与此 task 相关的事件
       const ctx: EventMapperContext = { inThinking: false, taskId }
@@ -249,10 +254,18 @@ export class TianjiAgent extends AbstractAgent {
         'INSERT INTO commands (command_id, node_id, type, payload, state, created_at) VALUES (?, ?, ?, ?, ?, ?)'
       )
       .run(commandId, task.node_id, 'task.cancel', payload, 'pending', Date.now())
+    this.#registry?.notify(task.node_id)
   }
 
   clone(): TianjiAgent {
-    return new TianjiAgent(this.#db, this.#nodeId, this.#cpAgentId, this.#bus, this.#logger)
+    return new TianjiAgent(
+      this.#db,
+      this.#nodeId,
+      this.#cpAgentId,
+      this.#bus,
+      this.#logger,
+      this.#registry
+    )
   }
 }
 

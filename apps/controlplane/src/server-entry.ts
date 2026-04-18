@@ -164,7 +164,7 @@ export function startControlPlaneServer(): ControlPlaneServerHandle {
   subscribeEventBusLogger(bus, logger)
   subscribeOtelAdapter(bus)
 
-  const { app, monitor } = createApp(db, logger, {
+  const { app, monitor, registry } = createApp(db, logger, {
     emitEvent: (ev) => pipeline.emitEvent(ev),
     enterCorrelation,
     bus,
@@ -176,6 +176,7 @@ export function startControlPlaneServer(): ControlPlaneServerHandle {
   void logger.info(SCOPE_SERVER, 'Control plane started', { port, host, dbPath })
 
   const shutdown = async (): Promise<void> => {
+    registry.destroy()
     monitor.stop()
     await bus.close()
     await eventLogHandle.close()

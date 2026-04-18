@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 
 import type { ControlPlaneDb } from '../db/index.js'
 import { createAuthMiddleware } from '../middleware/auth.js'
+import type { CommandWaiterRegistry } from '../services/command-waiter-registry.js'
 
 type AuthVariables = {
   Variables: {
@@ -19,7 +20,8 @@ type AuthVariables = {
  */
 export function createCommandPollRoute(
   db: ControlPlaneDb,
-  logger: ObserverLogger
+  logger: ObserverLogger,
+  registry: CommandWaiterRegistry
 ): Hono<AuthVariables> {
   const app = new Hono<AuthVariables>()
   const auth = createAuthMiddleware(db, logger)
@@ -33,43 +35,39 @@ export function createCommandPollRoute(
     }
 
     const timeout = Math.min(Number(c.req.query('timeout') ?? 30000), 60000)
+    const deadline = Date.now() + timeout
 
-    // task.cancel 命令在节点 busy 时也必须下发，不受 busy 限制；
-    // task.run 命令在节点 busy 时跳过，等节点空闲后再取。
-    const pendingCancel = tryLeasePendingCancelCommand(db, nodeId)
-    if (pendingCancel !== null) {
-      return c.json(pendingCancel)
-    }
-
-    if (!isNodeBusy(db, nodeId)) {
-      const command = tryLeasePendingCommand(db, nodeId)
+    while (Date.now() <= deadline) {
+      const command = tryLeaseAvailableCommand(db, nodeId)
       if (command !== null) {
         return c.json(command)
       }
-    }
-
-    const deadline = Date.now() + timeout
-    while (Date.now() < deadline) {
-      if (c.req.raw.signal.aborted) {
-        return c.body(null, 204)
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 1000))
 
       if (c.req.raw.signal.aborted) {
         return c.body(null, 204)
       }
 
-      const pendingCancelInLoop = tryLeasePendingCancelCommand(db, nodeId)
-      if (pendingCancelInLoop !== null) {
-        return c.json(pendingCancelInLoop)
+      const remainingMs = deadline - Date.now()
+      if (remainingMs <= 0) {
+        return c.body(null, 204)
       }
 
-      if (!isNodeBusy(db, nodeId)) {
-        const nextCommand = tryLeasePendingCommand(db, nodeId)
-        if (nextCommand !== null) {
-          return c.json(nextCommand)
-        }
+      const waitController = new AbortController()
+      const onRequestAbort = (): void => {
+        waitController.abort()
+      }
+      c.req.raw.signal.addEventListener('abort', onRequestAbort, { once: true })
+
+      const timer = setTimeout(() => {
+        waitController.abort()
+      }, remainingMs)
+
+      const notified = await registry.wait(nodeId, waitController.signal)
+      clearTimeout(timer)
+      c.req.raw.signal.removeEventListener('abort', onRequestAbort)
+
+      if (!notified) {
+        return c.body(null, 204)
       }
     }
 
@@ -77,6 +75,21 @@ export function createCommandPollRoute(
   })
 
   return app
+}
+
+function tryLeaseAvailableCommand(db: ControlPlaneDb, nodeId: string): PollCommandResponse | null {
+  // task.cancel 命令在节点 busy 时也必须下发，不受 busy 限制；
+  // task.run 命令在节点 busy 时跳过，等节点空闲后再取。
+  const pendingCancel = tryLeasePendingCancelCommand(db, nodeId)
+  if (pendingCancel !== null) {
+    return pendingCancel
+  }
+
+  if (isNodeBusy(db, nodeId)) {
+    return null
+  }
+
+  return tryLeasePendingCommand(db, nodeId)
 }
 
 function isNodeBusy(db: ControlPlaneDb, nodeId: string): boolean {
