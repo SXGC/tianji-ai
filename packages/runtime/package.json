@@ -28,6 +28,7 @@
     "@tianji/shared": "workspace:*",
     "deepagents": "^1.8.4",
     "langchain": "^1.2.34",
+    "langsmith": "^0.5.9",
     "ulid": "^3.0.2"
   },
   "devDependencies": {

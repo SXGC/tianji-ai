@@ -18,6 +18,19 @@ export interface RuntimeProviderConfig {
   readonly headers?: Record<string, string>
 }
 
+export interface RuntimeLangsmithTracingConfig {
+  readonly enabled?: boolean
+  readonly project?: string
+  readonly apiKey?: string
+  readonly apiUrl?: string
+  readonly tags?: readonly string[]
+  readonly metadata?: Record<string, unknown>
+}
+
+export interface SessionRuntimeTracingConfig {
+  readonly langsmith?: RuntimeLangsmithTracingConfig
+}
+
 export interface SessionRuntimeDeepagentsConfig {
   readonly model: string | BaseLanguageModel
   readonly providerConfig?: RuntimeProviderConfig

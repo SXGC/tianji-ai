@@ -25,7 +25,7 @@ import type { ReplayableEventStream } from '../event-stream.js'
 import type { LlmGenerationConfig } from '../llm/index.js'
 import type { SnapshotStore } from '../snapshot-store.js'
 import type { RuntimeToolDefinition, ToolCatalog, ToolRegistry } from '../tool-catalog.js'
-import type { SessionRuntimeDeepagentsConfig } from '../types.js'
+import type { SessionRuntimeDeepagentsConfig, SessionRuntimeTracingConfig } from '../types.js'
 
 // ── 公共类型（re-export 到 index.ts）──────────────────────────────────────────
 
@@ -80,6 +80,7 @@ export interface DeepagentsRunWorkflowState {
 export interface SessionRuntimeOptions {
   readonly engine?: Extract<SessionRuntimeEngine, 'deepagents'>
   readonly deepagents?: SessionRuntimeDeepagentsConfig
+  readonly tracing?: SessionRuntimeTracingConfig
   readonly logger?: ObserverLogger
   readonly snapshotStore?: SnapshotStore
   readonly toolCatalog?: ToolCatalog | ToolRegistry | readonly RuntimeToolDefinition[]

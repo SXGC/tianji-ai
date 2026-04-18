@@ -31,6 +31,11 @@ import {
 import { resolveConfigPaths } from '../config.js'
 import { type DeepagentsRunResult, executeDeepagentsRun } from '../engines/deepagents-engine.js'
 import { ReplayableEventStream } from '../event-stream.js'
+import {
+  type RuntimeTracingContext,
+  type RuntimeTracingState,
+  createRuntimeTracingState,
+} from '../langsmith.js'
 import { InMemorySnapshotStore } from '../snapshot-store.js'
 import type { SnapshotStore } from '../snapshot-store.js'
 import { ToolRegistry } from '../tool-catalog.js'
@@ -133,6 +138,7 @@ class SessionRuntimeImpl implements SessionRuntime {
   private readonly engine: SessionRuntimeEngine
   private readonly snapshotStore: SnapshotStore
   private readonly toolCatalog: ToolCatalog
+  private readonly tracing: RuntimeTracingState
   private readonly activeRuns = new Map<RunId, ActiveRun>()
   private readonly eventStreams = new Map<RunId, ReplayableEventStream<DomainEvent>>()
 
@@ -170,6 +176,7 @@ class SessionRuntimeImpl implements SessionRuntime {
 
     this.snapshotStore = options.snapshotStore ?? new InMemorySnapshotStore()
     this.toolCatalog = normalizeToolCatalog(options.toolCatalog)
+    this.tracing = createRuntimeTracingState(options.tracing)
   }
 
   readonly createSession = async (options: CreateSessionOptions = {}): Promise<SessionSnapshot> => {
@@ -488,6 +495,8 @@ class SessionRuntimeImpl implements SessionRuntime {
       sequence: context.sequence,
       llmRawDir:
         deepagents.llmRawDir ?? join(resolveConfigPaths().userConfigDir, 'runtime-snapshots'),
+      tracing: this.tracing,
+      tracingContext: this.buildTracingContext(activeRun, input, deepagents),
       logger: this.options.logger,
       emitEvent: (event) => {
         activeRun.events.push(event)
@@ -519,6 +528,39 @@ class SessionRuntimeImpl implements SessionRuntime {
         }
       },
     })
+  }
+
+  private buildTracingContext(
+    activeRun: ActiveRun,
+    input: ExecuteRunInput,
+    deepagents: SessionRuntimeDeepagentsConfig
+  ): RuntimeTracingContext {
+    const metadata: Record<string, unknown> = {
+      sessionId: activeRun.sessionId,
+      runId: activeRun.runId,
+      triggerType: input.triggerType,
+      model:
+        typeof deepagents.model === 'string'
+          ? deepagents.model
+          : (deepagents.model.constructor?.name ?? 'unknown'),
+    }
+
+    if (input.parentRunId !== undefined) {
+      metadata.parentRunId = input.parentRunId
+    }
+
+    if (input.threadId !== undefined) {
+      metadata.threadId = input.threadId
+    }
+
+    if (input.checkpointId !== undefined) {
+      metadata.checkpointId = input.checkpointId
+    }
+
+    return {
+      tags: ['tianji', 'runtime', `trigger:${input.triggerType}`],
+      metadata,
+    }
   }
 
   private async requireSessionSnapshot(sessionId: SessionId): Promise<SessionSnapshot> {

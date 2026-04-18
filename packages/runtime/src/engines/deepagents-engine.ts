@@ -18,6 +18,7 @@ import { randomUUID } from 'node:crypto'
 import { type AppMessage, TianjiError, type ToolInvocation } from '@tianji/shared'
 import { createDeepAgent } from 'deepagents'
 
+import { buildDeepagentsRunnableConfig } from '../langsmith.js'
 import { LlmCallRecorder, createRecordingMiddleware } from '../llm-call-recorder.js'
 import {
   buildMiddlewareList,
@@ -149,14 +150,16 @@ export async function executeDeepagentsRun(
     tools: resolvedTools,
   })
 
-  const events = await agent.streamEvents(readDeepagentsInput(options), {
-    version: 'v2',
-    configurable: {
-      thread_id: threadId,
-      checkpoint_id: options.checkpointId,
-    },
-    signal: options.signal,
-  })
+  const events = await agent.streamEvents(
+    readDeepagentsInput(options),
+    buildDeepagentsRunnableConfig({
+      threadId,
+      checkpointId: options.checkpointId,
+      signal: options.signal,
+      tracing: options.tracing,
+      tracingContext: options.tracingContext,
+    })
+  )
 
   const loopState: StreamLoopState = {
     messageId,

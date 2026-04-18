@@ -15,6 +15,7 @@
 - 运行时入口：`createSessionRuntime`、`createGraphRuntime`
 - 配置中心：`loadResolvedConfig`、`resolveConfigPaths`、`resolveWorkspaceConfig`、`createWorkspaceId`
 - 运行时接口与配置类型：`SessionRuntime`、`SessionRuntimeOptions`、`SessionRuntimeEngine`、`SessionRuntimeDeepagentsConfig`、`CreateSessionOptions`、`RunTurnOptions`、`ResumeRunOptions`、`GraphRuntime`、`GraphRunRequest`、`GraphRunHandle`
+- tracing 配置类型：`SessionRuntimeTracingConfig`、`RuntimeLangsmithTracingConfig`
 - observer 边界：`ObserverLogger`
 - 配置错误与元数据类型：`RuntimeConfigError`、`ResolvedConfig`、`ResolvedConfigPaths`、`WorkspaceConfigResolution`、`ConfigLayerSnapshot`
 - Metadata 读取：`readSessionRuntimeMetadata`、`readRunRuntimeMetadata`、`readDeepagentsRunWorkflowState`
@@ -37,6 +38,17 @@ const runtime = createSessionRuntime({
     store: { kind: 'memory-store' },
     subagents: [],
     skills: ['/skills/'],
+  },
+  tracing: {
+    langsmith: {
+      enabled: true,
+      project: 'tianji-dev',
+      apiKey: '${env:LANGSMITH_API_KEY}',
+      tags: ['tianji', 'runtime'],
+      metadata: {
+        service: 'tianji-node',
+      },
+    },
   },
   snapshotStore: new InMemorySnapshotStore(),
   toolCatalog: new ToolRegistry(),
@@ -94,7 +106,31 @@ const resolved = await loadResolvedConfig()
 console.log(resolved.paths.defaultConfigPath)
 console.log(resolved.workspace.id)
 console.log(resolved.config.agents?.defaultAgent)
+console.log(resolved.config.runtime?.tracing?.langsmith?.project)
 ```
+
+`runtime.tracing.langsmith` 也走同一条三层配置链：
+
+```json
+{
+  "runtime": {
+    "tracing": {
+      "langsmith": {
+        "enabled": true,
+        "project": "tianji-dev",
+        "apiKey": "${env:LANGSMITH_API_KEY}",
+        "apiUrl": "https://api.smith.langchain.com",
+        "tags": ["tianji", "runtime"],
+        "metadata": {
+          "service": "tianji-node"
+        }
+      }
+    }
+  }
+}
+```
+
+注意：`enabled: true` 时，`project` 和 `apiKey` 在三层配置合并完成后必须存在；runtime 不依赖 `LANGCHAIN_TRACING_V2` 之类的环境变量自动开关。
 
 ## `SessionRuntimeOptions` v2 说明
 
@@ -106,6 +142,7 @@ console.log(resolved.config.agents?.defaultAgent)
 
 - `engine?: 'deepagents'`：未显式指定时默认使用 `deepagents`；历史 legacy 标记仅通过 metadata helper 暴露，不再作为可执行 runtime 选项。
 - `deepagents`：v2 主配置块，当前公开字段为 `model`、`middleware`、`backend`、`checkpointer`、`store`、`subagents`、`skills`、`interruptOn`。
+- `tracing`：可选 tracing 配置块；当前支持 `langsmith`，由 runtime 在执行时显式注入 `LangChainTracer`。
 - `logger?: ObserverLogger`：可选注入 observer logger，作为 runtime 向外部日志系统写入记录的公共边界；runtime 本身不定义 sink、文件路径或渲染策略。
 - `snapshotStore` / `toolCatalog`：继续作为稳定公共 API 暴露。
 
@@ -141,6 +178,7 @@ void runtime
 注意事项：
 
 - 当前版本已经接入 deepagents bootstrap，可执行基础文本轮次并写回 runtime metadata。
+- `runtime.tracing.langsmith` 只在 runtime 执行层创建 LangSmith client / tracer；`@tianji/observer` 继续只负责通用日志与 OTel span。
 - `middleware`、`subagents` 会按当前配置原样透传给上游 deepagents；其具体行为与兼容性约束遵循 upstream 实现。
 - `interruptOn` 现在支持真实 checkpoint 恢复，但必须与 `checkpointer` 一起使用；被中断的 run 会把 checkpoint 信息写入 runtime metadata，并把 interrupt payload 写入 `RunSnapshot.workflowState`。
 - 当 run 因 HITL 中断而暂停时，调用方应先读取 `readRunRuntimeMetadata(run.metadata)` 和 `readDeepagentsRunWorkflowState(run.workflowState)`，再通过 `resumeRun({ runId, resumeValue })` 提交与上游 LangGraph `Command({ resume })` 兼容的 JSON 值。

@@ -115,6 +115,34 @@ describe('agent session', () => {
     createSessionRuntimeSpy.mockRestore()
   })
 
+  it('passes runtime tracing config through to createSessionRuntime', async () => {
+    const createSessionRuntimeSpy = vi.spyOn(runtimeModule, 'createSessionRuntime')
+    const context = createFakeContext()
+
+    context.config = {
+      runtime: {
+        tracing: {
+          langsmith: {
+            enabled: true,
+            project: 'tianji-dev',
+            apiKey: 'ls-key',
+            tags: ['runtime'],
+            metadata: {
+              source: 'config',
+            },
+          },
+        },
+      },
+    }
+
+    await createAgentRuntime(context)
+
+    const callArgs = createSessionRuntimeSpy.mock.calls.at(-1)?.[0]
+    expect(callArgs?.tracing).toEqual(context.config.runtime?.tracing)
+
+    createSessionRuntimeSpy.mockRestore()
+  })
+
   it('normalizes openai runtime model into a configured model instance', async () => {
     const runtime = (await createAgentRuntime(createFakeContext())) as SessionRuntime & {
       readonly options?: {
