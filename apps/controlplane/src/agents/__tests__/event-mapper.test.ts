@@ -714,6 +714,27 @@ describe('GraphRun 事件映射', () => {
       expect(resultEv.metadata?.output).toEqual(nodeOutput)
       expect(resultEv.metadata?.usage).toEqual(usage)
     })
+
+    it('usage 缺失时，metadata 里根本没有 usage key', () => {
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphNodeCompleted',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          nodeId: 'node-1',
+          nodeKind: 'agent',
+          output: { result: 'done' },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
+
+      const resultEv = result[0] as {
+        metadata?: Record<string, unknown>
+      }
+      expect(resultEv.metadata).toBeDefined()
+      expect('usage' in (resultEv.metadata as Record<string, unknown>)).toBe(false)
+    })
   })
 
   describe('GraphRunCompleted → STEP_FINISHED', () => {
@@ -748,6 +769,26 @@ describe('GraphRun 事件映射', () => {
       expect(resultEv.metadata?.stepKind).toBe('graph')
       expect(resultEv.metadata?.finalState).toEqual(finalState)
       expect(resultEv.metadata?.usage).toEqual(usage)
+    })
+
+    it('usage 缺失时，metadata 里根本没有 usage key', () => {
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphRunCompleted',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          graphVersion: 1,
+          finalState: { status: 'ok' },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
+
+      const resultEv = result[0] as {
+        metadata?: Record<string, unknown>
+      }
+      expect(resultEv.metadata).toBeDefined()
+      expect('usage' in (resultEv.metadata as Record<string, unknown>)).toBe(false)
     })
   })
 
@@ -798,6 +839,32 @@ describe('GraphRun 事件映射', () => {
       expect(resultEv.metadata?.error).toEqual(error)
       expect(resultEv.metadata?.usage).toEqual(usage)
     })
+
+    it('usage 缺失时，metadata 里根本没有 usage key', () => {
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphNodeFailed',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          nodeId: 'node-2',
+          nodeKind: 'agent',
+          error: {
+            name: 'TianjiError',
+            category: 'internal',
+            code: 'NODE_ERR',
+            message: '节点执行失败',
+          },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
+
+      const resultEv = result[0] as {
+        metadata?: Record<string, unknown>
+      }
+      expect(resultEv.metadata).toBeDefined()
+      expect('usage' in (resultEv.metadata as Record<string, unknown>)).toBe(false)
+    })
   })
 
   describe('不映射的 GraphRun 事件', () => {
@@ -809,6 +876,21 @@ describe('GraphRun 事件映射', () => {
           graphId: 'graph-abc',
           graphVersion: 1,
           error: { name: 'TianjiError', category: 'internal', code: 'ERR', message: 'fail' },
+          timestamp: 1000,
+        }),
+        freshCtx()
+      )
+      expect(result).toHaveLength(0)
+    })
+
+    it('GraphRunCancelled 返回空数组（无 AG-UI 映射）', () => {
+      const result = mapToAgUi(
+        envelope({
+          type: 'GraphRunCancelled',
+          runId: 'run-001',
+          graphId: 'graph-abc',
+          graphVersion: 1,
+          reason: 'abort',
           timestamp: 1000,
         }),
         freshCtx()
